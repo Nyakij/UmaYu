@@ -14,6 +14,8 @@ mod knowledge;
 mod live;
 mod meta;
 mod onboarding;
+mod onboarding_grid;
+mod paste;
 mod plan_sim;
 mod profile;
 mod recommend;
@@ -657,6 +659,8 @@ pub(crate) struct App {
     pub debug_scroll: Option<f32>,
     /// `UMALORD_RUN=1`: start the Race sim run (or the planner's skill simulation) on launch.
     debug_run: bool,
+    /// `UMALORD_HOVER=<id>`: draw that setup tile as if the mouse were on it, for screenshots.
+    pub debug_hover: Option<u32>,
 }
 
 /// The frame every page's central panel uses: see-through, with the same margins everywhere.
@@ -755,6 +759,7 @@ impl App {
             debug_install: env("UMALORD_INSTALL").is_some_and(|v| v == "1"),
             debug_scroll: env("UMALORD_SCROLL").and_then(|s| s.parse().ok()),
             debug_run: env("UMALORD_RUN").is_some_and(|v| v == "1"),
+            debug_hover: env("UMALORD_HOVER").and_then(|s| s.parse().ok()),
         };
         // The live CM schedule: the cache now, a refresh on the first frame if it's stale. Tests
         // stay on the bundled data, so they don't depend on the network or this PC's cache.
@@ -791,6 +796,7 @@ impl App {
         let step = match env("UMALORD_SETUP").as_deref() {
             Some("welcome") => Some(onboarding::Step::Welcome),
             Some("import") => Some(onboarding::Step::Import),
+            Some("you") => Some(onboarding::Step::You),
             Some("umas") => Some(onboarding::Step::Umas),
             Some("cards") => Some(onboarding::Step::Cards),
             Some("done") => Some(onboarding::Step::Done),
@@ -1009,7 +1015,7 @@ impl App {
                 let on = self.tab == tab && !self.onboarding.open;
                 if ui.add(egui::Button::selectable(on, text).min_size(vec2(0.0, 30.0))).on_hover_text(what).clicked() {
                     self.tab = tab;
-                    self.onboarding.open = false;
+                    self.close_setup();
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1090,7 +1096,8 @@ impl App {
                     self.toast(format!("Couldn't open {}: {e}", path.display()), ui_util::ToastKind::Error);
                 }
             }
-            Some(ui_util::ToastAction::Undo) | None => {}
+            Some(ui_util::ToastAction::Undo) => self.undo_setup(),
+            None => {}
         }
     }
 
@@ -1103,7 +1110,7 @@ impl App {
             let key = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5][i];
             if ctx.input_mut(|inp| inp.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key))) {
                 self.tab = *tab;
-                self.onboarding.open = false;
+                self.close_setup();
             }
         }
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
@@ -1136,8 +1143,8 @@ impl App {
 
     /// Esc: close Help, an open dialog, or the selection's detail panel, in that order.
     fn close_topmost(&mut self) {
-        if self.settings.open {
-            // The Settings window closes itself on Esc (it's a modal).
+        if self.settings.open || self.onboarding.paste.open {
+            // Modals close themselves on Esc.
         } else if self.help_open {
             self.help_open = false;
         } else if self.onboarding.confirm_start_over {
@@ -1146,6 +1153,13 @@ impl App {
             self.cards.add.open = false;
         } else if self.planner.picker.is_some() {
             self.planner.picker = None;
+        } else if self.onboarding.open {
+            // Setup: unpick the picked tiles, then close the editor.
+            if !self.onboarding.multi.is_empty() {
+                self.onboarding.multi.clear();
+            } else {
+                self.onboarding.selected = None;
+            }
         } else if self.tab == Tab::Collection {
             match self.collection_tab {
                 CollectionTab::Umas => self.umas.selected = None,

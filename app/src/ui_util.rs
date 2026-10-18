@@ -107,6 +107,31 @@ pub fn page_header(ui: &mut egui::Ui, title: &str, subtitle: &str, actions: impl
     ui.add_space(10.0);
 }
 
+/// A rounded rectangle shading from `from` (top left) to `to` (bottom right).
+pub fn gradient_rect(painter: &Painter, rect: Rect, radius: f32, from: Color32, to: Color32) {
+    let r = radius.min(rect.width() / 2.0).min(rect.height() / 2.0);
+    let corners = [(rect.right_bottom() - vec2(r, r), 0.0), (rect.left_bottom() + vec2(r, -r), 0.5), (rect.left_top() + vec2(r, r), 1.0), (rect.right_top() + vec2(-r, r), 1.5)];
+    let shade = |q: Pos2| {
+        let t = (((q.x - rect.left()) / rect.width() + (q.y - rect.top()) / rect.height()) / 2.0).clamp(0.0, 1.0);
+        from.lerp_to_gamma(to, t)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.center(), shade(rect.center()));
+    let mut n = 0u32;
+    for (c, start) in corners {
+        for i in 0..=6 {
+            let a = std::f32::consts::PI * (start + 0.5 * i as f32 / 6.0);
+            let q = c + vec2(a.cos() * r, a.sin() * r);
+            mesh.colored_vertex(q, shade(q));
+            n += 1;
+        }
+    }
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
 /// The six chibi Seiun Sky poses, embedded.
 pub fn chibi_image(pose: u8) -> egui::ImageSource<'static> {
     match pose {
@@ -498,12 +523,17 @@ pub fn tile_ring(ui: &egui::Ui, rect: Rect, selected: bool, hovered: bool, radiu
     ui.painter().rect_stroke(rect.expand(2.5), CornerRadius::same(radius), Stroke::new(w, c), StrokeKind::Outside);
 }
 
+/// Unlit stars and diamonds: dark grey on dark, light grey on light.
+fn dim(p: &Painter) -> Color32 {
+    if p.ctx().global_style().visuals.dark_mode { DIM } else { Color32::from_gray(200) }
+}
+
 /// Four LB diamonds starting at `left_center`, filled up to `lb`.
 pub fn draw_lb(p: &Painter, left_center: Pos2, lb: u8, r: f32) {
     for i in 0..4u8 {
         let c = Pos2::new(left_center.x + r + f32::from(i) * (2.0 * r + 2.5), left_center.y);
         let pts = vec![c + vec2(0.0, -r), c + vec2(r * 0.8, 0.0), c + vec2(0.0, r), c + vec2(-r * 0.8, 0.0)];
-        let fill = if i < lb { LB_ON } else { DIM };
+        let fill = if i < lb { LB_ON } else { dim(p) };
         p.add(Shape::convex_polygon(pts, fill, Stroke::NONE));
     }
 }
@@ -521,7 +551,7 @@ pub fn draw_stars(p: &Painter, center: Pos2, n: u8, r: f32) {
     let x0 = center.x - 2.0 * step;
     for i in 0..5u8 {
         let c = Pos2::new(x0 + f32::from(i) * step, center.y);
-        draw_star(p, c, r, if i < n { GOLD } else { DIM });
+        draw_star(p, c, r, if i < n { GOLD } else { dim(p) });
     }
 }
 
@@ -529,6 +559,11 @@ pub fn stars_widget(ui: &mut egui::Ui, n: u8, r: f32) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(5.0 * (2.0 * r + 1.5), 2.0 * r + 2.0), Sense::hover());
     draw_stars(ui.painter(), rect.center(), n, r);
     resp
+}
+
+/// One star centred on `c`.
+pub fn draw_star_at(p: &Painter, c: Pos2, r: f32, color: Color32) {
+    draw_star(p, c, r, color);
 }
 
 /// A five-point star as a convex pentagon plus five convex tips.

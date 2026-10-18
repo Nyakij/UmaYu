@@ -22,8 +22,17 @@ The app starts empty and opens Setup, which offers two ways in:
 - Load a profile: if someone saved your account for you, you'll have a file ending in
   .umalord.json. Put it in the profiles folder next to umalord.exe, leave it in Downloads,
   or drag it onto the app's window, then click Choose and Load this profile.
-- Set up from scratch: click every uma and support card you own (they light up), then click
-  one again to set its stars and potential, or a card's limit break.
+- Set up from scratch: pick a trainer name and how the app looks, then click every uma and
+  support card you own (they light up).
+  - Set "New picks start as" first: for example MLB, then click every maxed card, then LB0
+    for the rest. Each card is one click.
+  - Hover an uma you added to click her stars and potential right on the picture; hover a
+    card to click its limit break diamonds.
+  - Ctrl-click or Shift-click picks several at once, to set them all together.
+  - "Paste a list" takes lines like "Kitasan Black MLB" or "Oguri Cap Starlight Beat 5* P5".
+  - Keys: type to search (Enter adds the first match), arrows to move, Space to add or
+    remove, 1-5 for stars (Shift for potential) or 0-4 for a card's limit break, Ctrl+Z to
+    undo.
 Settings (the cog, top right) > Profile can rename the account, save your data to one file (Save my data), load
 another profile, reopen Setup, or empty the app (Start over). Loading a profile or starting
 over saves what was there to profiles\backups first, so nothing is lost.

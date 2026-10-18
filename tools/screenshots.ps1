@@ -57,6 +57,7 @@ if (-not $ProfileFile) { Write-Warning 'No friend profile in profiles\; pages sh
 $all = [ordered]@{
     'setup-welcome'  = @{ SETUP = 'welcome' }
     'setup-import'   = @{ SETUP = 'import' }
+    'setup-you'      = @{ SETUP = 'you' }
     'setup-umas'     = @{ SETUP = 'umas' }
     'setup-cards'    = @{ SETUP = 'cards' }
     'setup-done'     = @{ SETUP = 'done' }

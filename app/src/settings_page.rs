@@ -423,76 +423,95 @@ impl App {
         });
     }
 
+    /// System, Light or Dark, as big buttons. Shared with setup's "Make it yours".
+    pub(crate) fn mode_picker(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let options = [
+            (theme::Mode::System, theme::Mode::System.label(), "Follow Windows: dark when Windows is dark"),
+            (theme::Mode::Light, theme::Mode::Light.label(), ""),
+            (theme::Mode::Dark, theme::Mode::Dark.label(), ""),
+        ];
+        if let Some(m) = big_choice(ui, self.mode, &options) {
+            self.set_mode(&ctx, m);
+        }
+    }
+
+    /// The colour themes as cards with a painted preview each; a click applies one.
+    pub(crate) fn theme_picker(&mut self, ui: &mut egui::Ui) {
+        let p = pal(ui);
+        let ctx = ui.ctx().clone();
+        let w = ui.available_width();
+        let cols = if w >= 600.0 { 3 } else { 2 };
+        let gap = 10.0;
+        let tile = vec2((w - gap * (cols - 1) as f32) / cols as f32, 156.0);
+        for row in Look::ALL.chunks(cols) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for look in row {
+                    let on = self.look == *look;
+                    let (rect, resp) = ui.allocate_exact_size(tile, Sense::click());
+                    let painter = ui.painter();
+                    if resp.hovered() && !on {
+                        painter.rect_filled(rect.expand(2.0), CornerRadius::same(10), p.hover);
+                    }
+                    let thumb = Rect::from_min_size(rect.min, vec2(rect.width(), 100.0));
+                    look_preview(painter, thumb, *look, self.dark);
+                    if on {
+                        painter.rect_stroke(thumb.expand(1.5), CornerRadius::same(9), Stroke::new(2.5, p.accent_strong), StrokeKind::Outside);
+                        let tick = thumb.right_top() + vec2(-14.0, 14.0);
+                        painter.circle_filled(tick, 9.0, p.accent);
+                        painter.text(tick, Align2::CENTER_CENTER, "✔", FontId::proportional(size::SM), p.on_accent);
+                    }
+                    painter.text(thumb.left_bottom() + vec2(2.0, 8.0), Align2::LEFT_TOP, look.label(), FontId::new(size::BODY, FontFamily::Name(theme::SEMIBOLD.into())), p.text);
+                    let about = painter.layout(look.about().to_string(), FontId::proportional(size::XS), p.weak, rect.width() - 4.0);
+                    painter.galley(thumb.left_bottom() + vec2(2.0, 27.0), about, p.weak);
+                    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !on {
+                        self.look = *look;
+                        theme::set_look(&ctx, *look);
+                        settings::set("look", serde_json::json!(look.key()));
+                    }
+                }
+            });
+            ui.add_space(gap);
+        }
+    }
+
+    /// The sky-and-decorations switch.
+    pub(crate) fn background_toggle(&mut self, ui: &mut egui::Ui) {
+        if ui.checkbox(&mut self.mascot, "Sky and decorations behind the pages").changed() {
+            settings::set("mascot", serde_json::json!(self.mascot));
+        }
+    }
+
+    /// Where chibi Seiun Sky goes.
+    pub(crate) fn chibi_picker(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            chibi(ui, 0, 64.0);
+            ui.vertical(|ui| {
+                let options = [
+                    (theme::Chibi::Everywhere, "Everywhere", "On Home, on empty pages, and small beside every page title"),
+                    (theme::Chibi::Home, "Home and empty pages", "Beside Home's welcome, and on pages with nothing to show yet"),
+                    (theme::Chibi::Off, "Off", "Nowhere"),
+                ];
+                if let Some(c) = big_choice(ui, theme::chibi(), &options) {
+                    theme::use_chibi(c);
+                    settings::set("chibi", serde_json::json!(c.key()));
+                }
+            });
+        });
+    }
+
     fn settings_appearance(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
         let ctx = ui.ctx().clone();
-        setting_row(ui, "Mode", "", |ui| {
-            let options = [
-                (theme::Mode::System, theme::Mode::System.label(), "Follow Windows: dark when Windows is dark"),
-                (theme::Mode::Light, theme::Mode::Light.label(), ""),
-                (theme::Mode::Dark, theme::Mode::Dark.label(), ""),
-            ];
-            if let Some(m) = big_choice(ui, self.mode, &options) {
-                self.set_mode(&ctx, m);
-            }
-        });
-        setting_row(ui, "Theme", "The accent colour of buttons and highlights, and the background. Click one to try it.", |ui| {
-            let w = ui.available_width();
-            let cols = if w >= 600.0 { 3 } else { 2 };
-            let gap = 10.0;
-            let tile = vec2((w - gap * (cols - 1) as f32) / cols as f32, 156.0);
-            for row in Look::ALL.chunks(cols) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for look in row {
-                        let on = self.look == *look;
-                        let (rect, resp) = ui.allocate_exact_size(tile, Sense::click());
-                        let painter = ui.painter();
-                        if resp.hovered() && !on {
-                            painter.rect_filled(rect.expand(2.0), CornerRadius::same(10), p.hover);
-                        }
-                        let thumb = Rect::from_min_size(rect.min, vec2(rect.width(), 100.0));
-                        look_preview(painter, thumb, *look, self.dark);
-                        if on {
-                            painter.rect_stroke(thumb.expand(1.5), CornerRadius::same(9), Stroke::new(2.5, p.accent_strong), StrokeKind::Outside);
-                            let tick = thumb.right_top() + vec2(-14.0, 14.0);
-                            painter.circle_filled(tick, 9.0, p.accent);
-                            painter.text(tick, Align2::CENTER_CENTER, "✔", FontId::proportional(size::SM), p.on_accent);
-                        }
-                        painter.text(thumb.left_bottom() + vec2(2.0, 8.0), Align2::LEFT_TOP, look.label(), FontId::new(size::BODY, FontFamily::Name(theme::SEMIBOLD.into())), p.text);
-                        let about = painter.layout(look.about().to_string(), FontId::proportional(size::XS), p.weak, rect.width() - 4.0);
-                        painter.galley(thumb.left_bottom() + vec2(2.0, 27.0), about, p.weak);
-                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !on {
-                            self.look = *look;
-                            theme::set_look(&ctx, *look);
-                            settings::set("look", serde_json::json!(look.key()));
-                        }
-                    }
-                });
-                ui.add_space(gap);
-            }
-        });
+        setting_row(ui, "Mode", "", |ui| self.mode_picker(ui));
+        setting_row(ui, "Theme", "The accent colour of buttons and highlights, and the background. Click one to try it.", |ui| self.theme_picker(ui));
         setting_row(ui, "Background", "", |ui| {
-            if ui.checkbox(&mut self.mascot, "Sky and decorations behind the pages").changed() {
-                settings::set("mascot", serde_json::json!(self.mascot));
-            }
+            self.background_toggle(ui);
             ui.label(RichText::new("The theme's gradient, clouds, petals, stars or rails. Ink has none.").size(size::SM).color(p.weak));
         });
         setting_row(ui, "Seiun Sky", "Chibi Seiun Sky, the app's mascot. She's only drawn where nothing else is, so she never covers your data.", |ui| {
-            ui.horizontal(|ui| {
-                chibi(ui, 0, 64.0);
-                ui.vertical(|ui| {
-                    let options = [
-                        (theme::Chibi::Everywhere, "Everywhere", "On Home, on empty pages, and small beside every page title"),
-                        (theme::Chibi::Home, "Home and empty pages", "Beside Home's welcome, and on pages with nothing to show yet"),
-                        (theme::Chibi::Off, "Off", "Nowhere"),
-                    ];
-                    if let Some(c) = big_choice(ui, theme::chibi(), &options) {
-                        theme::use_chibi(c);
-                        settings::set("chibi", serde_json::json!(c.key()));
-                    }
-                });
-            });
+            self.chibi_picker(ui)
         });
         setting_row(ui, "Size", "Makes everything bigger or smaller, text and all. Ctrl+plus and Ctrl+minus do the same for this session.", |ui| {
             ui.horizontal(|ui| {

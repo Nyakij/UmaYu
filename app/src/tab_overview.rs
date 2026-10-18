@@ -4,7 +4,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Rect, Response, 
 
 use crate::data::{CardType, Rarity, SupportCard, Uma};
 use crate::knowledge::EventPreset;
-use crate::tab_planner::{Plan, day_number};
+use crate::tab_planner::Plan;
 use crate::theme::pal;
 use crate::ui_util::{GOLD, badge, card, card_explained, page_header, semibold, stat_row, today, type_color, type_icon};
 use crate::{App, CareerTab, CollectionTab, Jump, Tab};
