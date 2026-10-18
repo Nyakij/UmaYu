@@ -344,6 +344,19 @@ pub fn readable(ui: &egui::Ui, color: Color32) -> Color32 {
     c
 }
 
+/// A rounded pill with text, as one widget, so it wraps whole in a wrapping row (a Frame with a
+/// label inside can't, since its size is only known after it's placed).
+pub fn pill(ui: &mut egui::Ui, text: RichText, fill: Color32, stroke: Stroke) -> Response {
+    let galley = egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
+    let size = galley.size() + vec2(16.0, 6.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().rect(rect, CornerRadius::same(10), fill, stroke, StrokeKind::Inside);
+        ui.painter().galley(rect.center() - galley.size() / 2.0, galley, pal(ui).text);
+    }
+    resp
+}
+
 /// A small label over a coloured letter tile, like the game's aptitude grades.
 pub fn grade_badge(ui: &mut egui::Ui, label: &str, grade: &str) {
     let weak = pal(ui).weak;

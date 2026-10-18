@@ -259,7 +259,7 @@ type CareerCache = Option<((u64, u64, [Option<u32>; 5], Option<u32>), CareerResu
 
 pub(crate) struct PlannerState {
     pub plan: Plan,
-    files: Vec<(PathBuf, String)>,
+    pub(crate) files: Vec<(PathBuf, String)>,
     pub(crate) open_file: Option<PathBuf>,
     /// What Auto-pick or the skill simulation last did, shown under Step 5 (true = a warning).
     pub(crate) skill_status: Option<(String, bool)>,
@@ -548,15 +548,24 @@ impl App {
             }
         });
         if let Some(path) = load {
-            let text = std::fs::read_to_string(&path).unwrap_or_default();
-            let json = text.split(PLAN_MARKER).nth(1).and_then(|t| t.split("-->").next());
-            match json.map(serde_json::from_str::<Plan>) {
-                Some(Ok(plan)) => {
-                    self.planner.plan = plan;
-                    self.planner.open_file = Some(path);
-                    self.planner.skill_status = None;
-                }
-                _ => self.toast("That plan has no app data block (written by hand?). Read it in ⚙ Settings → Data and updates → Browse notes and data files.", crate::ui_util::ToastKind::Warn),
+            self.open_plan_file(&path);
+        }
+    }
+
+    /// Open a saved plan in the planner. Returns false (with a toast) if it has no data block.
+    pub(crate) fn open_plan_file(&mut self, path: &std::path::Path) -> bool {
+        let text = std::fs::read_to_string(path).unwrap_or_default();
+        let json = text.split(PLAN_MARKER).nth(1).and_then(|t| t.split("-->").next());
+        match json.map(serde_json::from_str::<Plan>) {
+            Some(Ok(plan)) => {
+                self.planner.plan = plan;
+                self.planner.open_file = Some(path.to_path_buf());
+                self.planner.skill_status = None;
+                true
+            }
+            _ => {
+                self.toast("That plan has no app data block (written by hand?). Read it in ⚙ Settings → Data and updates → Browse notes and data files.", crate::ui_util::ToastKind::Warn);
+                false
             }
         }
     }
@@ -2102,9 +2111,10 @@ impl App {
         let text = self.plan_markdown(kept);
         match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
             Ok(()) => {
-                self.toast(format!("Saved {}", path.display()), crate::ui_util::ToastKind::Success);
+                self.toast_action(format!("Saved {}", path.display()), crate::ui_util::ToastKind::Success, "Show", crate::ui_util::ToastAction::Open(path.clone()));
                 self.planner.open_file = Some(path);
                 self.planner.refresh_files(Some(&root));
+                self.home_dirty();
             }
             Err(e) => self.toast(format!("Couldn't save: {e}"), crate::ui_util::ToastKind::Error),
         }

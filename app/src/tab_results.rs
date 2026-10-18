@@ -261,6 +261,7 @@ impl App {
         match insert_row(&text, &self.results.form).map(|t| std::fs::write(&path, t)) {
             Some(Ok(())) => {
                 self.toast("Added. Ask Claude to compare it with the plan and update insights.md.", crate::ui_util::ToastKind::Success);
+                self.home_dirty();
                 self.results.loaded = None;
             }
             Some(Err(e)) => self.toast(format!("Couldn't write: {e}"), crate::ui_util::ToastKind::Error),

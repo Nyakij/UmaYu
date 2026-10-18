@@ -43,8 +43,15 @@ Tabs
 New to the app? Press the ? button (top right) for Help: it explains every tab,
 the steps to plan a career, and the game words the app uses.
 
-- Home: shortcuts to common jobs, the next Champions Meeting ("Plan for it" starts a plan
-  with its course filled in), and your roster at a glance.
+- Home: where to start each day.
+  - The next Champions Meeting: announced or estimated, its course drawn with corners and
+    slopes, countdowns in your time zone, the skills it turns off, what the community meta
+    sheet recommends, your best umas for it, and how far your plan for it has got.
+    "Plan for it" starts a plan with its course filled in; "Continue plan" opens yours.
+  - Coming up: the next three weeks from the game's news. Click a bar to read it.
+  - Widgets: where you left off, your stable, cards by type, who can run where, an uma of
+    the day, your trainer card, your best and missing cards for the next CM, and a game
+    term a day. Two per row on a wide window, one per row on a narrow one.
 - Collection: everything you own, in three sub-tabs.
   - Umas show aptitudes, stats and growth, skills (with what is locked at your potential),
     evolutions, career objectives and events.

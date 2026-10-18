@@ -9,7 +9,9 @@ mod ask;
 mod ask_opencode;
 mod career;
 mod data;
+mod charts;
 mod digest;
+mod home;
 mod knowledge;
 mod live;
 mod meta;
@@ -527,7 +529,7 @@ impl Tab {
 }
 
 /// Game words the app uses, for the Help window. General terms only; numbers come from the data.
-const GLOSSARY: &[(&str, &str)] = &[
+pub(crate) const GLOSSARY: &[(&str, &str)] = &[
     ("Uma, trainee", "A horse girl. You train one in each career; that uma is the trainee."),
     ("Outfit", "A version of an uma, like [Reeling in the Big One]. Each outfit has its own unique skill and aptitudes."),
     ("Stars ★", "An uma's star rank, 1 to 5. You raise it with shards, and it makes her stronger, including her unique skill."),
@@ -648,6 +650,8 @@ pub(crate) struct App {
     pub settings: settings_page::SettingsState,
     /// The live Champions Meeting schedule (official news and Umalator), refreshed in the background.
     pub live: live::LiveState,
+    /// Home's derived data and daily picks.
+    pub home: home::HomeState,
     /// First-run setup, and Settings → Profile's actions.
     pub onboarding: onboarding::OnboardingState,
     screenshot_to: Option<PathBuf>,
@@ -752,6 +756,7 @@ impl App {
             onboarding: Default::default(),
             settings: Default::default(),
             live: Default::default(),
+            home: Default::default(),
             screenshot_to: env("UMALORD_SCREENSHOT").map(PathBuf::from),
             screenshot_requested: false,
             debug_question: env("UMALORD_ASK").filter(|q| !q.trim().is_empty()),
@@ -898,6 +903,7 @@ impl App {
         self.uma_art = scan_art(self.root.as_deref(), "umas");
         self.planner.refresh_files(self.root.as_deref());
         self.planner.key_memo.set(None);
+        self.home_dirty();
         self.planner.rank_cache.borrow_mut().clear();
         self.notes.loaded = None;
         self.write_digest();
