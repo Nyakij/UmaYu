@@ -150,7 +150,7 @@ License
 The race simulator is a port of Moomoolator (https://github.com/TheCing/uma-tools, by
 TheCing, building on alpha123's Umalator and kachi-dev's VFalator), which is licensed
 GPL-3.0-or-later. So this app, as shared, is under GPL-3.0-or-later too: see
-LICENSE-GPL-3.0.txt. The source is in the app folder.
+LICENSE. The source is in the app folder, and on GitHub: https://github.com/brickc4/umaLord
 
 
 Troubleshooting

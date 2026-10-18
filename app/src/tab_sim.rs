@@ -365,7 +365,7 @@ impl App {
             (Mode::Compare, "⚖ Compare two umas", "Race Uma 1 against Uma 2 many times. Shows who wins and by how much."),
             (Mode::Chart, "📊 Which skills help most", "Adds each skill to Uma 1 in turn and measures how many lengths it gains on this course."),
             (Mode::Stamina, "♥ Enough stamina?", "Runs Uma 1 alone and shows the HP she has left at the finish."),
-            (Mode::HpCalc, "🧮 Quick stamina estimate", "A formula instead of a race: instant, rougher."),
+            (Mode::HpCalc, "⚡ Quick stamina estimate", "A formula instead of a race: instant, rougher."),
         ] {
             let b = egui::Button::selectable(self.sim.mode == m, label).min_size(vec2(ui.available_width(), 26.0));
             if ui.add(b).on_hover_text(hover).clicked() {

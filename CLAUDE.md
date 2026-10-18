@@ -16,7 +16,7 @@ This folder is a personal knowledge base and decision log for the user's Uma Mus
 | `account/support_cards.md` | Owned support cards: rarity, type, LB, level | Claude, from what the user reports |
 | `account/parents.md` | Saved legacy umas (parents) and their sparks | Claude, from what the user reports |
 | `profiles/*.umalord.json` | Saved accounts: one file per account with its roster, parents, plans, results and insights (`profile.rs`). `profiles/backups/` holds the automatic backups made before an import or Start over. `friend-2026-10-18.umalord.json` is the friend's account the app was first built for | The app (⚙ → Save my data, `--export-profile`) |
-| `app/templates/` | The blank account files that Start over and a new install begin from | Claude |
+| `app/templates/` | The blank account files that Start over and a new install begin from, and the plan template (`plans/_template.md`) | Claude |
 | `app/tests/fixtures/` | A copy of the friend's `umas.md` and `support_cards.md`: the roster every test runs against, since `account/` may be empty | Claude; refresh it only on purpose |
 | `knowledge/data/*.json` | Global game data from uma.guide: every uma, support card, skill, race and glossary term, one record per line; `cm_schedule.json` (the scenario current at each CM) | `tools/update_knowledge.py`; don't edit by hand |
 | `knowledge/data/pvp_meta.json` | The community PvP meta sheet, per CM/LoH and running style: recommended decks by tier, umas, stats and skill advice. Opinion, not game data | `tools/update_knowledge.py --only meta`; don't edit by hand |
@@ -31,7 +31,8 @@ This folder is a personal knowledge base and decision log for the user's Uma Mus
 | `results/*.md` | Real outcomes: careers, Team Trials, Champions Meeting, League of Heroes, sparks | The app's Career → Results page, or Claude logging what the user reports |
 | `insights.md` | Claude's current opinions, with the evidence and confidence for each | Claude |
 | `app/` | Rust desktop app (eframe/egui): roster, knowledge, planner, race simulator, results, notes, and Ask | Claude |
-| `LICENSE-GPL-3.0.txt` | The app's license. `app/src/sim/` ports Moomoolator's GPL-3.0-or-later engine, so the app as shared is GPL-3.0-or-later | — |
+| `LICENSE` | The app's license. `app/src/sim/` ports Moomoolator's GPL-3.0-or-later engine, so the app as shared is GPL-3.0-or-later | — |
+| `README.md`, `docs/` | The GitHub front page (with `docs/screenshots/` and `docs/logo.png`), and `docs/guide.txt`, the user guide that ships in the zip as README.txt | Claude |
 
 ## Knowledge data (`knowledge/data/`)
 
@@ -99,7 +100,7 @@ This folder is a personal knowledge base and decision log for the user's Uma Mus
 - **Art:** card art and uma icons live in `app/assets/cards/<id>.webp` and `app/assets/umas/<id>.webp`, copied from uma.guide (every Global card and uma as of 2026-10-15). When the roster gains something released later, download its image too. Card images are `/img/card/composite/tex_support_card_<id>_thumb.webp`; uma icons are the `src` on each `/characters/` entry.
 - **Building and testing:** build from `app/` with `cargo build --release`; the exe is `app/target/release/umalord.exe`. Run `cargo test` after editing account files or rebuilding knowledge. It parses the real files, runs every Ask tool against them, and round-trips a plan and a profile. Tests use the fixture roster in `app/tests/fixtures/` (`App::for_tests`, `Roster::sample`), not `account/`, which is empty after Start over.
 - **Profiles from the command line:** `umalord.exe --export-profile [name]` writes `profiles/<name>-<date>.umalord.json`; `umalord.exe --start-over [name]` backs the account up to `profiles/backups/` and empties it. Both exit without a window (run with `Start-Process -Wait`).
-- **Sharing:** `powershell -ExecutionPolicy Bypass -File tools\package.ps1 -Build` writes `dist\umaLord-<date>.zip`. The zip holds the exe at its root plus the roster, knowledge data, notes, tools, app source and art. It leaves out `app\target`, `app\.cargo`, `tools\opencode` (downloaded on demand), the generated `knowledge\digest` and `profiles\`; `-IncludeProfile profiles\<file>` adds one profile, which the recipient's first-run setup lists. The exe finds its data from its own folder, so the zip runs from anywhere. `README.txt` is the guide for whoever receives it.
+- **Sharing:** `powershell -ExecutionPolicy Bypass -File tools\package.ps1 -Build` writes `dist\umaLord-<date>.zip`. The zip holds the exe at its root plus the roster, knowledge data, notes, tools, app source and art. It leaves out `app\target`, `app\.cargo`, `tools\opencode` (downloaded on demand), the generated `knowledge\digest` and `profiles\`; `-IncludeProfile profiles\<file>` adds one profile, which the recipient's first-run setup lists. The exe finds its data from its own folder, so the zip runs from anywhere. `docs/guide.txt` is the guide for whoever receives it; the script puts it at the zip's root as `README.txt`.
 - **Toolchain:** this machine has only the rustup `windows-gnu` toolchain, which needs workarounds that `app/.cargo/config.toml` explains. After `rustup update`, run `app/setup-toolchain.ps1`. The Ask tab sends requests through Windows' `curl.exe`, because Rust has no official Anthropic SDK.
 - **Checking the UI unattended:** set `UMALORD_SCREENSHOT=<file>.png`. The app saves a screenshot after about 2.5 seconds, then exits.
   - `UMALORD_TAB` picks the tab: `home`, `umas`, `cards` or `skills` (Collection sub-tabs), `planner`, `sim` or `results` (Career sub-tabs, `career` for Plan), `notes` or `ask`.
@@ -114,7 +115,8 @@ This folder is a personal knowledge base and decision log for the user's Uma Mus
   - `UMALORD_ASK=<question>` asks that question on start, and holds the screenshot until it's answered.
   - `UMALORD_INSTALL=1` installs OpenCode on start if it's missing. This runs before `UMALORD_ASK`.
   - `UMALORD_THEME=light` forces light mode. Otherwise the app uses the mode saved in `%APPDATA%\umaLord\settings.json`, which defaults to dark.
-  - `UMALORD_LOOK=sky|sakura|sunset|night` forces a colour theme; `UMALORD_SETTINGS=1` opens the ⚙ menu.
+  - `UMALORD_LOOK=sky|sakura|sunset|night` forces a colour theme; `UMALORD_MASCOT=1` (or `0`) forces the background art on (or off); `UMALORD_SETTINGS=1` opens the ⚙ menu.
+  - `UMALORD_ROOT=<folder>` runs on another folder. For README screenshots, point it at a scratch copy of `knowledge/` and `app/assets/` and set `UMALORD_PROFILE` to the friend's profile, so no real account file is touched and the user's own roster never shows.
   - `UMALORD_SETUP=welcome|import|umas|cards|done` opens setup at that step; any other value (e.g. `off`) keeps it closed on an empty roster.
   - `UMALORD_PROFILE=<file.umalord.json>` shows that profile's roster in memory without importing it. With `account/` empty, use it with the friend's profile for screenshots of pages that need a roster (demo plans, the Race sim).
 - **OpenCode backend (`app/src/ask_opencode.rs`):**
@@ -178,7 +180,7 @@ This folder is a personal knowledge base and decision log for the user's Uma Mus
 
 - Windows, PowerShell 5.1. Git for Windows and the GitHub CLI (`gh`, signed in as brickc4) are installed.
 - **Git:** a public repo, https://github.com/brickc4/umaLord (branch `main`). Commits use the brickc4 noreply address, set in the repo's git config, so no personal email goes public.
-  - `.gitignore` keeps the user's data out: `account/`, `plans/` (except `_template.md`), `results/`, `insights.md`, `profiles/`. The app writes blank ones from `app/templates/` when they're missing (`profile::ensure_account`), and `find_root` accepts a folder with only `knowledge/data`, so a fresh clone runs. Also ignored: `app/target`, `app/.cargo` (per-machine toolchain paths; `setup-toolchain.ps1` writes it), `tools/opencode`, `dist`, `knowledge/digest`.
+  - `.gitignore` keeps the user's data out: `account/`, `plans/`, `results/`, `insights.md`, `profiles/`. The app writes blank ones (and `plans/_template.md`) from `app/templates/` when they're missing (`profile::ensure_account`), and `find_root` accepts a folder with only `knowledge/data`, so a fresh clone runs. Also ignored: `app/target`, `app/.cargo` (per-machine toolchain paths; `setup-toolchain.ps1` writes it), `tools/opencode`, `dist`, `knowledge/digest`.
   - The repo is public: before every push, check `git diff --cached --name-only` for personal files and search the staged text for names, emails, local paths and keys.
   - **Releases:** build the zip with `tools\package.ps1` (it never includes the account), then `gh release create vX.Y.Z dist\umaLord-<date>.zip --title ... --notes-file <file>`. Pass notes as a file: PowerShell 5.1 breaks quoted multi-line `--notes`.
 - The user may send screenshots of rosters, results or sparks. Read them and transcribe the details into the matching file.

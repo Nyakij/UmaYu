@@ -648,7 +648,7 @@ impl App {
             jump: Cell::new(None),
             available_skills: std::cell::RefCell::new(None),
             help_open: false,
-            mascot: settings::get("mascot").and_then(|v| v.as_bool()).unwrap_or(true),
+            mascot: env("UMALORD_MASCOT").map(|v| v == "1").or_else(|| settings::get("mascot").and_then(|v| v.as_bool())).unwrap_or(true),
             umas: Default::default(),
             cards: Default::default(),
             skills: Default::default(),
@@ -1267,6 +1267,10 @@ impl App {
             self.submit_question(ctx, q);
         }
         let Some(path) = self.screenshot_to.clone() else { return };
+        // No tooltips from wherever the real mouse happens to be over the window.
+        if ctx.input(|i| i.time) < 0.5 {
+            ctx.all_styles_mut(|s| s.interaction.tooltip_delay = f32::INFINITY);
+        }
         let waiting = (installing || (self.debug_asked && self.ask_busy())) && ctx.input(|i| i.time) < 300.0;
         if !self.screenshot_requested && !waiting && ctx.input(|i| i.time) >= 2.5 {
             self.screenshot_requested = true;

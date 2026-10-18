@@ -723,6 +723,10 @@ impl RankCache {
                 }
             }
         }
+        // Every slot ranked: the job is finished, even if its thread hasn't quite exited yet.
+        if self.key == Some(job.key) && self.slots.len() == 6 {
+            done = true;
+        }
         if !done {
             self.job = Some(job);
         }

@@ -2,8 +2,7 @@
 # Never commit these; ⚙ → Save my data makes a profile file to keep or share instead.
 /account/
 /insights.md
-/plans/*
-!/plans/_template.md
+/plans/
 /results/
 /profiles/
 

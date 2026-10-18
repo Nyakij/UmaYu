@@ -2,7 +2,7 @@
 //! alpha123's Umalator and kachi-dev's VFalator, built on uma-skill-tools (alpha123 and pecan).
 //! Source: https://github.com/TheCing/uma-tools (engine v2, checked 2026-10-17).
 //!
-//! The original is licensed GPL-3.0-or-later, and so is this port: see LICENSE-GPL-3.0.txt in
+//! The original is licensed GPL-3.0-or-later, and so is this port: see LICENSE in
 //! the umaLord folder.
 //! Game data (skills, courses, outfits) comes from Moomoolator's Global files, which
 //! tools/update_knowledge.py saves in knowledge/data/sim/.

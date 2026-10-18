@@ -203,7 +203,7 @@ pub fn ensure_account(root: &Path) -> Result<(), String> {
     std::fs::create_dir_all(&plans).map_err(|e| e.to_string())?;
     let template = plans.join("_template.md");
     if !template.exists() {
-        std::fs::write(&template, include_str!("../../plans/_template.md")).map_err(|e| e.to_string())?;
+        std::fs::write(&template, include_str!("../templates/plans/_template.md")).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

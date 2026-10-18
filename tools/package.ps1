@@ -23,12 +23,12 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 Copy-Item $exe $stage
-foreach ($f in 'README.txt', 'LICENSE-GPL-3.0.txt', 'CLAUDE.md', 'AGENTS.md', 'opencode.json', 'sources.md') { Copy-Item (Join-Path $root $f) $stage }
+foreach ($f in 'LICENSE', 'CLAUDE.md', 'AGENTS.md', 'opencode.json', 'sources.md') { Copy-Item (Join-Path $root $f) $stage }
+# The user guide sits at the zip's root as README.txt, where people look first.
+Copy-Item (Join-Path $root 'docs\guide.txt') (Join-Path $stage 'README.txt')
 foreach ($d in 'knowledge', 'tools') { Copy-Item (Join-Path $root $d) (Join-Path $stage $d) -Recurse }
 # Your account (account\, plans, results, insights.md) never goes in the zip: the app writes
 # blank ones from app\templates on first run, and Setup fills them.
-New-Item -ItemType Directory -Force (Join-Path $stage 'plans') | Out-Null
-Copy-Item (Join-Path $root 'plans\_template.md') (Join-Path $stage 'plans')
 New-Item -ItemType Directory -Force (Join-Path $stage 'app') | Out-Null
 foreach ($d in 'src', 'assets', 'templates', 'tests') { Copy-Item (Join-Path $root "app\$d") (Join-Path $stage "app\$d") -Recurse }
 foreach ($f in 'Cargo.toml', 'Cargo.lock', 'setup-toolchain.ps1') { Copy-Item (Join-Path $root "app\$f") (Join-Path $stage 'app') }
