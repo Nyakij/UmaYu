@@ -26,9 +26,9 @@
 | 📋 **Plan a career** | Pick the next Champions Meeting and a trainee. Trainee suggestions, the deck fill and ✨ Auto-pick start from the community PvP meta sheet's picks for that CM and running style (marked ★); simulated careers rank the rest. Skills are bought within the skill points your simulated careers end with. |
 | 🏁 **Race sim** | A Rust port of Moomoolator's race engine, checked against umalator.app. Race two builds 1,000 times, chart which skills gain the most lengths on a course, check stamina. No browser needed. |
 | 📚 **Collection** | Your umas and support cards, with effects at your limit break and level, the skills they teach, and their events. |
-| ✨ **Set up in minutes** | Click the umas and cards you own, or load a profile file someone saved for you. ⚙ → Save my data puts your whole account in one file. |
+| ✨ **Set up in minutes** | Click the umas and cards you own, or load a profile file someone saved for you. ⚙ Settings → Save my data puts your whole account in one file. |
 | 💬 **Ask** | Questions about your roster in plain English, answered by a free OpenCode model or your own Claude API key. |
-| 🎨 **Themes** | Seiun Sky, Sakura, Sunset and Starry night, in dark or light, or following Windows. |
+| 🎨 **Themes** | Seiun Sky, Sakura, Sunset, Starry night, Track day and the high-contrast Ink, in dark or light, or following Windows. |
 
 <table>
   <tr>

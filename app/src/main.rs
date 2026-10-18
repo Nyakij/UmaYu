@@ -17,6 +17,7 @@ mod plan_sim;
 mod profile;
 mod recommend;
 mod settings;
+mod settings_page;
 mod sim;
 mod tab_career;
 mod tab_cards;
@@ -449,7 +450,7 @@ pub(crate) enum Tab {
     /// Planner, race sim and results, as sub-tabs.
     Career,
     Ask,
-    /// The notes and data files: not in the top bar, opened from ⚙ (`App::open_notes`).
+    /// The notes and data files: not in the top bar, opened from Settings (`App::open_notes`).
     Notes,
 }
 
@@ -524,8 +525,9 @@ const GLOSSARY: &[(&str, &str)] = &[
 ];
 
 /// Keyboard shortcuts, as Help lists them (`App::shortcuts` handles them).
-const SHORTCUTS: &[(&str, &str)] = &[
+pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl+1 … Ctrl+4", "Switch tabs: Home, Collection, Career, Ask"),
+    ("Ctrl+,", "Open Settings"),
     ("Ctrl+F", "Jump to the page's search box"),
     ("Ctrl+S", "Save the plan (on Career → Plan)"),
     ("F5", "Reload your roster, game data and plans from disk"),
@@ -533,7 +535,7 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("?", "Open this Help"),
 ];
 
-/// The top bar's tabs, left to right. Notes isn't one: ⚙ → Browse notes opens it.
+/// The top bar's tabs, left to right. Notes isn't one: Settings → Data and updates opens it.
 const TABS: [Tab; 4] = [Tab::Home, Tab::Collection, Tab::Career, Tab::Ask];
 
 /// The Collection tab's sub-tabs.
@@ -605,9 +607,9 @@ pub(crate) struct App {
     pub dark: bool,
     /// The colour theme (accent and background); saved in settings.json.
     pub look: theme::Look,
-    /// `UMALORD_SETTINGS=1`: open the settings menu on start, for screenshots.
-    debug_settings: bool,
-    /// First-run setup, and the ⚙ menu's profile actions.
+    /// The Settings window.
+    pub settings: settings_page::SettingsState,
+    /// First-run setup, and Settings → Profile's actions.
     pub onboarding: onboarding::OnboardingState,
     screenshot_to: Option<PathBuf>,
     screenshot_requested: bool,
@@ -706,8 +708,8 @@ impl App {
             // System resolves once the window knows Windows' theme (`App::frame`).
             dark: mode != theme::Mode::Light,
             look: theme::Look::from_key(&env("UMALORD_LOOK").or_else(|| settings::get("look").and_then(|v| v.as_str().map(String::from))).unwrap_or_default()),
-            debug_settings: env("UMALORD_SETTINGS").is_some_and(|v| v == "1"),
             onboarding: Default::default(),
+            settings: Default::default(),
             screenshot_to: env("UMALORD_SCREENSHOT").map(PathBuf::from),
             screenshot_requested: false,
             debug_question: env("UMALORD_ASK").filter(|q| !q.trim().is_empty()),
@@ -734,6 +736,11 @@ impl App {
             _ => CareerTab::Plan,
         };
         app.help_open = env("UMALORD_HELP").is_some_and(|v| v == "1");
+        // UMALORD_SETTINGS=1 opens Settings; UMALORD_SETTINGS_PAGE=<section> picks the section.
+        if env("UMALORD_SETTINGS").is_some_and(|v| v == "1") {
+            let page = env("UMALORD_SETTINGS_PAGE").and_then(|k| settings_page::SettingsPage::from_key(&k)).unwrap_or_default();
+            app.open_settings(page);
+        }
         theme::use_look(app.look);
         // A new install (or after Start over): setup opens by itself. UMALORD_SETUP=<step> forces a step.
         if app.roster.is_empty() && matches!(app.source, Source::Folder(_)) {
@@ -963,125 +970,20 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                // Settings: help, dark or light mode, colour theme and background. It stays open
-                // while you click through the themes.
                 let cog = egui::Button::new(RichText::new("⚙").size(17.0).color(p.text)).min_size(vec2(32.0, 30.0));
-                let config = egui::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-                let (cog, _) = egui::menu::MenuButton::from_button(cog).config(config).ui(ui, |ui| self.settings_menu(ui));
-                if self.debug_settings {
-                    self.debug_settings = false;
-                    egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&cog));
+                if ui.add(cog).on_hover_text("Settings (Ctrl+,): your profile, look and theme, game data, the AI assistant").clicked() {
+                    self.open_settings(self.settings.page);
                 }
-                cog.on_hover_text("Settings: help, dark or light mode, colour theme and background");
-                if ui.button("🔄").on_hover_text("Reload: re-read your roster, game data and plans from disk").clicked() {
+                let help = egui::Button::new(RichText::new("?").size(16.0).color(p.text)).min_size(vec2(32.0, 30.0));
+                if ui.add(help).on_hover_text("Help (?): what each tab does, how to plan a career, and the game's words").clicked() {
+                    self.help_open = true;
+                }
+                if ui.add(egui::Button::new("🔄").min_size(vec2(32.0, 30.0))).on_hover_text("Reload (F5): re-read your roster, game data and plans from disk").clicked() {
                     self.reload();
+                    self.toast("Reloaded your roster, game data and plans.", ui_util::ToastKind::Success);
                 }
             });
         });
-    }
-
-    /// The ⚙ menu: Help, dark or light mode, the colour theme, and the background art.
-    fn settings_menu(&mut self, ui: &mut egui::Ui) {
-        let p = theme::pal(ui);
-        ui.set_width(300.0);
-        let help = egui::Button::new(RichText::new("❓ Help").size(14.5).color(p.link)).right_text(RichText::new("what each tab does").size(12.0).color(p.weak));
-        if ui.add(help).clicked() {
-            self.help_open = true;
-            ui.close();
-        }
-        ui.separator();
-        ui.label(RichText::new("MODE").size(11.5).color(p.weak));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for mode in theme::Mode::ALL {
-                let b = egui::Button::selectable(self.mode == mode, RichText::new(mode.label()).size(14.0)).min_size(vec2(96.0, 28.0));
-                let hover = if mode == theme::Mode::System { "Follow Windows: dark when Windows is dark" } else { "" };
-                let r = ui.add(b);
-                let r = if hover.is_empty() { r } else { r.on_hover_text(hover) };
-                if r.clicked() && self.mode != mode {
-                    self.set_mode(ui.ctx(), mode);
-                }
-            }
-        });
-        ui.add_space(4.0);
-        ui.label(RichText::new("THEME").size(11.5).color(p.weak));
-        for look in theme::Look::ALL {
-            let on = self.look == look;
-            // One row per theme: a swatch (its sky with its accent as a dot), the name and a line on it.
-            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), egui::Sense::click());
-            let painter = ui.painter();
-            if on {
-                painter.rect_filled(rect, CornerRadius::same(8), p.accent.gamma_multiply(if self.dark { 0.28 } else { 0.16 }));
-                painter.rect_stroke(rect, CornerRadius::same(8), egui::Stroke::new(1.0, p.accent_strong), egui::StrokeKind::Inside);
-            } else if resp.hovered() {
-                painter.rect_filled(rect, CornerRadius::same(8), p.hover);
-            }
-            let tp = theme::palette_for(look, self.dark);
-            let swatch = egui::Rect::from_center_size(egui::pos2(rect.left() + 26.0, rect.center().y), vec2(34.0, 26.0));
-            painter.rect_filled(swatch, CornerRadius::same(6), tp.sky);
-            painter.rect_stroke(swatch, CornerRadius::same(6), egui::Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-            painter.circle_filled(swatch.center(), 6.5, tp.accent);
-            let x = swatch.right() + 12.0;
-            painter.text(egui::pos2(x, rect.top() + 4.0), egui::Align2::LEFT_TOP, look.label(), egui::FontId::new(14.0, egui::FontFamily::Name(theme::SEMIBOLD.into())), p.text);
-            painter.text(egui::pos2(x, rect.top() + 23.0), egui::Align2::LEFT_TOP, look.about(), egui::FontId::proportional(11.5), p.weak);
-            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !on {
-                self.look = look;
-                theme::set_look(ui.ctx(), look);
-                settings::set("look", serde_json::json!(look.key()));
-            }
-        }
-        ui.add_space(4.0);
-        ui.label(RichText::new("BACKGROUND").size(11.5).color(p.weak));
-        if ui.checkbox(&mut self.mascot, "Sky and decorations behind the pages").changed() {
-            settings::set("mascot", serde_json::json!(self.mascot));
-        }
-        ui.add_space(4.0);
-        ui.label(RichText::new("CHIBI SEIUN SKY").size(11.5).color(p.weak)).on_hover_text("She's only drawn where nothing else is, so she never covers your data.");
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for c in theme::Chibi::ALL {
-                let hover = match c {
-                    theme::Chibi::Everywhere => "On Home, on empty pages, and small beside every page title",
-                    theme::Chibi::Home => "On Home and on empty pages only",
-                    theme::Chibi::Off => "Nowhere",
-                };
-                if ui.add(egui::Button::selectable(theme::chibi() == c, RichText::new(c.label()).size(13.0))).on_hover_text(hover).clicked() {
-                    theme::use_chibi(c);
-                    settings::set("chibi", serde_json::json!(c.key()));
-                }
-            }
-        });
-        ui.separator();
-        ui.label(RichText::new(format!("PROFILE · {}", self.profile_name().to_uppercase())).size(11.5).color(p.weak));
-        let row = |ui: &mut egui::Ui, text: &str, hint: &str| ui.add(egui::Button::new(RichText::new(text).size(14.0)).right_text(RichText::new(hint).size(11.5).color(p.weak)));
-        if row(ui, "📤 Save my data", "to one file").on_hover_text("Write your umas, cards, parents, plans and results to profiles/<name>-<date>.umalord.json, to keep or share").clicked() {
-            match self.export_profile() {
-                Ok(path) => self.toast_action(format!("Saved {}.", path.display()), ui_util::ToastKind::Success, "Show", ui_util::ToastAction::Open(path)),
-                Err(e) => self.toast(e, ui_util::ToastKind::Error),
-            }
-            ui.close();
-        }
-        if row(ui, "📥 Load a profile", "switch accounts").on_hover_text("Replace what's here with a saved .umalord.json profile (what's here is backed up first)").clicked() {
-            self.open_setup(onboarding::Step::Import);
-            ui.close();
-        }
-        if row(ui, "📝 Set up my collection", "click what you own").on_hover_text("Add umas and cards by clicking their art, and set stars and limit breaks").clicked() {
-            self.open_setup(onboarding::Step::Umas);
-            ui.close();
-        }
-        if row(ui, "⚠ Start over", "empty the app").on_hover_text("Back up this account, then empty the app for a new one").clicked() {
-            self.onboarding.confirm_start_over = true;
-            ui.close();
-        }
-        ui.separator();
-        ui.label(RichText::new("ADVANCED").size(11.5).color(p.weak));
-        if row(ui, "📝 Browse notes and data files", "read-only")
-            .on_hover_text("Read the markdown files in this folder: insights, plans, results, your roster files and the knowledge notes")
-            .clicked()
-        {
-            self.open_notes();
-            ui.close();
-        }
     }
 
     /// Open the notes page; its Back button returns to the page you were on.
@@ -1160,6 +1062,9 @@ impl App {
                 self.onboarding.open = false;
             }
         }
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
+            self.open_settings(self.settings.page);
+        }
         if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
             self.focus_search.set(true);
         }
@@ -1187,7 +1092,9 @@ impl App {
 
     /// Esc: close Help, an open dialog, or the selection's detail panel, in that order.
     fn close_topmost(&mut self) {
-        if self.help_open {
+        if self.settings.open {
+            // The Settings window closes itself on Esc (it's a modal).
+        } else if self.help_open {
             self.help_open = false;
         } else if self.onboarding.confirm_start_over {
             self.onboarding.confirm_start_over = false;
@@ -1224,7 +1131,7 @@ impl App {
         ui.style_mut().visuals.override_text_color = Some(weak);
         ui.horizontal(|ui| {
             if let Some(name) = &self.roster.profile {
-                ui.label(format!("👤 {name}")).on_hover_text("Whose account this is. ⚙ → Load a profile switches accounts.");
+                ui.label(format!("👤 {name}")).on_hover_text("Whose account this is. ⚙ Settings → Profile renames it or switches accounts.");
                 ui.separator();
             }
             if let Some(server) = &self.roster.server {
@@ -1269,7 +1176,8 @@ impl App {
         let p = theme::palette(self.dark);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, p.bg);
-        if !self.mascot {
+        // Ink is high contrast: the plain page colour, nothing behind the content.
+        if !self.mascot || theme::look() == theme::Look::Ink {
             return;
         }
         // Sky: the page colour at the top, fading toward the theme's colour at the bottom.
@@ -1330,6 +1238,27 @@ impl App {
                 painter.circle_filled(moon, size * 0.36, light.gamma_multiply(0.05));
                 painter.circle_filled(moon, size * 0.2, light.gamma_multiply(if self.dark { 0.55 } else { 0.9 }));
             }
+            theme::Look::Track => {
+                // The rails of a racetrack's far turn, sweeping across the bottom of the page.
+                let rail = if self.dark { egui::Color32::from_white_alpha(22) } else { egui::Color32::from_rgb(146, 100, 0).gamma_multiply(0.22) };
+                let center = rect.right_bottom() + vec2(-size * 0.2, size * 1.9);
+                for (r, w) in [(size * 2.3, 2.0), (size * 2.55, 1.2)] {
+                    let pts: Vec<egui::Pos2> = (0..=48)
+                        .map(|i| {
+                            let a = std::f32::consts::PI * (1.0 + 0.5 * i as f32 / 48.0);
+                            center + vec2(a.cos() * r * 1.6, a.sin() * r)
+                        })
+                        .collect();
+                    painter.add(egui::Shape::line(pts, egui::Stroke::new(w, rail)));
+                }
+                // Furlong posts on the inner rail.
+                for i in 0..7 {
+                    let a = std::f32::consts::PI * (1.0 + 0.5 * (i as f32 + 0.5) / 7.0);
+                    let at = center + vec2(a.cos() * size * 2.3 * 1.6, a.sin() * size * 2.3);
+                    painter.line_segment([at, at - vec2(0.0, 14.0)], egui::Stroke::new(2.0, rail));
+                }
+            }
+            theme::Look::Ink => {}
         }
         if theme::look() == theme::Look::Sakura {
             // Petals drifting down the page.
@@ -1395,7 +1324,7 @@ impl App {
                             go = Some((Tab::Notes, None));
                         }
                     };
-                    row(ui, &mut notes, RichText::new("Read the markdown files in this folder: insights, plans, results and your roster files. It's in ⚙ → Advanced.").color(p.weak));
+                    row(ui, &mut notes, RichText::new("Read the markdown files in this folder: insights, plans, results and your roster files. It's in ⚙ Settings → Data and updates.").color(p.weak));
                     ui.add_space(10.0);
                     ui.label(semibold("Planning a career, start to finish", 16.0));
                     for (n, step) in [
@@ -1540,6 +1469,7 @@ impl App {
         if self.help_open {
             self.help_window(&ctx);
         }
+        self.settings_window(&ctx);
         self.start_over_dialog(&ctx);
         self.apply_jump();
         // Background simulations finish even while another tab is open.

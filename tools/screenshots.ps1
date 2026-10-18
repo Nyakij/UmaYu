@@ -76,7 +76,11 @@ $all = [ordered]@{
     'results'        = @{ TAB = 'results' }
     'ask'            = @{ TAB = 'ask' }
     'notes'          = @{ TAB = 'notes' }
-    'settings'       = @{ SETTINGS = '1' }
+    'settings'       = @{ SETTINGS = '1'; SETTINGS_PAGE = 'profile' }
+    'settings-look'  = @{ SETTINGS = '1'; SETTINGS_PAGE = 'appearance' }
+    'settings-data'  = @{ SETTINGS = '1'; SETTINGS_PAGE = 'data' }
+    'settings-ai'    = @{ SETTINGS = '1'; SETTINGS_PAGE = 'ai' }
+    'settings-about' = @{ SETTINGS = '1'; SETTINGS_PAGE = 'about' }
     'help'           = @{ HELP = '1' }
 }
 $names = if ($Pages.Count) { $Pages } else { @($all.Keys) }

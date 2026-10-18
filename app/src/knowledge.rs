@@ -335,6 +335,8 @@ struct Meta {
 
 #[derive(Deserialize, Clone, Debug, Default)]
 struct UmalatorMeta {
+    #[serde(default)]
+    built: String,
     skills: Vec<u32>,
     #[serde(default)]
     courses: Vec<UmalatorCourse>,
@@ -599,6 +601,8 @@ pub struct Knowledge {
     pub scenarios: Option<crate::career::Scenarios>,
     /// The community PvP meta sheet (`pvp_meta.json`).
     pub pvp_meta: Option<crate::meta::PvpMeta>,
+    /// When `umalator.json` (the simulator's skills, courses and CM presets) was built.
+    pub umalator_built: Option<String>,
     pub built: Option<String>,
     pub error: Option<String>,
 }
@@ -637,6 +641,7 @@ impl Knowledge {
         k.umalator_skills = umalator.skills.into_iter().collect();
         k.umalator_courses = umalator.courses;
         k.umalator_presets = umalator.presets;
+        k.umalator_built = Some(umalator.built).filter(|b| !b.is_empty());
         k.cm_schedule = read(dir, "cm_schedule.json").unwrap_or_default();
         k.pvp_meta = read(dir, "pvp_meta.json").ok();
         Ok(k)
@@ -698,6 +703,7 @@ impl Knowledge {
             cm_schedule: Vec::new(),
             scenarios: None,
             pvp_meta: None,
+            umalator_built: None,
             built,
             error: None,
         }

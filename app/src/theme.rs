@@ -164,10 +164,14 @@ pub enum Look {
     Sakura,
     Sunset,
     Night,
+    /// Turf brown and trophy gold, with a racetrack's rails.
+    Track,
+    /// High contrast: black and white, no decorations.
+    Ink,
 }
 
 impl Look {
-    pub const ALL: [Look; 4] = [Look::Sky, Look::Sakura, Look::Sunset, Look::Night];
+    pub const ALL: [Look; 6] = [Look::Sky, Look::Sakura, Look::Sunset, Look::Night, Look::Track, Look::Ink];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -175,6 +179,8 @@ impl Look {
             Look::Sakura => "Sakura",
             Look::Sunset => "Sunset",
             Look::Night => "Starry night",
+            Look::Track => "Track day",
+            Look::Ink => "Ink",
         }
     }
 
@@ -184,6 +190,8 @@ impl Look {
             Look::Sakura => "Cherry-blossom pink, with falling petals",
             Look::Sunset => "Warm orange, with an evening sun",
             Look::Night => "Violet, with stars and a moon",
+            Look::Track => "Trophy gold, with the rails of a racetrack",
+            Look::Ink => "High contrast black and white, plain background",
         }
     }
 
@@ -194,6 +202,8 @@ impl Look {
             Look::Sakura => "sakura",
             Look::Sunset => "sunset",
             Look::Night => "night",
+            Look::Track => "track",
+            Look::Ink => "ink",
         }
     }
 
@@ -263,6 +273,10 @@ fn tint(look: Look, dark: bool) -> [Color32; 5] {
         (Look::Sunset, false) => [c(180, 80, 10), Color32::WHITE, c(150, 66, 8), c(170, 78, 10), c(255, 222, 190)],
         (Look::Night, true) => [c(167, 139, 250), c(22, 14, 46), c(167, 139, 250), c(196, 181, 253), c(40, 32, 84)],
         (Look::Night, false) => [c(109, 58, 214), Color32::WHITE, c(84, 40, 170), c(92, 46, 190), c(226, 218, 252)],
+        (Look::Track, true) => [c(234, 179, 8), c(30, 20, 0), c(234, 179, 8), c(250, 204, 21), c(58, 42, 20)],
+        (Look::Track, false) => [c(146, 100, 0), Color32::WHITE, c(120, 80, 0), c(133, 77, 14), c(247, 234, 200)],
+        (Look::Ink, true) => [c(236, 238, 242), c(12, 13, 16), c(236, 238, 242), c(191, 219, 254), c(30, 32, 38)],
+        (Look::Ink, false) => [c(17, 19, 24), Color32::WHITE, c(0, 0, 0), c(29, 78, 216), c(226, 228, 232)],
     }
 }
 
@@ -273,6 +287,19 @@ pub fn palette(dark: bool) -> Palette {
 
 pub fn palette_for(look: Look, dark: bool) -> Palette {
     let [accent, on_accent, accent_strong, link, sky] = tint(look, dark);
+    let p = base_palette(dark, accent, on_accent, accent_strong, link, sky);
+    if look != Look::Ink {
+        return p;
+    }
+    // Ink: stronger secondary text and borders, for high contrast.
+    if dark {
+        Palette { bg: Color32::BLACK, surface: Color32::from_rgb(14, 15, 18), weak: Color32::from_rgb(196, 201, 210), border: Color32::from_rgb(92, 98, 110), ..p }
+    } else {
+        Palette { bg: Color32::WHITE, surface: Color32::WHITE, weak: Color32::from_rgb(52, 58, 68), border: Color32::from_rgb(120, 126, 136), ..p }
+    }
+}
+
+fn base_palette(dark: bool, accent: Color32, on_accent: Color32, accent_strong: Color32, link: Color32, sky: Color32) -> Palette {
     if dark {
         Palette {
             bg: Color32::from_rgb(17, 19, 24),

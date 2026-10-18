@@ -645,7 +645,7 @@ impl App {
     }
 
     /// Download card shown while OpenCode isn't installed.
-    fn opencode_install_ui(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn opencode_install_ui(&mut self, ui: &mut egui::Ui) {
         use crate::ask_opencode::{RELEASE, ZIP_SIZE};
         let p = pal(ui);
         let mb = |b: u64| b as f32 / 1_048_576.0;
@@ -901,7 +901,11 @@ impl App {
                 } else if self.ask.turns.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.add_space(24.0);
-                        ui.label(RichText::new("💬").size(44.0).color(p.weak));
+                        if crate::theme::chibi() == crate::theme::Chibi::Off {
+                            ui.label(RichText::new("💬").size(44.0).color(p.weak));
+                        } else {
+                            crate::ui_util::chibi(ui, 5, 110.0);
+                        }
                         ui.label(semibold("What do you want to know?", 20.0));
                         let who = if self.ask.backend == Backend::OpenCode { "A free model (via OpenCode)" } else { "Claude" };
                         ui.label(
@@ -968,32 +972,23 @@ impl App {
         }
     }
 
+    /// The Ask tab's side panel: who answers (changed in Settings → AI assistant) and this
+    /// conversation.
     fn ask_settings(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
         let busy = self.ask_busy();
-        let s = &mut self.ask;
         filter_heading(ui, "Answered by");
-        let before = s.backend;
-        ui.add_enabled_ui(!busy, |ui| {
-            ui.radio_value(&mut s.backend, Backend::OpenCode, "🆓 OpenCode · free models");
-            ui.radio_value(&mut s.backend, Backend::ClaudeApi, "🔑 Claude API · your key");
-        });
-        if s.backend != before {
-            crate::settings::set("ask_backend", json!(if s.backend == Backend::OpenCode { "opencode" } else { "claude_api" }));
+        let (who, detail) = match self.ask.backend {
+            Backend::OpenCode => ("🆓 OpenCode · free model", self.ask.oc.model.trim_start_matches("opencode/").to_string()),
+            Backend::ClaudeApi => ("🔑 Claude API · your key", MODELS[self.ask.model].1.to_string()),
+        };
+        ui.label(semibold(who, 14.0));
+        ui.label(RichText::new(detail).size(12.5).color(p.weak));
+        if self.ask.backend == Backend::OpenCode && self.ask.oc.exe.is_none() {
+            ui.label(RichText::new("OpenCode isn't installed yet: the download is in the chat area.").size(12.5).color(p.warn));
         }
-
-        if s.backend == Backend::OpenCode && s.oc.exe.is_none() {
-            ui.add_space(8.0);
-            if s.turns.is_empty() {
-                // The chat area shows the download card.
-                ui.label(RichText::new("OpenCode isn't installed yet. Use the download button on the left.").size(12.5).color(p.weak));
-            } else {
-                self.opencode_install_ui(ui);
-            }
-        } else if s.backend == Backend::OpenCode {
-            Self::opencode_settings(ui, s);
-        } else {
-            Self::claude_api_settings(ui, s);
+        if ui.add(egui::Button::new("⚙ Change model or key").min_size(vec2(0.0, 28.0))).on_hover_text("Settings → AI assistant").clicked() {
+            self.open_settings(crate::settings_page::SettingsPage::Ai);
         }
         let s = &mut self.ask;
 
@@ -1021,7 +1016,7 @@ impl App {
         }
     }
 
-    fn opencode_settings(ui: &mut egui::Ui, s: &mut AskState) {
+    pub(crate) fn opencode_settings(ui: &mut egui::Ui, s: &mut AskState) {
         let p = pal(ui);
         let Some(exe) = s.oc.exe.clone() else { return };
         if s.oc.models.is_empty() && s.oc.models_rx.is_none() {
@@ -1071,7 +1066,7 @@ impl App {
         );
     }
 
-    fn claude_api_settings(ui: &mut egui::Ui, s: &mut AskState) {
+    pub(crate) fn claude_api_settings(ui: &mut egui::Ui, s: &mut AskState) {
         let p = pal(ui);
         filter_heading(ui, "Model");
         for (i, (_, label, _)) in MODELS.iter().enumerate() {
@@ -1086,7 +1081,7 @@ impl App {
         ui.label(RichText::new("Higher effort thinks longer and costs more.").size(12.0).color(p.weak));
 
         filter_heading(ui, "API key");
-        let has_key = !s.auth_label().starts_with("none");
+        let has_key = s.auth_label() != "no key set yet";
         badge(ui, format!("{} {}", if has_key { "✔" } else { "✖" }, s.auth_label()), if has_key { p.accent } else { pal(ui).warn });
         ui.add_space(4.0);
         ui.add(egui::TextEdit::singleline(&mut s.key_input).password(true).hint_text("sk-ant-…").desired_width(f32::INFINITY));

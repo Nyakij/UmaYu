@@ -1,4 +1,4 @@
-//! Setup: the first-run wizard, and the ⚙ menu's profile actions. Either load a saved profile
+//! Setup: the first-run wizard, and Settings → Profile's actions. Either load a saved profile
 //! (`profile.rs`), or click the umas and support cards you own. It opens by itself when the
 //! roster is empty, and replaces the page until it's finished or skipped. Every click is saved to
 //! `account/` straight away.
@@ -41,7 +41,7 @@ pub(crate) struct OnboardingState {
     pub path: String,
     /// A profile picked to import, waiting for the user to confirm.
     pub pending: Option<(PathBuf, Profile)>,
-    /// The ⚙ menu's "Start over" confirmation is showing.
+    /// Settings → Profile's "Start over" confirmation is showing.
     pub confirm_start_over: bool,
     /// Setup went the "Load a profile" way, so its steps read Welcome › Load › Done.
     pub via_import: bool,
@@ -90,14 +90,10 @@ impl App {
         self.roster.profile.clone().unwrap_or_else(|| "My account".into())
     }
 
-    /// ⚙ → Save my data: write the account to profiles/ and show it in Explorer.
+    /// Settings → Profile → Save my data: write the account to profiles/.
     pub(crate) fn export_profile(&self) -> Result<PathBuf, String> {
         let root = self.root.as_ref().ok_or("umaLord folder not found.")?;
-        let path = profile::export(root, &self.profile_name(), &today())?;
-        let mut cmd = std::process::Command::new("explorer.exe");
-        cmd.arg(format!("/select,{}", path.display()));
-        let _ = cmd.spawn();
-        Ok(path)
+        profile::export(root, &self.profile_name(), &today())
     }
 
     fn import_profile(&mut self, p: &Profile) -> Result<String, String> {
@@ -233,7 +229,7 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let label = if self.roster.is_empty() { "Skip for now" } else { "✖ Close" };
-                let hover = if self.roster.is_empty() { "Look around first. ⚙ → Set up opens this again." } else { "Back to the app" };
+                let hover = if self.roster.is_empty() { "Look around first. ⚙ Settings → Profile → Set up my collection opens this again." } else { "Back to the app" };
                 if ui.button(label).on_hover_text(hover).clicked() {
                     self.onboarding.open = false;
                 }
@@ -282,12 +278,12 @@ impl App {
                 });
             });
             ui.add_space(10.0);
-            ui.label(RichText::new("Everything stays on this computer, in the account folder next to the app. ⚙ → Save my data writes it to one file you can keep or share.").size(12.5).color(p.weak));
+            ui.label(RichText::new("Everything stays on this computer, in the account folder next to the app. ⚙ Settings → Profile → Save my data writes it to one file you can keep or share.").size(12.5).color(p.weak));
         });
         if !self.roster.is_empty() {
             ui.add_space(8.0);
             ui.label(RichText::new(format!(
-                "This app already has {} umas and {} cards ({}). Setting up from scratch adds to them; ⚙ → Start over empties them first.",
+                "This app already has {} umas and {} cards ({}). Setting up from scratch adds to them; ⚙ Settings → Profile → Start over empties them first.",
                 self.roster.umas.len(),
                 self.roster.cards.len(),
                 self.profile_name()
@@ -689,7 +685,7 @@ impl App {
             ui.label(RichText::new("Next:").color(p.weak));
             ui.label("• 🏇 Career → Plan: pick the next Champions Meeting and a trainee; ✨ fills a deck and picks skills, starting from the community's meta picks.");
             ui.label("• 📚 Collection: everything you own, with effects at your level. ＋ Add cards and ＋ Add umas record new pulls.");
-            ui.label("• ⚙ → Save my data: one file with your whole account, to keep as a backup or move to another computer.");
+            ui.label("• ⚙ Settings → Profile → Save my data: one file with your whole account, to keep as a backup or move to another computer.");
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui.add(crate::ui_util::primary_button(ui, "🏇 Plan a career", 15.0).min_size(vec2(0.0, 32.0))).clicked() {
@@ -707,7 +703,7 @@ impl App {
         });
     }
 
-    /// ⚙ → Start over: confirm, back up, empty, and open setup.
+    /// Settings → Profile → Start over: confirm, back up, empty, and open setup.
     pub(crate) fn start_over_dialog(&mut self, ctx: &egui::Context) {
         if !self.onboarding.confirm_start_over {
             return;
@@ -724,7 +720,7 @@ impl App {
                 self.roster.umas.len(),
                 self.roster.cards.len()
             ));
-            ui.label(RichText::new("They're saved to profiles/backups first, so ⚙ → Load a profile can bring them back.").color(p.weak));
+            ui.label(RichText::new("They're saved to profiles/backups first, so ⚙ Settings → Profile → Load a profile can bring them back.").color(p.weak));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.add(egui::Button::new(RichText::new("⚠ Back up and start over").color(Color32::WHITE)).fill(pal(ui).warn.gamma_multiply(0.85))).clicked() {

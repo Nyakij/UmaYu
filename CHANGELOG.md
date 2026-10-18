@@ -6,6 +6,9 @@ What changed in each release. Releases are built from the tagged source by GitHu
 
 ### Added
 
+- **Settings** is now a proper window (⚙ or Ctrl+,) with five sections: Profile (rename the account, save, load, start over), Appearance (mode, themes with live previews, Seiun Sky, size and spacing), Data and updates (how old the game data and meta sheet are, and how to refresh them), AI assistant (the Ask tab's backend, model and key, moved out of the Ask tab), and About. Help has its own ? button.
+- **Two new themes:** Track day (trophy gold with a racetrack's rails) and Ink (high contrast black and white).
+- **Size and spacing:** make everything 90–125% as big, and switch to compact spacing.
 - **System mode:** the app can follow Windows' dark or light setting.
 - **Keyboard shortcuts:** Ctrl+1 to Ctrl+4 switch tabs, Ctrl+F jumps to the search box, Ctrl+S saves the plan, F5 reloads, Esc closes things, and ? opens Help. Help lists them.
 - Messages like "Saved" now pop up at the bottom of the window and fade away, instead of pushing the page around. A saved profile's message has a "Show" button that opens its folder.
@@ -19,6 +22,8 @@ What changed in each release. Releases are built from the tagged source by GitHu
 
 ### Fixed
 
+- The Claude API key badge said a key was set even when none was.
+- Save my data no longer opens Explorer by itself; its message has a Show button instead.
 - Showing a profile with `UMALORD_PROFILE` (for screenshots) no longer overwrites the Ask tab's roster digest with that profile's roster.
 
 ## [0.1.1] - 2026-10-18

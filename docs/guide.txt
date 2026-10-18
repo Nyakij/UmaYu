@@ -24,14 +24,14 @@ The app starts empty and opens Setup, which offers two ways in:
   or drag it onto the app's window, then click Choose and Load this profile.
 - Set up from scratch: click every uma and support card you own (they light up), then click
   one again to set its stars and potential, or a card's limit break.
-Settings (the cog, top right) > Profile can save your data to one file (Save my data), load
+Settings (the cog, top right) > Profile can rename the account, save your data to one file (Save my data), load
 another profile, reopen Setup, or empty the app (Start over). Loading a profile or starting
 over saves what was there to profiles\backups first, so nothing is lost.
 
 
 Tabs
 ----
-New to the app? Open the settings cog (top right) and press "Help": it explains every tab,
+New to the app? Press the ? button (top right) for Help: it explains every tab,
 the steps to plan a career, and the game words the app uses.
 
 - Home: shortcuts to common jobs, the next Champions Meeting ("Plan for it" starts a plan
@@ -85,7 +85,7 @@ the steps to plan a career, and the game words the app uses.
 - Career > Results: log careers, Team Trials, Champions Meeting, League of Heroes and
   sparks.
 - Notes and files: read the notes, plans and logs. It isn't a tab any more: open it from
-  the settings cog, under Advanced ("Browse notes and data files").
+  Settings > Data and updates ("Browse notes and data files").
 - Long dropdowns (trainees, courses, skills, models) have a search box: type to filter,
   and delete the text to see the whole list again.
 - Ask: ask questions about your account in plain English. There are two ways to answer:
@@ -97,18 +97,24 @@ the steps to plan a career, and the game words the app uses.
       tools\opencode.
     - It is read-only: it can read your files but can't change anything.
     - Free models are only offered for a limited time and are weaker than Claude. Pick one
-      in the tab. The note under the model says whether your questions are kept.
+      in Settings > AI assistant. The note under the model says whether your questions are
+      kept.
   - Claude API gives better answers but needs your own Anthropic API key from
-    https://console.anthropic.com, and use is billed to that key. Paste the key into the
-    tab, or set the ANTHROPIC_API_KEY environment variable.
+    https://console.anthropic.com, and use is billed to that key. Paste the key into
+    Settings > AI assistant, or set the ANTHROPIC_API_KEY environment variable.
 
 
-The settings cog at the top right holds Help, the mode (System follows Windows, or always
-Light or Dark), four colour themes (Seiun Sky, Sakura, Sunset and Starry night, each with
-its own button colour and background), a switch for the sky and decorations behind the
-pages, and where chibi Seiun Sky appears: everywhere (small, beside each page title), on
-Home and empty pages only, or nowhere. She never covers your data. The app remembers your
-choices.
+Settings (the cog at the top right, or Ctrl+comma) has five sections. Everything saves as
+you change it.
+- Profile: your trainer name, the data folder, and saving, loading or emptying the account.
+- Appearance: the mode (System follows Windows, or always Light or Dark), six colour themes
+  (Seiun Sky, Sakura, Sunset, Starry night, Track day and the high-contrast Ink), the sky
+  and decorations behind the pages, where chibi Seiun Sky appears (everywhere, small beside
+  each page title; on Home and empty pages only; or nowhere: she never covers your data),
+  the size of everything, and comfortable or compact spacing.
+- Data and updates: how old the game data and the meta sheet are, and how to refresh them.
+- AI assistant: who answers on the Ask tab, the model, and your API key.
+- About: the version, credits, license and keyboard shortcuts.
 
 Messages such as "Saved" pop up at the bottom of the window for a few seconds.
 
