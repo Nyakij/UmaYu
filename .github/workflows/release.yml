@@ -1,0 +1,43 @@
+# Push a tag like v0.1.1 to build, test and package the app, and publish it as a GitHub
+# release. The notes come from that version's section of CHANGELOG.md, plus
+# .github/release-footer.md (how to install).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+      - name: Build and test
+        working-directory: app
+        run: |
+          cargo build --release --locked
+          cargo test --release --locked
+      - name: Package
+        shell: pwsh
+        run: ./tools/package.ps1 -Version "${{ github.ref_name }}"
+      - name: Release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $section = [regex]::Match($changelog, "(?ms)^## \[$([regex]::Escape($version))\][^\n]*\n(.*?)(?=^## \[|\z)")
+          $notes = if ($section.Success) { $section.Groups[1].Value.Trim() } else { "See CHANGELOG.md." }
+          $footer = Get-Content .github/release-footer.md -Raw
+          "$notes`n`n$footer" | Set-Content release-notes.md -Encoding utf8
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "dist/umaLord-${{ github.ref_name }}.zip" --title "umaLord ${{ github.ref_name }}" --notes-file release-notes.md

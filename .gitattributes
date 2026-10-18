@@ -1,0 +1,9 @@
+# Text files are stored with LF line endings; Git converts them on checkout.
+* text=auto
+*.png binary
+*.jpg binary
+*.webp binary
+*.exe binary
+
+# Written by tools/update_knowledge.py: collapsed in diffs and left out of language stats.
+knowledge/data/** linguist-generated=true

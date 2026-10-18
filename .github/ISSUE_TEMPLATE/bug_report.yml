@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in umaLord doesn't work, looks wrong, or crashes.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Issues are public, so please don't attach your `.umalord.json` profile or account files unless you're happy for anyone to see them.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which release you're running (the zip's name, e.g. umaLord-v0.1.1.zip).
+      placeholder: v0.1.1
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: "In Career → Plan, I clicked ✨ Auto-pick and …"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Career → Plan
+        2. Pick the Capricorn Cup and Oguri Cap
+        3. …
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag images here. They help a lot for layout problems.
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11

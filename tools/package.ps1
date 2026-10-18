@@ -2,8 +2,10 @@
 # and logs. Leaves out build output, the toolchain hardlinks in app\.cargo, and profiles\
 # (saved accounts and backups). -IncludeProfile puts one profile in the zip's profiles\ folder,
 # so whoever gets it can load it from the first-run setup with one click.
-#   powershell -ExecutionPolicy Bypass -File tools\package.ps1 [-Build] [-IncludeProfile profiles\<name>.umalord.json]
-param([switch]$Build, [string]$IncludeProfile)
+# -Version v0.1.1 names the zip umaLord-v0.1.1.zip (the release workflow passes the tag);
+# without it the zip is named by date.
+#   powershell -ExecutionPolicy Bypass -File tools\package.ps1 [-Build] [-Version v0.1.1] [-IncludeProfile profiles\<name>.umalord.json]
+param([switch]$Build, [string]$Version, [string]$IncludeProfile)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
@@ -44,7 +46,8 @@ if ($IncludeProfile) {
     Copy-Item $src (Join-Path $stage 'profiles')
 }
 
-$zip = Join-Path $dist "umaLord-$(Get-Date -Format yyyy-MM-dd).zip"
+$label = if ($Version) { $Version } else { Get-Date -Format yyyy-MM-dd }
+$zip = Join-Path $dist "umaLord-$label.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $stage -DestinationPath $zip
 '{0}  ({1:N1} MB, {2} files)' -f $zip, ((Get-Item $zip).Length / 1MB), (Get-ChildItem $stage -Recurse -File).Count

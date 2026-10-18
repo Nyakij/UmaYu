@@ -378,6 +378,8 @@ mod tests {
     #[test]
     fn results_files_have_tables() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        // A fresh clone has no results/ until the app first runs.
+        crate::profile::ensure_account(root).unwrap();
         for (label, file) in LOGS {
             let text = std::fs::read_to_string(root.join(file)).unwrap();
             assert!(!tables(&text).is_empty(), "{label}: {file} has no table");

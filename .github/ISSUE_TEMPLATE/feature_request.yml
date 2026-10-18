@@ -1,0 +1,21 @@
+name: Idea or request
+description: Something umaLord could do, or do better.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe it in your own words. What are you trying to do in the game?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: For example, which Champions Meeting, career or decision it would have helped with.
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources
+      description: Guides, sheets or sites with the data or advice this would use, if any.

@@ -1,6 +1,6 @@
 [package]
 name = "umalord"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Account-aware Uma Musume knowledge base, career planner and results log (reads ../account, ../knowledge/data, ../plans, ../results)"
 

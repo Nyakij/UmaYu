@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/brickc4/umaLord/releases/latest"><img src="https://img.shields.io/github/v/release/brickc4/umaLord?label=download&color=60a5fa" alt="Download"></a>
+  <a href="https://github.com/brickc4/umaLord/actions/workflows/ci.yml"><img src="https://github.com/brickc4/umaLord/actions/workflows/ci.yml/badge.svg" alt="Build and tests"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0e6ebe" alt="Windows 10 | 11">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20egui-b7410e" alt="Built with Rust and egui">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-a78bfa" alt="GPL-3.0-or-later"></a>
@@ -56,6 +57,8 @@
 
 Needs Windows 10 or 11, 64-bit. Your data stays on your computer, in the `account` folder next to the app.
 
+Every release is built and tested by [GitHub Actions](https://github.com/brickc4/umaLord/actions) from the tagged source. What changed is in the [changelog](CHANGELOG.md).
+
 ## Themes
 
 ![Home in each theme: Seiun Sky, Sakura (light), Sunset and Starry night](docs/screenshots/themes.jpg)
@@ -84,7 +87,20 @@ Game data lives in `knowledge/data/`. To refresh it from uma.guide, umalator.app
 python -I -X utf8 tools/update_knowledge.py
 ```
 
-Add `--only meta` to refresh just the meta sheet. `tools/package.ps1 -Build` makes the release zip; it never includes your account.
+Add `--only meta` to refresh just the meta sheet. `tools/package.ps1 -Build` makes the release zip locally; it never includes your account.
+
+**Releasing:** add the version's section to [CHANGELOG.md](CHANGELOG.md), bump `version` in `app/Cargo.toml`, then push a tag:
+
+```powershell
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+The [Release workflow](.github/workflows/release.yml) builds, tests and packages it, and publishes the release with that changelog section as its notes.
+
+## Bugs and ideas
+
+[Open an issue](https://github.com/brickc4/umaLord/issues/new/choose). There's a short form for bug reports and one for ideas. Issues are public, so don't attach your profile file unless you're happy to share it.
 
 ## Use it with Claude Code
 

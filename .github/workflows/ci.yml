@@ -1,0 +1,30 @@
+# Build and test on every push to main and every pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+      - name: Build
+        working-directory: app
+        run: cargo build --release --locked
+      - name: Test
+        # Includes the race engine's check against umalator.app (sim::tests::matches_moomoolator).
+        working-directory: app
+        run: cargo test --release --locked
+      - name: Check the knowledge updater compiles
+        run: python -m py_compile tools/update_knowledge.py
