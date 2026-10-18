@@ -13,6 +13,7 @@ What changed in each release. Releases are built from the tagged source by GitHu
 
 ### Changed
 
+- The Notes tab is gone from the top bar; open the notes and data files from ⚙ → Advanced → Browse notes and data files. Help links to it too.
 - **Chibi Seiun Sky no longer covers your data.** By default she now stands beside Home's welcome and on empty pages; in ⚙ you can also show her beside every page title, or hide her. The background switch now only turns the sky and decorations on and off.
 - Light mode is easier to read: green, orange, gold, pink, grade letters and card-type names are darker on white, and every status colour passes the WCAG AA contrast check (a test keeps it that way).
 

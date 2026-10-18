@@ -449,6 +449,7 @@ pub(crate) enum Tab {
     /// Planner, race sim and results, as sub-tabs.
     Career,
     Ask,
+    /// The notes and data files: not in the top bar, opened from ⚙ (`App::open_notes`).
     Notes,
 }
 
@@ -532,8 +533,8 @@ const SHORTCUTS: &[(&str, &str)] = &[
     ("?", "Open this Help"),
 ];
 
-/// The top bar's tabs, left to right.
-const TABS: [Tab; 5] = [Tab::Home, Tab::Collection, Tab::Career, Tab::Ask, Tab::Notes];
+/// The top bar's tabs, left to right. Notes isn't one: ⚙ → Browse notes opens it.
+const TABS: [Tab; 4] = [Tab::Home, Tab::Collection, Tab::Career, Tab::Ask];
 
 /// The Collection tab's sub-tabs.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -592,6 +593,8 @@ pub(crate) struct App {
     pub planner: tab_planner::PlannerState,
     pub results: tab_results::ResultsState,
     pub notes: tab_results::NotesState,
+    /// The tab to go back to from the notes page.
+    pub notes_back: Tab,
     pub sim: tab_sim::SimState,
     /// Moomoolator's data for the native simulator (`knowledge/data/sim/`).
     pub sim_data: Option<std::sync::Arc<sim::data::SimData>>,
@@ -678,6 +681,7 @@ impl App {
             ask: ask::AskState::new(root.as_deref()),
             planner: tab_planner::PlannerState::new(root.as_deref()),
             notes: tab_results::NotesState::default(),
+            notes_back: Tab::Home,
             root,
             roster,
             source,
@@ -1069,6 +1073,24 @@ impl App {
             self.onboarding.confirm_start_over = true;
             ui.close();
         }
+        ui.separator();
+        ui.label(RichText::new("ADVANCED").size(11.5).color(p.weak));
+        if row(ui, "📝 Browse notes and data files", "read-only")
+            .on_hover_text("Read the markdown files in this folder: insights, plans, results, your roster files and the knowledge notes")
+            .clicked()
+        {
+            self.open_notes();
+            ui.close();
+        }
+    }
+
+    /// Open the notes page; its Back button returns to the page you were on.
+    pub fn open_notes(&mut self) {
+        if self.tab != Tab::Notes {
+            self.notes_back = self.tab;
+        }
+        self.tab = Tab::Notes;
+        self.onboarding.open = false;
     }
 
     /// Switch dark, light or System, and save it.
@@ -1368,6 +1390,12 @@ impl App {
                             }
                         }
                     }
+                    let mut notes = |ui: &mut egui::Ui| {
+                        if ui.link(semibold("📝 Notes and files", 14.0)).on_hover_text("Go there").clicked() {
+                            go = Some((Tab::Notes, None));
+                        }
+                    };
+                    row(ui, &mut notes, RichText::new("Read the markdown files in this folder: insights, plans, results and your roster files. It's in ⚙ → Advanced.").color(p.weak));
                     ui.add_space(10.0);
                     ui.label(semibold("Planning a career, start to finish", 16.0));
                     for (n, step) in [
@@ -1402,7 +1430,11 @@ impl App {
                 });
             });
         if let Some((tab, page)) = go {
-            self.tab = tab;
+            if tab == Tab::Notes {
+                self.open_notes();
+            } else {
+                self.tab = tab;
+            }
             if let Some(page) = page {
                 self.career_tab = page;
             }

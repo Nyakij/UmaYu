@@ -29,7 +29,6 @@ pub(crate) struct ResultsState {
     headers: Vec<String>,
     rows: Vec<Vec<String>>,
     form: Vec<String>,
-    status: Option<(String, bool)>,
 }
 
 #[derive(Default)]
@@ -84,7 +83,6 @@ impl App {
                     .min_size(vec2(ui.available_width(), 30.0));
                 if ui.add(b).clicked() {
                     self.results.log = i;
-                    self.results.status = None;
                 }
             }
             ui.add_space(12.0);
@@ -154,9 +152,6 @@ impl App {
                     self.results.loaded = None;
                 }
             });
-            if let Some((msg, err)) = &self.results.status {
-                ui.label(RichText::new(msg).color(if *err { pal(ui).warn } else { pal(ui).good }));
-            }
         });
 
         ui.add_space(4.0);
@@ -258,18 +253,18 @@ impl App {
     fn add_result(&mut self) {
         let Some(root) = self.root.clone() else { return };
         if self.results.form.iter().filter(|f| !f.trim().is_empty()).count() <= 1 {
-            self.results.status = Some(("Fill in more than the date.".into(), true));
+            self.toast("Fill in more than the date.", crate::ui_util::ToastKind::Warn);
             return;
         }
         let path = root.join(LOGS[self.results.log].1);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         match insert_row(&text, &self.results.form).map(|t| std::fs::write(&path, t)) {
             Some(Ok(())) => {
-                self.results.status = Some(("Added. Ask Claude to compare it with the plan and update insights.md.".into(), false));
+                self.toast("Added. Ask Claude to compare it with the plan and update insights.md.", crate::ui_util::ToastKind::Success);
                 self.results.loaded = None;
             }
-            Some(Err(e)) => self.results.status = Some((format!("Couldn't write: {e}"), true)),
-            None => self.results.status = Some(("No table found in the file.".into(), true)),
+            Some(Err(e)) => self.toast(format!("Couldn't write: {e}"), crate::ui_util::ToastKind::Error),
+            None => self.toast("No table found in the file.", crate::ui_util::ToastKind::Warn),
         }
     }
 
@@ -336,7 +331,9 @@ impl App {
             let mut reload = false;
             let shown = display_path(self.root.as_deref(), &path);
             let where_ = if shown == name { "In the main umaLord folder".to_string() } else { format!("Saved at {shown}") };
+            let mut back = false;
             page_header(ui, &format!("📝 {name}"), &where_, |ui| {
+                back = ui.add(egui::Button::new("← Back").min_size(vec2(0.0, 30.0))).on_hover_text("Back to the page you were on").clicked();
                 reload = ui.add(egui::Button::new("🔄 Reload").min_size(vec2(0.0, 30.0))).on_hover_text("Read the file again from disk").clicked();
                 if ui.add(egui::Button::new("↗ Open in editor").min_size(vec2(0.0, 30.0))).on_hover_text("Open it in your default program for .md files").clicked() {
                     open_url(&path.to_string_lossy());
@@ -344,6 +341,9 @@ impl App {
             });
             if reload {
                 self.notes.loaded = None;
+            }
+            if back {
+                self.tab = self.notes_back;
             }
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.set_max_width(1000.0);

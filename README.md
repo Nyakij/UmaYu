@@ -28,7 +28,7 @@
 | 📚 **Collection** | Your umas and support cards, with effects at your limit break and level, the skills they teach, and their events. |
 | ✨ **Set up in minutes** | Click the umas and cards you own, or load a profile file someone saved for you. ⚙ → Save my data puts your whole account in one file. |
 | 💬 **Ask** | Questions about your roster in plain English, answered by a free OpenCode model or your own Claude API key. |
-| 🎨 **Themes** | Seiun Sky, Sakura, Sunset and Starry night, in dark or light. |
+| 🎨 **Themes** | Seiun Sky, Sakura, Sunset and Starry night, in dark or light, or following Windows. |
 
 <table>
   <tr>

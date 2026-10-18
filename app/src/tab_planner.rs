@@ -551,7 +551,7 @@ impl App {
                     self.planner.open_file = Some(path);
                     self.planner.skill_status = None;
                 }
-                _ => self.toast("That plan has no app data block (written by hand?). Open it in Notes.", crate::ui_util::ToastKind::Warn),
+                _ => self.toast("That plan has no app data block (written by hand?). Read it in ⚙ → Browse notes and data files.", crate::ui_util::ToastKind::Warn),
             }
         }
     }

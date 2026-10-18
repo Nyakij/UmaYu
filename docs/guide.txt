@@ -84,7 +84,8 @@ the steps to plan a career, and the game words the app uses.
     "Load from Planner" loads the plan's build.
 - Career > Results: log careers, Team Trials, Champions Meeting, League of Heroes and
   sparks.
-- Notes: read the notes, plans and logs.
+- Notes and files: read the notes, plans and logs. It isn't a tab any more: open it from
+  the settings cog, under Advanced ("Browse notes and data files").
 - Long dropdowns (trainees, courses, skills, models) have a search box: type to filter,
   and delete the text to see the whole list again.
 - Ask: ask questions about your account in plain English. There are two ways to answer:
