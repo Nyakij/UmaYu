@@ -10,6 +10,7 @@ mod ask_opencode;
 mod career;
 mod data;
 mod charts;
+mod collection_kit;
 mod digest;
 mod home;
 mod knowledge;
@@ -592,7 +593,7 @@ pub(crate) enum View {
 }
 
 /// Navigation requested from inside a borrowed UI closure; applied at the end of the frame.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Jump {
     Uma(u32),
     Card(u32),
@@ -652,6 +653,8 @@ pub(crate) struct App {
     pub live: live::LiveState,
     /// Home's derived data and daily picks.
     pub home: home::HomeState,
+    /// UMALORD_RAIL: start with the Collection filters folded, for screenshots.
+    pub debug_rail: bool,
     /// First-run setup, and Settings → Profile's actions.
     pub onboarding: onboarding::OnboardingState,
     screenshot_to: Option<PathBuf>,
@@ -757,6 +760,7 @@ impl App {
             settings: Default::default(),
             live: Default::default(),
             home: Default::default(),
+            debug_rail: false,
             screenshot_to: env("UMALORD_SCREENSHOT").map(PathBuf::from),
             screenshot_requested: false,
             debug_question: env("UMALORD_ASK").filter(|q| !q.trim().is_empty()),
@@ -830,14 +834,35 @@ impl App {
         if let Some(id) = env("UMALORD_ADD").and_then(|s| s.parse::<u32>().ok()) {
             app.tab = Tab::Collection;
             app.collection_tab = CollectionTab::Cards;
-            let a = &mut app.cards.add;
+            let mut a = std::mem::take(&mut app.cards.add);
             a.open = true;
-            a.pick = Some(id);
-            a.lb = 0;
-            a.level = data::Rarity::from_id(id).map_or(1, |r| r.max_level(0));
+            app.pick_add_card(&mut a, id);
+            app.cards.add = a;
         }
         if env("UMALORD_VIEW").as_deref() == Some("table") {
             app.view = View::Table;
+        }
+        // UMALORD_COMPARE=<card id>,<card id>: open the Compare cards window.
+        if let Some(ids) = env("UMALORD_COMPARE") {
+            for id in ids.split(',').filter_map(|s| s.trim().parse::<u32>().ok()) {
+                app.toggle_compare(id);
+            }
+        }
+        // UMALORD_COURSE=cm: the Skills course filter on the next Champions Meeting.
+        if env("UMALORD_COURSE").as_deref() == Some("cm")
+            && let Some(e) = app.kb.upcoming_cms(&ui_util::today()).first().copied().cloned()
+        {
+            app.skills.course = Some(tab_skills::CourseCheck {
+                course: e.course,
+                conditions: [e.ground, e.weather, e.season, e.time],
+                cm: Some(e.name.clone()),
+                disabled: e.disabled_skills.clone(),
+                label: format!("the {}", e.name),
+            });
+        }
+        // UMALORD_RAIL=1: fold the Collection filters into the rail (in memory only).
+        if env("UMALORD_RAIL").as_deref() == Some("1") {
+            app.debug_rail = true;
         }
         if let Some(id) = env("UMALORD_SELECT").and_then(|s| s.parse::<u32>().ok()) {
             match (app.tab, app.career_tab) {

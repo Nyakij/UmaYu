@@ -123,7 +123,6 @@ pub fn grade_rank(g: &str) -> u8 {
     }
 }
 
-pub const GRADES: [&str; 8] = ["S", "A", "B", "C", "D", "E", "F", "G"];
 
 #[derive(Deserialize, Clone, Debug, Default)]
 pub struct Aptitude {

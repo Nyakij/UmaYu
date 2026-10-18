@@ -4,10 +4,13 @@ use eframe::egui::{self, Margin, RichText};
 
 use crate::theme::pal;
 use crate::ui_util::{segmented, semibold};
-use crate::{App, CollectionTab, View};
+use crate::{App, CollectionTab};
 
 impl App {
     pub(crate) fn collection_tab(&mut self, ui: &mut egui::Ui) {
+        if std::mem::take(&mut self.debug_rail) {
+            crate::collection_kit::fold_all_in_memory(ui.ctx());
+        }
         egui::Panel::top("collection_bar")
             .frame(egui::Frame::new().inner_margin(Margin { left: 14, right: 18, top: 12, bottom: 10 }))
             .show(ui, |ui| self.collection_bar(ui));
@@ -21,7 +24,6 @@ impl App {
     /// Title, the three sub-tabs, a line on what the open one shows, and its actions.
     fn collection_bar(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
-        let available = self.kb.skills.keys().filter(|id| self.skill_available(**id)).count();
         ui.horizontal(|ui| {
             ui.set_min_height(34.0);
             ui.label(semibold("📚 Collection", 22.0));
@@ -29,7 +31,7 @@ impl App {
             let options = [
                 (CollectionTab::Umas, format!("🐴 Umas  {}", self.roster.umas.len()), "The umas you own"),
                 (CollectionTab::Cards, format!("🃏 Support cards  {}", self.roster.cards.len()), "The support cards you own"),
-                (CollectionTab::Skills, format!("⚡ Skills  {available}"), "Every skill in the game, and which ones you can get"),
+                (CollectionTab::Skills, "⚡ Skills".to_string(), "Every skill in the game, and which ones you can get"),
             ];
             segmented(ui, &mut self.collection_tab, &options);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -46,18 +48,12 @@ impl App {
                         self.open_setup(crate::onboarding::Step::Umas);
                     }
                 }
-                if matches!(self.collection_tab, CollectionTab::Umas | CollectionTab::Cards) {
-                    let views = [(View::Grid, "▦ Pictures".to_string(), "Show art tiles"), (View::Table, "☰ Table".to_string(), "Show a sortable table with more columns")];
-                    segmented(ui, &mut self.view, &views);
-                }
             });
         });
         let explain = match self.collection_tab {
-            CollectionTab::Umas => "Click an uma to see her aptitudes, stats, skills and events. Filter on the left, e.g. umas with A or better at Long distance.",
-            CollectionTab::Cards => "Click a card to see its effects at your level, the skills it can teach, and its events. Diamonds under a card show its limit break.",
-            CollectionTab::Skills => {
-                "Every skill on the Global server. Green names in the last column are umas and cards you own that can give you the skill. Click a skill for details."
-            }
+            CollectionTab::Umas => "Click an uma to see her aptitudes, stats, skills and events. Hover one for the numbers; filter on the left, e.g. A or better at Long.",
+            CollectionTab::Cards => "Click a card for its effects at your level, the skills it can teach and its events. Hover one to use it in your plan or compare two.",
+            CollectionTab::Skills => "Every skill on the Global server, and the umas and cards you own that give it. Pick a course on the left to see which can activate there.",
         };
         ui.label(RichText::new(explain).size(13.0).color(p.weak));
     }

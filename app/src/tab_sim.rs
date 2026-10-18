@@ -196,7 +196,7 @@ fn new_seed() -> f64 {
 
 impl App {
     /// Fill an uma's aptitudes from her data for the current course and style.
-    fn fill_aptitudes(&mut self, i: usize) {
+    pub(crate) fn fill_aptitudes(&mut self, i: usize) {
         let Some(course) = self.sim_data.as_ref().and_then(|d| d.courses.get(&self.sim.course)).cloned() else { return };
         let u = &mut self.sim.umas[i];
         let Some(info) = u.outfit.and_then(|o| self.kb.umas.get(&o)) else { return };

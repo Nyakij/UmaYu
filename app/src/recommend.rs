@@ -166,35 +166,12 @@ impl App {
                 return Some(false);
             }
             let data = self.sim_data.as_ref()?;
-            if !data.skills.contains_key(&id) {
-                return None;
-            }
             let setup = self.plan_race_setup();
             let course = data.courses.get(&setup.course?)?;
             let p = &self.planner.plan;
-            let race = crate::sim::run::race_params(
-                i32::from(setup.ground.unwrap_or(1)),
-                i32::from(setup.weather.unwrap_or(1)),
-                i32::from(setup.season.unwrap_or(1)),
-                i32::from(setup.time.unwrap_or(2)),
-                Some(crate::tab_sim::strategy_of(p.style)),
-            );
+            let conditions = [setup.ground.unwrap_or(1), setup.weather.unwrap_or(1), setup.season.unwrap_or(1), setup.time.unwrap_or(2)];
             let stats = if p.target.iter().any(|v| *v > 0) { p.target.map(f64::from) } else { [1000.0; 5] };
-            let desc = crate::sim::params::HorseDesc {
-                speed: stats[0],
-                stamina: stats[1],
-                power: stats[2],
-                guts: stats[3],
-                wisdom: stats[4],
-                strategy: crate::tab_sim::strategy_of(p.style),
-                distance_apt: 1,
-                surface_apt: 1,
-                strategy_apt: 1,
-                mood: 2,
-            };
-            let horse = crate::sim::params::base_stats(&desc);
-            let built = crate::sim::builder::build_skill_data(data, &horse, &race, course, id, crate::sim::solver::Perspective::Mine, 1).ok()?;
-            Some(built.iter().any(|sd| sd.regions.first().is_some_and(|r| r.start < 9999.0)))
+            skill_can_activate(data, course, conditions, stats, crate::tab_sim::strategy_of(p.style), id)
         })();
         let mut cache = self.planner.activation_cache.borrow_mut();
         if cache.0 != key {
@@ -762,6 +739,33 @@ impl RankCache {
         });
         self.job = Some(RankJob { key, rx, cancel });
     }
+}
+
+
+/// Whether a skill's conditions can be met on a course under these conditions (ground, weather,
+/// season, time of day, as the simulator numbers them) for one running style, by the simulator's
+/// condition engine. `None` when the simulator lacks the skill (mostly scenario skills).
+pub(crate) fn skill_can_activate(data: &crate::sim::data::SimData, course: &crate::sim::course::Course, conditions: [u8; 4], stats: [f64; 5], strategy: i32, id: u32) -> Option<bool> {
+    if !data.skills.contains_key(&id) {
+        return None;
+    }
+    let [ground, weather, season, time] = conditions.map(i32::from);
+    let race = crate::sim::run::race_params(ground, weather, season, time, Some(strategy));
+    let desc = crate::sim::params::HorseDesc {
+        speed: stats[0],
+        stamina: stats[1],
+        power: stats[2],
+        guts: stats[3],
+        wisdom: stats[4],
+        strategy,
+        distance_apt: 1,
+        surface_apt: 1,
+        strategy_apt: 1,
+        mood: 2,
+    };
+    let horse = crate::sim::params::base_stats(&desc);
+    let built = crate::sim::builder::build_skill_data(data, &horse, &race, course, id, crate::sim::solver::Perspective::Mine, 1).ok()?;
+    Some(built.iter().any(|sd| sd.regions.first().is_some_and(|r| r.start < 9999.0)))
 }
 
 #[cfg(test)]

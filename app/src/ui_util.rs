@@ -314,17 +314,10 @@ pub fn card_titled_to(ui: &mut egui::Ui, title: &str, bottom: f32, add: impl FnO
 }
 
 /// Small tinted pill with coloured text.
+/// Drawn as one widget, so it keeps its size in any layout (a table cell's included).
 pub fn badge(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) -> Response {
-    egui::Frame::new()
-        .fill(color.gamma_multiply(0.16))
-        .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
-        .corner_radius(CornerRadius::same(10))
-        .inner_margin(Margin::symmetric(8, 1))
-        .show(ui, |ui| {
-            let text_color = readable(ui, color);
-            ui.label(RichText::new(text.into()).color(text_color).size(size::SM))
-        })
-        .response
+    let text = RichText::new(text.into()).color(readable(ui, color)).size(size::SM);
+    pill_padded(ui, text, color.gamma_multiply(0.16), Stroke::new(1.0, color.gamma_multiply(0.45)), vec2(16.0, 4.0))
 }
 
 /// `color` as text: unchanged in dark mode; in light mode darkened until it reads on a card
@@ -347,8 +340,12 @@ pub fn readable(ui: &egui::Ui, color: Color32) -> Color32 {
 /// A rounded pill with text, as one widget, so it wraps whole in a wrapping row (a Frame with a
 /// label inside can't, since its size is only known after it's placed).
 pub fn pill(ui: &mut egui::Ui, text: RichText, fill: Color32, stroke: Stroke) -> Response {
+    pill_padded(ui, text, fill, stroke, vec2(16.0, 6.0))
+}
+
+fn pill_padded(ui: &mut egui::Ui, text: RichText, fill: Color32, stroke: Stroke, pad: Vec2) -> Response {
     let galley = egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
-    let size = galley.size() + vec2(16.0, 6.0);
+    let size = galley.size() + pad;
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
         ui.painter().rect(rect, CornerRadius::same(10), fill, stroke, StrokeKind::Inside);
@@ -375,24 +372,18 @@ pub fn grade_badge(ui: &mut egui::Ui, label: &str, grade: &str) {
     });
 }
 
-/// Inline grade, e.g. in tables: the letter in its colour, darker in light mode so it reads.
-pub fn grade_text(ui: &egui::Ui, grade: &str) -> RichText {
-    let color = if ui.visuals().dark_mode {
-        grade_color(grade)
-    } else {
-        let c = Color32::from_rgb;
-        match grade_rank(grade) {
-            8 => c(146, 100, 0),
-            7 => c(194, 65, 12),
-            6 => c(190, 24, 93),
-            5 => c(21, 128, 61),
-            4 => c(3, 105, 161),
-            3 => c(109, 40, 217),
-            2 => c(71, 85, 105),
-            _ => c(100, 116, 139),
+/// A grade as a small coloured tile, the same as the detail panel's, for table cells.
+pub fn grade_tile(ui: &mut egui::Ui, grade: &str) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        if grade.is_empty() || grade == "-" {
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, "—", FontId::proportional(size::SM), pal(ui).weak);
+        } else {
+            ui.painter().rect_filled(rect, CornerRadius::same(5), grade_color(grade));
+            ui.painter().text(rect.center(), Align2::CENTER_CENTER, grade, FontId::new(size::BODY, FontFamily::Name(SEMIBOLD.into())), Color32::from_rgb(20, 22, 28));
         }
-    };
-    semibold(grade, size::BODY).color(color)
+    }
+    resp
 }
 
 /// Colour for a skill tier, readable in both themes.
@@ -727,88 +718,6 @@ pub fn chip(ui: &mut egui::Ui, on: bool, label: &str, count: Option<usize>) -> R
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A wrapping row of chips that toggle values in `set`: (value, label, count, hover).
-/// Returns true when the set changed.
-pub fn chip_row<T: std::hash::Hash + Eq + Copy>(ui: &mut egui::Ui, set: &mut HashSet<T>, options: &[(T, String, Option<usize>, &str)]) -> bool {
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-        for (v, label, count, hover) in options {
-            let on = set.contains(v);
-            let mut r = chip(ui, on, label, *count);
-            if !hover.is_empty() {
-                r = r.on_hover_text(*hover);
-            }
-            if r.clicked() {
-                toggle(set, *v, !on);
-                changed = true;
-            }
-        }
-    });
-    changed
-}
-
-/// A wrapping row of chips where exactly one is on: (value, label, hover). Returns true when it
-/// changed.
-pub fn single_chips<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, String, &str)]) -> bool {
-    let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-        for (v, label, hover) in options {
-            let mut r = chip(ui, *value == *v, label, None);
-            if !hover.is_empty() {
-                r = r.on_hover_text(*hover);
-            }
-            if r.clicked() && *value != *v {
-                *value = *v;
-                changed = true;
-            }
-        }
-    });
-    changed
-}
-
-/// "Sort [field ▾] [▼]": the field to sort by and which way. Returns true when either changed.
-/// In a right-to-left row, call it with the row reversed in mind (the arrow comes first).
-pub fn sort_control<T: PartialEq + Copy>(ui: &mut egui::Ui, id_salt: &str, field: &mut T, desc: &mut bool, options: &[(T, &str)]) -> bool {
-    let p = pal(ui);
-    fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id_salt: &str, field: &mut T, options: &[(T, &str)]) -> bool {
-        let mut changed = false;
-        let current = options.iter().find(|(v, _)| v == field).map_or("", |(_, l)| *l);
-        egui::ComboBox::from_id_salt(id_salt).selected_text(current).show_ui(ui, |ui| {
-            for (v, label) in options {
-                if ui.selectable_label(*field == *v, *label).clicked() && *field != *v {
-                    *field = *v;
-                    changed = true;
-                }
-            }
-        });
-        changed
-    }
-    fn arrow(ui: &mut egui::Ui, desc: &mut bool) -> bool {
-        let (text, hover) = if *desc {
-            ("▼", "Descending: highest first (Z to A for names). Click for ascending.")
-        } else {
-            ("▲", "Ascending: lowest first (A to Z for names). Click for descending.")
-        };
-        let clicked = ui.add(egui::Button::new(text).min_size(vec2(26.0, 24.0))).on_hover_text(hover).clicked();
-        if clicked {
-            *desc = !*desc;
-        }
-        clicked
-    }
-    if ui.layout().prefer_right_to_left() {
-        let a = arrow(ui, desc);
-        let c = combo(ui, id_salt, field, options);
-        ui.label(RichText::new("Sort").color(p.weak));
-        a || c
-    } else {
-        ui.label(RichText::new("Sort").color(p.weak));
-        let c = combo(ui, id_salt, field, options);
-        arrow(ui, desc) || c
-    }
-}
-
 /// A collapsible group of filters in a sidebar: its title with an ⓘ hover, a badge with how many
 /// of its filters are on, and a Clear link. Remembers whether it's open for the session.
 pub struct FilterSection<'a> {
@@ -831,12 +740,6 @@ impl<'a> FilterSection<'a> {
     /// How many of this section's filters are on.
     pub fn active(mut self, n: usize) -> Self {
         self.active = n;
-        self
-    }
-
-    /// Start folded.
-    pub fn closed(mut self) -> Self {
-        self.default_open = false;
         self
     }
 
@@ -938,6 +841,8 @@ pub struct TableCol {
     pub optional: bool,
     /// Hidden until the user turns it on.
     pub hidden: bool,
+    /// A super-header over this and its neighbours with the same group, e.g. "Distance".
+    pub group: Option<&'static str>,
 }
 
 impl TableCol {
@@ -952,7 +857,14 @@ impl TableCol {
             desc_first: false,
             optional: false,
             hidden: false,
+            group: None,
         }
+    }
+
+    /// Put the column under a super-header shared with its neighbours.
+    pub fn group(mut self, group: &'static str) -> Self {
+        self.group = Some(group);
+        self
     }
 
     pub fn width(mut self, width: egui_extras::Column) -> Self {
@@ -1036,11 +948,18 @@ pub struct DataTable<'a> {
     sort: Option<&'a mut TableSort>,
     row_height: f32,
     selected: Option<usize>,
+    scroll_to: Option<usize>,
 }
 
 impl<'a> DataTable<'a> {
     pub fn new(id: &'a str, cols: &'a [TableCol]) -> Self {
-        Self { id, cols, sort: None, row_height: 34.0, selected: None }
+        Self { id, cols, sort: None, row_height: 34.0, selected: None, scroll_to: None }
+    }
+
+    /// Scroll so this row is in view (centred), this frame.
+    pub fn scroll_to(mut self, row: Option<usize>) -> Self {
+        self.scroll_to = row;
+        self
     }
 
     pub fn sort(mut self, sort: &'a mut TableSort) -> Self {
@@ -1076,12 +995,35 @@ impl<'a> DataTable<'a> {
         for c in &visible {
             builder = builder.column(c.width);
         }
+        if let Some(r) = self.scroll_to {
+            builder = builder.scroll_to_row(r, Some(egui::Align::Center));
+        }
         let selected = self.selected;
         let row_height = self.row_height;
+        let grouped = visible.iter().any(|c| c.group.is_some());
+        // Header cells so far, for drawing each group's label across its columns.
+        let mut cells: Vec<Rect> = Vec::new();
         builder
-            .header(30.0, |mut header| {
-                for c in &visible {
+            .header(if grouped { 50.0 } else { 30.0 }, |mut header| {
+                for (n, c) in visible.iter().enumerate() {
                     header.col(|ui| {
+                        let cell = ui.max_rect();
+                        cells.push(cell);
+                        if let Some(g) = c.group
+                            && visible.get(n + 1).is_none_or(|next| next.group != Some(g))
+                        {
+                            let first = (0..=n).rev().take_while(|&i| visible[i].group == Some(g)).last().unwrap_or(n);
+                            let span = Rect::from_min_max(cells[first].left_top(), egui::pos2(cell.right(), cell.top() + 20.0));
+                            // A painter of its own: the cell's would clip the label to this one column.
+                            let painter = egui::Painter::new(ui.ctx().clone(), ui.layer_id(), span.expand(1.0));
+                            painter.text(span.center(), Align2::CENTER_CENTER, g.to_uppercase(), FontId::new(size::XS, FontFamily::Name(SEMIBOLD.into())), p.weak);
+                            let y = span.bottom() - 1.0;
+                            painter.line_segment([egui::pos2(span.left() + 6.0, y), egui::pos2(span.right() - 6.0, y)], Stroke::new(1.0, p.border));
+                        }
+                        // With groups, every title sits on the lower line so the baselines match.
+                        let lower = if grouped { Rect::from_min_max(egui::pos2(cell.left(), cell.bottom() - 28.0), cell.right_bottom()) } else { cell };
+                        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(lower).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let ui = &mut ui;
                         with_align(ui, c.align, |ui| {
                             let on = current.is_some_and(|s| s.key == c.key);
                             let arrow = match current {
@@ -1148,7 +1090,7 @@ impl<'a> DataTable<'a> {
 fn with_align(ui: &mut egui::Ui, align: egui::Align, add: impl FnOnce(&mut egui::Ui)) {
     let layout = match align {
         egui::Align::Min => egui::Layout::left_to_right(egui::Align::Center),
-        egui::Align::Center => egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+        egui::Align::Center => egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Center),
         egui::Align::Max => egui::Layout::right_to_left(egui::Align::Center),
     };
     ui.with_layout(layout, add);
@@ -1610,15 +1552,17 @@ mod tests {
             super::TableCol::new("note", "Notes").optional(true),
         ];
         let mut sort = super::TableSort { key: "name", desc: false };
-        let mut set = std::collections::HashSet::from([1]);
-        let mut one = 0;
-        let (mut field, mut desc) = (0, true);
+        let grouped = vec![super::TableCol::new("turf", "Turf").center().group("Surface"), super::TableCol::new("dirt", "Dirt").center().group("Surface")];
+        let mut set = std::collections::BTreeSet::from([1u8]);
+        let mut one = Some(0);
+        let mut sort2 = super::TableSort { key: "stars", desc: true };
         for _ in 0..2 {
             let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
             let _ = ctx.run_ui(input, |ui| {
-                super::chip_row(ui, &mut set, &[(1, "5★".into(), Some(3), "Five stars"), (2, "4★".into(), None, "")]);
-                super::single_chips(ui, &mut one, &[(0, "Any".into(), ""), (1, "P5".into(), "")]);
-                ui.horizontal(|ui| super::sort_control(ui, "s", &mut field, &mut desc, &[(0, "Stars"), (1, "Name")]));
+                crate::collection_kit::chip_set(ui, &mut set, &[(1, "5★".into(), Some(3), None, "Five stars".into()), (2, "4★".into(), None, None, String::new())]);
+                crate::collection_kit::option_chips(ui, &mut one, &[(0, "Any"), (1, "P5")]);
+                ui.horizontal(|ui| crate::collection_kit::sort_picker(ui, "s", &mut sort2, &[("stars", "Stars", true), ("name", "Name", false)]));
+                super::DataTable::new("g", &grouped).show(ui, 2, |ui, _, key| _ = super::grade_tile(ui, if key == "turf" { "A" } else { "G" }));
                 super::FilterSection::new("Stars").help("How many").active(1).show(ui, |ui| _ = ui.label("inside"));
                 super::active_filter_bar(ui, &["Long ≥ A".to_string()]);
                 super::stepper(ui, &["Welcome", "You", "Umas", "Cards", "Done"], 2);

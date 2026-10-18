@@ -771,7 +771,7 @@ fn move_focus(focus: Option<u32>, k: Key, order: &[u32], positions: &[(u32, Rect
 }
 
 /// A limit-break choice as diamonds: ◇◇◇◇ to ◆◆◆◆ (MLB).
-fn lb_button(ui: &mut egui::Ui, lb: u8, on: bool) -> egui::Response {
+pub(crate) fn lb_button(ui: &mut egui::Ui, lb: u8, on: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(if lb == 4 { 82.0 } else { 54.0 }, 24.0), Sense::click());
     let p = pal(ui);
     let painter = ui.painter();

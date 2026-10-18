@@ -1,54 +1,116 @@
 //! Support cards: owned cards with effects at the owned level, hints and events.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::sync::mpsc;
 
-use eframe::egui::{self, Align2, CornerRadius, FontId, Pos2, Rect, Response, RichText, Sense, vec2};
-use egui_extras::{Column, TableBuilder};
+use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, RichText, Sense, Stroke, pos2, vec2};
+use egui_extras::Column;
+use serde::{Deserialize, Serialize};
 
+use crate::collection_kit::{self as kit, SortOption, TileGroup};
 use crate::data::{CardType, Rarity, SupportCard};
 use crate::knowledge::{CardInfo, effect, effect_at};
-use crate::tab_umas::{FILTER_W, count_line};
-use crate::theme::pal;
+use crate::tab_umas::FILTER_W;
+use crate::theme::{pal, size};
 use crate::ui_util::{
-    badge, card_explained, card_titled, draw_lb, empty_state, lb_widget, placeholder, section_label, semibold, tile_grid, tile_ring,
-    toggle, truncate, type_color, type_icon, web_link,
+    DataTable, FilterBarAction, FilterSection, SortKey, TableCol, TableSort, active_filter_bar, badge, card_explained, card_titled, draw_lb,
+    empty_state, lb_widget, placeholder, semibold, sort_rows, tile_ring, truncate, type_color, type_color_str, type_icon, type_text, web_link,
 };
 use crate::{App, Jump, View};
 
 const CARD_W: f32 = 104.0;
 const CARD_H: f32 = CARD_W * 346.0 / 260.0;
 
-#[derive(Clone, Copy, PartialEq, Default)]
-pub(crate) enum LbFilter {
-    #[default]
-    Any,
-    Mlb,
-    NotMlb,
+/// Effect columns: effect id, column key, short title, full name, unit, shown by default.
+pub(crate) const FX: [(u32, &str, &str, &str, &str, bool); 12] = [
+    (effect::FRIENDSHIP, "friendship", "Friendship", "Friendship Bonus", "%", true),
+    (effect::TRAINING, "training", "Training", "Training Effectiveness", "%", true),
+    (effect::SPECIALTY, "specialty", "Specialty", "Specialty Priority", "", true),
+    (effect::RACE, "race", "Race bonus", "Race Bonus", "%", true),
+    (effect::HINT_FREQ, "hint_rate", "Hint rate", "Hint Frequency", "%", true),
+    (effect::MOOD, "mood", "Mood", "Mood Effect", "%", false),
+    (effect::INIT_BOND, "init_bond", "Start bond", "Initial Friendship Gauge (uma.guide: Starting Bond)", "", false),
+    (effect::HINT_LEVELS, "hint_levels", "Hint lv", "Hint Levels", "", false),
+    (effect::FAIL_PROTECT, "fail_protect", "Fail guard", "Failure Protection", "%", false),
+    (effect::ENERGY_COST, "energy", "Energy cut", "Energy Cost Reduction", "%", false),
+    (effect::SKILL_POINTS, "sp_bonus", "SP bonus", "Skill Point Bonus", "", false),
+    (effect::WIT_RECOVERY, "wit_recovery", "Wit recov.", "Wit Friendship Recovery", "", false),
+];
+
+fn fx_of(key: &str) -> Option<&'static (u32, &'static str, &'static str, &'static str, &'static str, bool)> {
+    FX.iter().find(|f| f.1 == key)
 }
 
-#[derive(Clone, Copy, PartialEq, Default)]
-pub(crate) enum CardSort {
-    #[default]
-    Type,
-    Lb,
-    Level,
-    Uma,
-    Newest,
-    /// By the selected support effect at the owned level.
-    Effect,
+fn fx_name(kind: u32) -> &'static str {
+    FX.iter().find(|f| f.0 == kind).map_or("?", |f| f.3)
+}
+
+fn rarity_rank(r: Rarity) -> f64 {
+    match r {
+        Rarity::SSR => 3.0,
+        Rarity::SR => 2.0,
+        Rarity::R => 1.0,
+    }
+}
+
+/// The filters on the Support cards sub-tab. Saved views store this.
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct CardFilter {
+    /// Card type labels ("Speed", "Pal"…).
+    pub types: BTreeSet<String>,
+    pub rarities: BTreeSet<String>,
+    /// Limit breaks 0–4 (4 is MLB).
+    pub lbs: BTreeSet<u8>,
+    pub below_cap: bool,
+    /// Skill ids: cards that can teach any of them.
+    pub teaches: Vec<u32>,
+    /// Only cards that can teach a gold skill.
+    pub gold_only: bool,
+    /// (effect id, lowest value at the owned level).
+    pub minimums: Vec<(u32, i32)>,
+    /// A scenario's name: cards of its linked characters.
+    pub linked: Option<String>,
+}
+
+impl CardFilter {
+    pub fn count(&self) -> usize {
+        self.types.len()
+            + self.rarities.len()
+            + self.lbs.len()
+            + usize::from(self.below_cap)
+            + self.teaches.len()
+            + usize::from(self.gold_only)
+            + self.minimums.len()
+            + usize::from(self.linked.is_some())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CardChip {
+    Search,
+    Type(CardType),
+    Rarity(Rarity),
+    Lb(u8),
+    BelowCap,
+    Teaches(u32),
+    GoldOnly,
+    Minimum(usize),
+    Linked,
 }
 
 pub(crate) struct CardsState {
     pub search: String,
-    pub types: HashSet<CardType>,
-    pub rarities: HashSet<Rarity>,
-    pub lb: LbFilter,
-    pub sort: CardSort,
-    pub sort_effect: u32,
-    pub hint_search: String,
+    pub filter: CardFilter,
+    pub sort: TableSort,
     pub selected: Option<u32>,
     pub add: AddCard,
+    /// What's typed in the "Teaches…" box.
+    pub teach_query: String,
+    /// Cards picked to compare (two at most); the window opens at two.
+    pub compare: Vec<u32>,
+    pub compare_open: bool,
+    pub art: ArtQueue,
 }
 
 /// The "Add cards" dialog: pick any Global card, set its LB and level, save it to the roster.
@@ -63,42 +125,94 @@ pub(crate) struct AddCard {
     pub notes: String,
     /// Also list cards uma.guide shows ahead of their Global release.
     pub upcoming: bool,
-    /// Card art being downloaded: the card id when it lands, or None if it failed.
-    pub art_rx: Option<mpsc::Receiver<Option<u32>>>,
+    pub owned_only: bool,
+}
+
+/// Card art to download from uma.guide, four at a time.
+#[derive(Default)]
+pub(crate) struct ArtQueue {
+    pending: VecDeque<u32>,
+    seen: HashSet<u32>,
+    running: Vec<mpsc::Receiver<(u32, bool)>>,
+    /// The card just saved: say so if its art fails.
+    watch: Option<u32>,
 }
 
 impl Default for CardsState {
     fn default() -> Self {
         Self {
             search: String::new(),
-            types: HashSet::new(),
-            rarities: HashSet::new(),
-            lb: LbFilter::Any,
-            sort: CardSort::Type,
-            sort_effect: effect::TRAINING,
-            hint_search: String::new(),
+            filter: CardFilter::default(),
+            sort: TableSort { key: "type", desc: false },
             selected: None,
             add: AddCard::default(),
+            teach_query: String::new(),
+            compare: Vec::new(),
+            compare_open: false,
+            art: ArtQueue::default(),
         }
     }
 }
 
+fn card_sorts() -> Vec<SortOption> {
+    let mut v: Vec<SortOption> = vec![
+        ("type", "Type, then rarity and LB", false),
+        ("rarity", "Rarity", true),
+        ("lb", "Limit break", true),
+        ("level", "Level", true),
+        ("uma", "Uma", false),
+        ("title", "Card title", false),
+        ("release", "Release date", true),
+        ("hints", "Number of skill hints", true),
+    ];
+    v.extend(FX.iter().map(|f| (f.1, f.3, true)));
+    v
+}
+
 impl App {
     pub(crate) fn cards_tab(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("card_filters").resizable(false).exact_size(FILTER_W).frame(crate::side_frame()).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| self.card_filters(ui));
-        });
+        let ctx = ui.ctx().clone();
+        self.pump_art(&ctx);
+        let mut collapsed = kit::rail_collapsed(&ctx, "cards");
+        if collapsed && self.focus_search.get() {
+            collapsed = false;
+            kit::set_rail(&ctx, "cards", false);
+        }
+        // A narrow window with the details open: fold the filters so the list keeps its room.
+        let auto_fold = !collapsed && self.cards.selected.is_some() && ui.available_width() < 1100.0 && !self.focus_search.get();
+        collapsed |= auto_fold;
+        let active = self.cards.filter.count() + usize::from(!self.cards.search.trim().is_empty());
+        if collapsed {
+            egui::Panel::left("card_filters_rail").resizable(false).exact_size(kit::RAIL_W).frame(kit::rail_frame()).show(ui, |ui| {
+                if kit::rail(ui, active, &[("🔍", "Search"), ("🃏", "Type and rarity"), ("◆", "Limit break"), ("💡", "Teaches"), ("📈", "Effect minimums")]) {
+                    if auto_fold {
+                        self.cards.selected = None;
+                    } else {
+                        kit::set_rail(&ctx, "cards", false);
+                    }
+                }
+            });
+        } else {
+            egui::Panel::left("card_filters").resizable(false).exact_size(FILTER_W).frame(crate::side_frame()).show(ui, |ui| {
+                if kit::sidebar_head(ui, active) {
+                    kit::set_rail(&ctx, "cards", true);
+                }
+                egui::ScrollArea::vertical().show(ui, |ui| self.card_filters(ui));
+            });
+        }
         if let Some(card) = self.cards.selected.and_then(|id| self.owned_card(id)).cloned() {
             egui::Panel::right("card_detail").resizable(true).default_size(440.0).min_size(340.0).frame(crate::side_frame()).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.card_detail(ui, &card));
             });
         }
         let list = self.filtered_cards();
-        self.poll_card_art();
         egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-            count_line(ui, list.len(), self.roster.cards.len(), "support cards", "Click one for details");
+            self.card_results_header(ui, &list);
+            if !self.cards.compare.is_empty() {
+                self.compare_tray(ui);
+            }
             if list.is_empty() {
-                empty_state(ui, "🔍", "No cards match", "Loosen or clear the filters on the left.");
+                empty_state(ui, "🔍", "No cards match", "Loosen or clear the filters.");
                 return;
             }
             match self.view {
@@ -106,47 +220,838 @@ impl App {
                 View::Table => self.card_table(ui, &list),
             }
         });
+        if self.cards.compare_open && self.cards.compare.len() == 2 {
+            self.compare_window(&ctx);
+        }
         if self.cards.add.open {
             self.add_cards_dialog(ui);
         }
     }
 
-    /// Modal: every Global card, newest first, searchable; pick one, set LB and level, save.
-    fn add_cards_dialog(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
+    fn card_results_header(&mut self, ui: &mut egui::Ui, list: &[usize]) {
+        let cols = self.card_cols();
+        let narrow = ui.available_width() < if self.view == View::Grid { 720.0 } else { 800.0 };
+        let mut tools = |app: &mut App, ui: &mut egui::Ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                app.view_switch(ui);
+                match app.view {
+                    View::Grid => kit::tile_size_switch(ui),
+                    View::Table => app.table_tools(ui, "cards", &cols, list.len(), |app, (r, k)| app.card_text(&app.roster.cards[list[r]], k)),
+                }
+            });
+        };
+        ui.horizontal(|ui| {
+            ui.set_min_height(30.0);
+            kit::showing(ui, list.len(), self.roster.cards.len(), "support cards");
+            ui.add_space(8.0);
+            kit::sort_picker(ui, "card_sort", &mut self.cards.sort, &card_sorts());
+            if !narrow {
+                tools(self, ui);
+            }
+        });
+        if narrow {
+            ui.horizontal(|ui| tools(self, ui));
+        }
+        let chips = self.card_chips();
+        let labels: Vec<String> = chips.iter().map(|(l, _)| l.clone()).collect();
+        match active_filter_bar(ui, &labels) {
+            Some(FilterBarAction::Remove(i)) => self.remove_card_chip(chips[i].1),
+            Some(FilterBarAction::ResetAll) => {
+                self.cards.filter = CardFilter::default();
+                self.cards.search.clear();
+            }
+            None => {}
+        }
+        ui.add_space(6.0);
+    }
+
+    fn card_chips(&self) -> Vec<(String, CardChip)> {
+        let f = &self.cards.filter;
+        let mut out = Vec::new();
+        if !self.cards.search.trim().is_empty() {
+            out.push((format!("“{}”", self.cards.search.trim()), CardChip::Search));
+        }
+        for t in CardType::ALL.into_iter().filter(|t| f.types.contains(t.label())) {
+            out.push((format!("{} {}", type_icon(t.label()), t.label()), CardChip::Type(t)));
+        }
+        for r in [Rarity::SSR, Rarity::SR, Rarity::R].into_iter().filter(|r| f.rarities.contains(r.label())) {
+            out.push((r.label().to_string(), CardChip::Rarity(r)));
+        }
+        out.extend(f.lbs.iter().map(|lb| (if *lb >= 4 { "MLB".to_string() } else { format!("LB{lb}") }, CardChip::Lb(*lb))));
+        if f.below_cap {
+            out.push(("Below level cap".into(), CardChip::BelowCap));
+        }
+        out.extend(f.teaches.iter().map(|s| (format!("Teaches {}", self.kb.skill_name(*s)), CardChip::Teaches(*s))));
+        if f.gold_only {
+            out.push(("Teaches a gold".into(), CardChip::GoldOnly));
+        }
+        out.extend(f.minimums.iter().enumerate().map(|(i, (k, v))| (format!("{} ≥ {v}", short_effect(fx_name(*k))), CardChip::Minimum(i))));
+        if let Some(s) = &f.linked {
+            out.push((format!("Linked in {s}"), CardChip::Linked));
+        }
+        out
+    }
+
+    fn remove_card_chip(&mut self, c: CardChip) {
+        let f = &mut self.cards.filter;
+        match c {
+            CardChip::Search => self.cards.search.clear(),
+            CardChip::Type(t) => {
+                f.types.remove(t.label());
+            }
+            CardChip::Rarity(r) => {
+                f.rarities.remove(r.label());
+            }
+            CardChip::Lb(lb) => {
+                f.lbs.remove(&lb);
+            }
+            CardChip::BelowCap => f.below_cap = false,
+            CardChip::Teaches(s) => f.teaches.retain(|x| *x != s),
+            CardChip::GoldOnly => f.gold_only = false,
+            CardChip::Minimum(i) => {
+                if i < f.minimums.len() {
+                    f.minimums.remove(i);
+                }
+            }
+            CardChip::Linked => f.linked = None,
+        }
+    }
+
+    fn card_filters(&mut self, ui: &mut egui::Ui) {
+        let focus = self.focus_search.take();
+        kit::search_box(ui, &mut self.cards.search, "🔍 Search card, uma or note (Ctrl+F)", focus);
+        let builtins = [
+            ("Maxed SSRs", "SSR cards at max limit break (MLB)", CardFilter { rarities: ["SSR".to_string()].into(), lbs: [4].into(), ..Default::default() }),
+            ("Not maxed", "Cards below MLB: more copies would make them stronger", CardFilter { lbs: [0, 1, 2, 3].into(), ..Default::default() }),
+            ("Teaches a gold", "Cards that can teach a gold skill, through a hint or an event", CardFilter { gold_only: true, ..Default::default() }),
+        ];
+        kit::quick_views(ui, "cards", &mut self.cards.filter, &builtins);
+
+        let cards = &self.roster.cards;
+        let dark = ui.visuals().dark_mode;
+        let _ = dark;
+        let f = &mut self.cards.filter;
+        let types: Vec<_> = CardType::ALL
+            .iter()
+            .map(|t| (t.label(), format!("{} {}", type_icon(t.label()), t.label()), cards.iter().filter(|c| c.card_type == *t).count()))
+            .filter(|(l, _, n)| *n > 0 || f.types.contains(*l))
+            .map(|(l, t, n)| (l, t, Some(n), None, String::new()))
+            .collect();
+        let rarities: Vec<_> = [Rarity::SSR, Rarity::SR, Rarity::R]
+            .iter()
+            .map(|r| (r.label(), r.label().to_string(), cards.iter().filter(|c| c.rarity == *r).count()))
+            .filter(|(l, _, n)| *n > 0 || f.rarities.contains(*l))
+            .map(|(l, t, n)| (l, t, Some(n), None, String::new()))
+            .collect();
+        let n = f.types.len() + f.rarities.len();
+        if FilterSection::new("Type and rarity").help("Which stat the card trains (Pal and Group cards work differently), and its rarity: SSR is the strongest, then SR, then R.").active(n).show(ui, |ui| {
+            kit::chip_set_str(ui, &mut f.types, &types);
+            ui.add_space(4.0);
+            kit::chip_set_str(ui, &mut f.rarities, &rarities);
+        }) {
+            f.types.clear();
+            f.rarities.clear();
+        }
+        let lbs: Vec<_> = (0..=4u8)
+            .map(|lb| {
+                let label = if lb == 4 { "MLB".to_string() } else { format!("LB{lb}") };
+                let hover = if lb == 4 { "Max limit break (LB4): the card at full strength".to_string() } else { format!("Limit break {lb} of 4") };
+                (lb, label, Some(cards.iter().filter(|c| c.lb.min(4) == lb).count()), None, hover)
+            })
+            .collect();
+        if FilterSection::new("Limit break")
+            .help("Merging copies of a card raises its level cap: LB0 to LB4. LB4, called MLB (max limit break), is the card at full strength. The diamonds under each card show its LB.")
+            .active(f.lbs.len() + usize::from(f.below_cap))
+            .show(ui, |ui| {
+                kit::chip_set(ui, &mut f.lbs, &lbs);
+                ui.add_space(4.0);
+                kit::toggle_row(ui, &mut f.below_cap, "Below level cap", "Cards you could still level up at their current limit break");
+            })
+        {
+            f.lbs.clear();
+            f.below_cap = false;
+        }
+        let teach_n = f.teaches.len() + usize::from(f.gold_only);
+        let mut clear_teach = false;
+        let mut add_skill = None;
+        let mut remove_skill = None;
+        clear_teach |= FilterSection::new("Teaches…").help("Cards that can teach any of these skills, through a hint or an event. Type part of a skill's name and pick it.").active(teach_n).show(ui, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.cards.teach_query).hint_text("💡 Type a skill name").desired_width(f32::INFINITY));
+            let q = self.cards.teach_query.trim().to_lowercase();
+            if !q.is_empty() {
+                let mut found: Vec<(u32, usize)> = Vec::new();
+                for c in cards {
+                    let Some(info) = self.kb.cards.get(&c.id) else { continue };
+                    for s in info.hints.iter().chain(&info.event_skills) {
+                        let Some(k) = self.kb.skills.get(s) else { continue };
+                        if f.teaches.contains(s) || (f.gold_only && k.tier() != "Gold") || !k.name.to_lowercase().contains(&q) {
+                            continue;
+                        }
+                        match found.iter_mut().find(|(id, _)| id == s) {
+                            Some(e) => e.1 += 1,
+                            None => found.push((*s, 1)),
+                        }
+                    }
+                }
+                found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| self.kb.skill_name(a.0).cmp(&self.kb.skill_name(b.0))));
+                if found.is_empty() {
+                    ui.label(RichText::new("None of your cards teach a skill like that.").size(size::SM).color(pal(ui).weak));
+                }
+                for (s, n) in found.iter().take(8) {
+                    let color = crate::ui_util::tier_color(ui, self.kb.skills.get(s).map_or("White", |k| k.tier()));
+                    let text = RichText::new(format!("＋ {}  ({n} card{})", self.kb.skill_name(*s), if *n == 1 { "" } else { "s" })).color(color);
+                    if ui.add(egui::Button::new(text).frame(false)).clicked() {
+                        add_skill = Some(*s);
+                    }
+                }
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                for s in &f.teaches {
+                    if crate::ui_util::chip(ui, true, &format!("{}  ✕", self.kb.skill_name(*s)), None).on_hover_text("Stop filtering by this skill").clicked() {
+                        remove_skill = Some(*s);
+                    }
+                }
+            });
+            if f.teaches.len() > 1 {
+                ui.label(RichText::new("Cards that teach any of these.").size(size::XS).color(pal(ui).weak));
+            }
+            kit::toggle_row(ui, &mut f.gold_only, "Gold skills only", "Only cards that can teach a gold skill; the box above then suggests gold skills only");
+        });
+        if let Some(s) = add_skill {
+            f.teaches.push(s);
+            self.cards.teach_query.clear();
+        }
+        if let Some(s) = remove_skill {
+            f.teaches.retain(|x| *x != s);
+        }
+        if clear_teach {
+            f.teaches.clear();
+            f.gold_only = false;
+        }
+        let mut drop = None;
+        if FilterSection::new("Effect minimums")
+            .help("Cards whose effect, at the level you own them, is at least this much. For example Friendship ≥ 25.")
+            .active(f.minimums.len())
+            .show(ui, |ui| {
+                for (i, (kind, min)) in f.minimums.iter_mut().enumerate() {
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt(("fx_min", i)).width(112.0).selected_text(short_effect(fx_name(*kind))).show_ui(ui, |ui| {
+                            for fx in FX {
+                                ui.selectable_value(kind, fx.0, fx.3);
+                            }
+                        });
+                        ui.label("≥");
+                        ui.add(egui::DragValue::new(min).range(0..=200).speed(1.0));
+                        if ui.small_button("✕").on_hover_text("Remove this minimum").clicked() {
+                            drop = Some(i);
+                        }
+                    });
+                }
+                let b = egui::Button::new(RichText::new("＋ Add a minimum").size(size::SM).color(pal(ui).link)).frame(false);
+                if ui.add(b).clicked() {
+                    f.minimums.push((effect::FRIENDSHIP, 20));
+                }
+            })
+        {
+            f.minimums.clear();
+        }
+        if let Some(i) = drop {
+            f.minimums.remove(i);
+        }
+        let scenarios: Vec<(String, usize)> = self
+            .kb
+            .scenarios
+            .as_ref()
+            .map(|s| s.scenarios.iter().filter(|s| !s.link.is_empty()).map(|s| (s.name.clone(), s.link.len())).collect())
+            .unwrap_or_default();
+        if !scenarios.is_empty()
+            && FilterSection::new("Scenario link")
+                .help("In some training scenarios, cards of certain characters (linked characters) get a bonus, and some teach a gold skill through the scenario's events. From knowledge/scenarios.json.")
+                .active(usize::from(f.linked.is_some()))
+                .show(ui, |ui| {
+                    let current = f.linked.clone().map_or("Any scenario".to_string(), |s| format!("Linked in {s}"));
+                    egui::ComboBox::from_id_salt("linked").width(ui.available_width() - 8.0).selected_text(current).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut f.linked, None, "Any scenario");
+                        for (name, n) in &scenarios {
+                            ui.selectable_value(&mut f.linked, Some(name.clone()), format!("Linked in {name} ({n} umas)"));
+                        }
+                    });
+                })
+        {
+            f.linked = None;
+        }
+        ui.add_space(12.0);
+    }
+
+    fn info(&self, id: u32) -> Option<&CardInfo> {
+        self.kb.cards.get(&id)
+    }
+
+    fn effect_value(&self, c: &SupportCard, kind: u32) -> i32 {
+        self.info(c.id).and_then(|i| i.effect(kind, u32::from(c.level))).unwrap_or(0)
+    }
+
+    /// The skills a card can teach, by hint or event.
+    fn card_skills(&self, id: u32) -> Vec<u32> {
+        self.info(id).map(|i| i.hints.iter().chain(&i.event_skills).copied().collect()).unwrap_or_default()
+    }
+
+    fn card_passes(&self, c: &SupportCard, q: &str) -> bool {
+        let f = &self.cards.filter;
+        let linked = |name: &str| {
+            self.kb.scenarios.as_ref().and_then(|s| s.scenarios.iter().find(|s| s.name == name)).is_some_and(|s| s.link.iter().any(|u| *u == c.uma))
+        };
+        (f.types.is_empty() || f.types.contains(c.card_type.label()))
+            && (f.rarities.is_empty() || f.rarities.contains(c.rarity.label()))
+            && (f.lbs.is_empty() || f.lbs.contains(&c.lb.min(4)))
+            && (!f.below_cap || c.level < c.rarity.max_level(c.lb))
+            && (f.teaches.is_empty() || self.card_skills(c.id).iter().any(|s| f.teaches.contains(s)))
+            && (!f.gold_only || self.card_skills(c.id).iter().any(|s| self.kb.skills.get(s).is_some_and(|k| k.tier() == "Gold")))
+            && f.minimums.iter().all(|(k, min)| self.effect_value(c, *k) >= *min)
+            && f.linked.as_deref().is_none_or(linked)
+            && (q.is_empty() || [c.title.as_str(), c.uma.as_str(), c.notes.as_str(), c.card_type.label()].iter().any(|t| t.to_lowercase().contains(q)))
+    }
+
+    /// What a column sorts by.
+    pub(crate) fn card_sort_key(&self, c: &SupportCard, key: &str) -> SortKey {
+        let num = SortKey::Num;
+        let (rr, lb) = (rarity_rank(c.rarity), f64::from(c.lb));
+        match key {
+            "type" => num(c.card_type as u8 as f64 * 100.0 + (3.0 - rr) * 10.0 + (4.0 - lb)),
+            "rarity" => num(rr * 10.0 + lb),
+            "lb" => num(lb * 10.0 + rr),
+            "level" => num(f64::from(c.level) * 10.0 + rr),
+            "uma" => SortKey::Text(c.uma.clone()),
+            "title" => SortKey::Text(c.title.clone()),
+            "release" => SortKey::Text(self.info(c.id).map(|i| i.release.clone()).unwrap_or_default()),
+            "hints" => num(self.info(c.id).map_or(0, |i| i.hints.len()) as f64),
+            "notes" => SortKey::Text(c.notes.clone()),
+            k => match fx_of(k) {
+                Some(fx) => num(f64::from(self.effect_value(c, fx.0))),
+                None => SortKey::Text(String::new()),
+            },
+        }
+    }
+
+    pub(crate) fn filtered_cards(&self) -> Vec<usize> {
+        let q = self.cards.search.trim().to_lowercase();
+        let cards = &self.roster.cards;
+        let mut idx: Vec<usize> = (0..cards.len()).filter(|&i| self.card_passes(&cards[i], &q)).collect();
+        idx.sort_by(|&a, &b| cards[a].uma.cmp(&cards[b].uma).then(cards[a].id.cmp(&cards[b].id)));
+        let sort = self.cards.sort;
+        sort_rows(&mut idx, sort.desc, |&i| self.card_sort_key(&cards[i], sort.key));
+        idx
+    }
+
+    fn card_grid(&mut self, ui: &mut egui::Ui, list: &[usize]) {
+        let scale = kit::tile_size(ui.ctx()).scale();
+        let (w, h) = (CARD_W * scale, CARD_H * scale);
+        let fx = fx_of(self.cards.sort.key);
+        let tile = vec2(w, h + if fx.is_some() { 50.0 } else { 36.0 });
+        let key = self.cards.sort.key;
+        let group_of = |c: &SupportCard| -> Option<u8> {
+            match key {
+                "type" => Some(c.card_type as u8),
+                "rarity" => Some(rarity_rank(c.rarity) as u8),
+                "lb" => Some(c.lb.min(4)),
+                _ => None,
+            }
+        };
+        let mut groups: Vec<(Option<u8>, Vec<usize>)> = Vec::new();
+        for &i in list {
+            let g = group_of(&self.roster.cards[i]);
+            match groups.last_mut() {
+                Some((k, v)) if *k == g => v.push(i),
+                _ => groups.push((g, vec![i])),
+            }
+        }
         let p = pal(ui);
-        let mut close = false;
-        let mut save = false;
-        let mut a = std::mem::take(&mut self.cards.add);
-        let modal = egui::Modal::new(egui::Id::unique("add_cards")).show(&ctx, |ui| {
-            ui.set_width(860.0);
+        let heads: Vec<TileGroup> = groups
+            .iter()
+            .map(|(g, v)| {
+                let first = &self.roster.cards[v[0]];
+                let (title, color) = match (key, g) {
+                    ("type", Some(_)) => (format!("{} {}", type_icon(first.card_type.label()), first.card_type.label()), type_text(ui, first.card_type.label())),
+                    ("rarity", Some(_)) => (first.rarity.label().to_string(), p.gold),
+                    ("lb", Some(4)) => ("MLB · max limit break".to_string(), p.text),
+                    ("lb", Some(lb)) => (format!("LB{lb}"), p.text),
+                    _ => (String::new(), p.text),
+                };
+                TileGroup { title, color, note: format!("{} card{}", v.len(), if v.len() == 1 { "" } else { "s" }), len: v.len() }
+            })
+            .collect();
+        let mut clicked = None;
+        let mut action = None;
+        let mut scroll = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if let Some(y) = self.debug_scroll {
+            scroll = scroll.vertical_scroll_offset(y);
+        }
+        scroll.show(ui, |ui| {
+            kit::grouped_tiles(ui, &heads, tile, |ui, g, k| {
+                let card = &self.roster.cards[groups[g].1[k]];
+                let (resp, act) = self.card_tile(ui, card, vec2(w, h), tile);
+                match act {
+                    Some(a) => action = Some((a, card.id)),
+                    None if resp.clicked() => clicked = Some(card.id),
+                    None => {}
+                }
+            });
+            ui.add_space(24.0);
+        });
+        if let Some(id) = clicked {
+            self.cards.selected = (self.cards.selected != Some(id)).then_some(id);
+        }
+        match action {
+            Some((CardAction::UseInPlan, id)) => self.use_card_in_plan(id),
+            Some((CardAction::Compare, id)) => self.toggle_compare(id),
+            Some((CardAction::Details, id)) => self.cards.selected = Some(id),
+            None => {}
+        }
+    }
+
+    /// One picture tile. Returns its response and the quick action clicked, if any.
+    fn card_tile(&self, ui: &mut egui::Ui, card: &SupportCard, art: egui::Vec2, tile: egui::Vec2) -> (Response, Option<CardAction>) {
+        let fx = fx_of(self.cards.sort.key);
+        let (rect, resp) = ui.allocate_exact_size(tile, Sense::click());
+        let img = Rect::from_min_size(rect.min, art);
+        let plan_at = img.right_top() + vec2(-14.0, 14.0);
+        let compare_at = plan_at + vec2(0.0, 28.0);
+        let mut action = None;
+        let comparing = self.cards.compare.contains(&card.id);
+        if ui.is_rect_visible(rect) {
+            match self.art_uri("cards", card.id) {
+                Some(uri) => egui::Image::new(uri).corner_radius(CornerRadius::same(8)).paint_at(ui, img),
+                None => placeholder(ui.painter(), img, type_color(card.card_type), &card.uma),
+            }
+            let p = pal(ui);
+            let y = img.bottom() + 11.0;
+            draw_lb(ui.painter(), Pos2::new(rect.left() + 2.0, y), card.lb, 6.0);
+            ui.painter().text(Pos2::new(rect.right() - 2.0, y), Align2::RIGHT_CENTER, format!("Lv {}", card.level), FontId::proportional(12.0), p.weak);
+            ui.painter().text(Pos2::new(rect.center().x, y + 16.0), Align2::CENTER_CENTER, truncate(&card.uma, (16.0 * art.x / CARD_W) as usize), FontId::proportional(12.5), p.text);
+            if let Some(fx) = fx {
+                let v = self.effect_value(card, fx.0);
+                let text = if v == 0 { format!("{} —", fx.2) } else { format!("{} {v}{}", fx.2, fx.4) };
+                ui.painter().text(Pos2::new(rect.center().x, y + 31.0), Align2::CENTER_CENTER, text, FontId::proportional(11.5), p.link);
+            }
+            tile_ring(ui, img, self.cards.selected == Some(card.id), resp.hovered(), 10);
+            if comparing {
+                kit::mark_ring(ui, img, p.link, 10);
+                kit::corner_button(ui, compare_at, "⇄", true);
+            }
+            if resp.hovered() {
+                let (hot_plan, hot_cmp) = (kit::over(ui, plan_at), kit::over(ui, compare_at));
+                kit::corner_button(ui, plan_at, "📋", hot_plan);
+                kit::corner_button(ui, compare_at, "⇄", hot_cmp || comparing);
+                if resp.clicked() {
+                    action = if hot_plan {
+                        Some(CardAction::UseInPlan)
+                    } else if hot_cmp {
+                        Some(CardAction::Compare)
+                    } else {
+                        None
+                    };
+                }
+            }
+        }
+        let resp = if resp.hovered() && kit::over(ui, plan_at) {
+            resp.on_hover_text("Use in the current plan's deck")
+        } else if resp.hovered() && kit::over(ui, compare_at) {
+            resp.on_hover_text(if comparing { "Stop comparing this card" } else { "Compare: pick two cards to see their effects side by side" })
+        } else {
+            resp.on_hover_ui(|ui| self.card_hover_card(ui, card))
+        };
+        resp.context_menu(|ui| {
+            if ui.button("📋 Use in the current plan").clicked() {
+                action = Some(CardAction::UseInPlan);
+                ui.close();
+            }
+            if ui.button(if comparing { "⇄ Stop comparing" } else { "⇄ Compare with another card" }).clicked() {
+                action = Some(CardAction::Compare);
+                ui.close();
+            }
+            if ui.button("🔍 Open details").clicked() {
+                action = Some(CardAction::Details);
+                ui.close();
+            }
+        });
+        (resp, action)
+    }
+
+    /// The hover card on a picture tile: the numbers that matter at a glance.
+    fn card_hover_card(&self, ui: &mut egui::Ui, card: &SupportCard) {
+        let p = pal(ui);
+        ui.set_max_width(310.0);
+        ui.label(semibold(&card.uma, size::MD));
+        ui.label(RichText::new(format!("[{}]", card.title)).italics().color(p.weak));
+        let lb = if card.is_mlb() { "MLB".to_string() } else { format!("LB{}", card.lb) };
+        ui.label(format!("{} {} · {lb} · level {} of {}", card.rarity.label(), card.card_type.label(), card.level, card.rarity.max_level(card.lb)));
+        let parts: Vec<String> = FX
+            .iter()
+            .filter(|f| f.5)
+            .filter_map(|f| {
+                let v = self.effect_value(card, f.0);
+                (v != 0).then(|| format!("{} {v}{}", f.2, f.4))
+            })
+            .collect();
+        if !parts.is_empty() {
+            ui.label(RichText::new(parts.join(" · ")).size(size::SM));
+        }
+        if let Some(info) = self.info(card.id) {
+            let skills = self.card_skills(card.id);
+            let golds = skills.iter().filter(|s| self.kb.skills.get(s).is_some_and(|k| k.tier() == "Gold")).count();
+            ui.label(RichText::new(format!("Teaches {} skills{}", skills.len(), if golds > 0 { format!(" ({golds} gold)") } else { String::new() })).size(size::SM).color(p.weak));
+            if let Some(u) = &info.unique
+                && u32::from(card.level) >= u.level
+            {
+                let fx: Vec<String> = u.effects.iter().map(|e| format!("{} {}", e.name, e.value)).collect();
+                ui.label(RichText::new(format!("Unique effect: {}", fx.join(", "))).size(size::SM).color(p.weak));
+            }
+        }
+        ui.label(RichText::new("Click for details · right-click for more").size(size::XS).color(p.weak));
+    }
+
+    fn card_cols(&self) -> Vec<TableCol> {
+        let mut cols = vec![
+            TableCol::new("art", "").width(Column::exact(34.0)),
+            TableCol::new("uma", "Uma").width(Column::initial(140.0).at_least(100.0).clip(true)).sort_asc(),
+            TableCol::new("title", "Card").width(Column::initial(180.0).at_least(100.0).clip(true)).sort_asc().hover("The card's title"),
+            TableCol::new("rarity", "Rarity").width(Column::exact(66.0)).center().sort_desc().hover("SSR is the strongest, then SR, then R"),
+            TableCol::new("type", "Type").width(Column::exact(100.0)).sort_asc().hover("Which stat the card trains"),
+            TableCol::new("lb", "LB").width(Column::exact(76.0)).center().sort_desc().hover("Limit break: LB0 to LB4 (MLB, full strength)"),
+            TableCol::new("level", "Level").width(Column::exact(80.0)).center().sort_desc().hover("Level, of the cap at this limit break"),
+        ];
+        for f in FX {
+            let mut c = TableCol::new(f.1, f.2)
+                .width(Column::exact(if f.5 { 92.0 } else { 86.0 }))
+                .right()
+                .sort_desc()
+                .hover(format!("{}{}, at the level you own the card", f.3, if f.4.is_empty() { String::new() } else { format!(" ({})", f.4) }));
+            if !f.5 {
+                c = c.optional(true);
+            }
+            cols.push(c);
+        }
+        cols.push(TableCol::new("hints", "Hints").width(Column::exact(64.0)).right().sort_desc().optional(true).hover("How many skills it can offer as hints"));
+        cols.push(TableCol::new("unique", "Unique effect").width(Column::initial(200.0).clip(true)).optional(true).hover("The extra effect only this card has, and the level it starts at"));
+        if self.roster.cards.iter().any(|c| !c.notes.trim().is_empty()) {
+            cols.push(TableCol::new("notes", "Notes").width(Column::remainder().at_least(100.0).clip(true)).sort_asc());
+        }
+        cols
+    }
+
+    fn unique_text(&self, c: &SupportCard) -> String {
+        self.info(c.id)
+            .and_then(|i| i.unique.as_ref())
+            .map(|u| format!("Lv {}: {}", u.level, u.effects.iter().map(|e| format!("{} {}", e.name, e.value)).collect::<Vec<_>>().join(", ")))
+            .unwrap_or_default()
+    }
+
+    /// A cell as text, for Copy as CSV.
+    fn card_text(&self, c: &SupportCard, key: &str) -> String {
+        match key {
+            "uma" => c.uma.clone(),
+            "title" => c.title.clone(),
+            "rarity" => c.rarity.label().to_string(),
+            "type" => c.card_type.label().to_string(),
+            "lb" => if c.is_mlb() { "MLB".to_string() } else { format!("LB{}", c.lb) },
+            "level" => format!("{} / {}", c.level, c.rarity.max_level(c.lb)),
+            "hints" => self.info(c.id).map_or(0, |i| i.hints.len()).to_string(),
+            "unique" => self.unique_text(c),
+            "notes" => c.notes.clone(),
+            k => fx_of(k).map(|f| self.effect_value(c, f.0).to_string()).unwrap_or_default(),
+        }
+    }
+
+    fn card_table(&mut self, ui: &mut egui::Ui, list: &[usize]) {
+        let cols = self.card_cols();
+        let selected = self.cards.selected.and_then(|id| list.iter().position(|&i| self.roster.cards[i].id == id));
+        // Each effect column's highest value, for the heat tint.
+        let max: Vec<i32> = FX.iter().map(|f| list.iter().map(|&i| self.effect_value(&self.roster.cards[i], f.0)).max().unwrap_or(0)).collect();
+        let dark = ui.visuals().dark_mode;
+        let mut sort = self.cards.sort;
+        let out = egui::ScrollArea::horizontal()
+            .id_salt("card_table_h")
+            .show(ui, |ui| {
+                DataTable::new("cards", &cols).sort(&mut sort).row_height(44.0).selected(selected).show(ui, list.len(), |ui, r, key| {
+                    let card = &self.roster.cards[list[r]];
+                    let p = pal(ui);
+                    match key {
+                        "art" => match self.art_uri("cards", card.id) {
+                            Some(uri) => {
+                                ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(28.0, 37.0)).corner_radius(CornerRadius::same(4)));
+                            }
+                            None => {
+                                let (rect, _) = ui.allocate_exact_size(vec2(28.0, 37.0), Sense::hover());
+                                placeholder(ui.painter(), rect, type_color(card.card_type), "");
+                            }
+                        },
+                        "uma" => {
+                            ui.add(egui::Label::new(&card.uma).truncate());
+                        }
+                        "title" => {
+                            ui.add(egui::Label::new(RichText::new(&card.title).color(p.weak)).truncate()).on_hover_text(&card.title);
+                        }
+                        "rarity" => {
+                            badge(ui, card.rarity.label(), if card.rarity == Rarity::SSR { p.gold } else { p.weak });
+                        }
+                        "type" => {
+                            ui.label(RichText::new(format!("{} {}", type_icon(card.card_type.label()), card.card_type.label())).color(type_text(ui, card.card_type.label())));
+                        }
+                        "lb" => {
+                            lb_widget(ui, card.lb, 5.0).on_hover_text(if card.is_mlb() { "Max limit break (MLB)".to_string() } else { format!("Limit break {} of 4", card.lb) });
+                        }
+                        "level" => {
+                            let cap = card.rarity.max_level(card.lb);
+                            let (rect, resp) = ui.allocate_exact_size(vec2(64.0, 30.0), Sense::hover());
+                            let painter = ui.painter();
+                            painter.text(rect.center() - vec2(0.0, 4.0), Align2::CENTER_CENTER, format!("{} / {cap}", card.level), FontId::proportional(size::BODY), p.text);
+                            let bar = Rect::from_min_size(pos2(rect.left() + 4.0, rect.bottom() - 6.0), vec2(rect.width() - 8.0, 3.0));
+                            painter.rect_filled(bar, CornerRadius::same(2), p.border);
+                            let t = f32::from(card.level) / f32::from(cap.max(1));
+                            painter.rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * t.min(1.0), 3.0)), CornerRadius::same(2), if card.level >= cap { p.accent } else { p.warn });
+                            if card.level < cap {
+                                resp.on_hover_text(format!("{} levels below the cap at this limit break", cap - card.level));
+                            }
+                        }
+                        "hints" => {
+                            ui.label(self.info(card.id).map_or(0, |i| i.hints.len()).to_string());
+                        }
+                        "unique" => {
+                            let t = self.unique_text(card);
+                            let active = self.info(card.id).and_then(|i| i.unique.as_ref()).is_some_and(|u| u32::from(card.level) >= u.level);
+                            ui.add(egui::Label::new(RichText::new(&t).size(size::SM).color(if active { p.text } else { p.weak })).truncate()).on_hover_text(if active { t.clone() } else { format!("{t}\nNot active yet at your level") });
+                        }
+                        "notes" => {
+                            ui.add(egui::Label::new(RichText::new(&card.notes).color(p.weak)).truncate());
+                        }
+                        k => {
+                            if let Some(n) = FX.iter().position(|f| f.1 == k) {
+                                let f = FX[n];
+                                let v = self.effect_value(card, f.0);
+                                if v == 0 {
+                                    ui.label(RichText::new("—").color(p.weak));
+                                } else {
+                                    let t = v as f32 / max[n].max(1) as f32;
+                                    let cell = ui.max_rect().shrink2(vec2(4.0, 9.0));
+                                    ui.painter().rect_filled(cell, CornerRadius::same(4), crate::charts::sequential(t, dark).gamma_multiply(0.06 + 0.24 * t));
+                                    ui.label(semibold(format!("{v}{}", f.4), size::BODY));
+                                }
+                            }
+                        }
+                    }
+                })
+            })
+            .inner;
+        self.cards.sort = sort;
+        if let Some(r) = out.clicked {
+            let id = self.roster.cards[list[r]].id;
+            self.cards.selected = (self.cards.selected != Some(id)).then_some(id);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Quick actions
+
+    /// Put an owned card in the open plan's deck: the first empty slot.
+    pub(crate) fn use_card_in_plan(&mut self, id: u32) {
+        use crate::ui_util::ToastKind;
+        let Some(card) = self.owned_card(id).cloned() else { return };
+        let plan = &self.planner.plan;
+        let trainee = plan.trainee.and_then(|t| self.kb.umas.get(&t)).map(|u| u.name.clone());
+        if plan.deck.contains(&Some(id)) {
+            self.toast(format!("{} is already in your plan's deck.", card.display_name()), ToastKind::Info);
+        } else if trainee.as_deref() == Some(card.uma.as_str()) {
+            self.toast(format!("Can't: {} is the trainee, and her own card can't go in her deck.", card.uma), ToastKind::Warn);
+        } else if plan.deck.iter().flatten().any(|d| self.kb.cards.get(d).is_some_and(|i| i.uma == card.uma)) {
+            self.toast(format!("Your plan's deck already has a {} card; a deck can't hold two cards of the same uma.", card.uma), ToastKind::Warn);
+        } else if let Some(slot) = plan.deck.iter().position(Option::is_none) {
+            self.planner.plan.deck[slot] = Some(id);
+            self.toast(format!("Added {} to slot {} of your plan's deck. Career → Plan shows it.", card.display_name(), slot + 1), ToastKind::Success);
+        } else {
+            self.toast("Your plan's deck is full. Open Career → Plan to swap a card.", ToastKind::Warn);
+        }
+    }
+
+    /// Pick or unpick a card to compare; the window opens at two.
+    pub(crate) fn toggle_compare(&mut self, id: u32) {
+        let c = &mut self.cards.compare;
+        if let Some(i) = c.iter().position(|x| *x == id) {
+            c.remove(i);
+            self.cards.compare_open = false;
+        } else {
+            if c.len() >= 2 {
+                c.truncate(1);
+            }
+            c.push(id);
+            self.cards.compare_open = c.len() == 2;
+        }
+    }
+
+    /// The bar above the cards while one or two are picked to compare.
+    fn compare_tray(&mut self, ui: &mut egui::Ui) {
+        let p = pal(ui);
+        let names: Vec<String> = self.cards.compare.iter().filter_map(|id| self.owned_card(*id)).map(|c| c.uma.clone()).collect();
+        let mut cancel = false;
+        let mut open = false;
+        egui::Frame::new().fill(p.link.gamma_multiply(0.12)).stroke(Stroke::new(1.0, p.link.gamma_multiply(0.6))).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::symmetric(12, 6)).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(semibold("Add cards", 19.0));
-                ui.label(RichText::new("New cards go into account/support_cards.md; cards you have get their LB and level updated.").size(12.5).color(p.weak));
+                ui.label(semibold("⇄ Compare", size::BODY));
+                if names.len() == 1 {
+                    ui.label(format!("{} with… pick another card's ⇄ (hover a tile), or right-click it.", names[0]));
+                } else {
+                    ui.label(names.join("  vs  "));
+                    if ui.button("Show").clicked() {
+                        open = true;
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("✕ Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        });
+        ui.add_space(8.0);
+        if cancel {
+            self.cards.compare.clear();
+            self.cards.compare_open = false;
+        }
+        if open {
+            self.cards.compare_open = true;
+        }
+    }
+
+    /// Two cards side by side: every effect at the level you own them, hints and unique effects.
+    fn compare_window(&mut self, ctx: &egui::Context) {
+        let ids = [self.cards.compare[0], self.cards.compare[1]];
+        let (Some(a), Some(b)) = (self.owned_card(ids[0]).cloned(), self.owned_card(ids[1]).cloned()) else {
+            self.cards.compare.clear();
+            return;
+        };
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::unique("compare_cards")).show(ctx, |ui| {
+            let p = pal(ui);
+            ui.set_width(620.0);
+            ui.horizontal(|ui| {
+                ui.label(semibold("Compare cards", size::XL));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("✖ Close").clicked() {
                         close = true;
                     }
                 });
             });
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut a.search).hint_text("🔍 Search uma, title or skill hint").desired_width(260.0));
-                ui.selectable_value(&mut a.kind, None, "All");
-                for t in ["Speed", "Stamina", "Power", "Guts", "Wit", "Pal", "Group"] {
-                    ui.selectable_value(&mut a.kind, Some(t.to_string()), RichText::new(format!("{} {t}", type_icon(t))).color(crate::ui_util::type_text(ui, t)));
+            ui.label(RichText::new("Effects at the level you own each card. The higher value is bold.").size(size::SM).color(p.weak));
+            ui.add_space(8.0);
+            egui::Grid::new("compare_grid").num_columns(3).striped(true).spacing([18.0, 6.0]).min_col_width(150.0).show(ui, |ui| {
+                ui.label("");
+                for c in [&a, &b] {
+                    ui.vertical(|ui| {
+                        if let Some(uri) = self.art_uri("cards", c.id) {
+                            ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(66.0, 88.0)).corner_radius(CornerRadius::same(6)));
+                        }
+                        ui.label(semibold(&c.uma, size::BODY));
+                        ui.label(RichText::new(format!("[{}]", c.title)).size(size::SM).color(p.weak));
+                        ui.label(RichText::new(format!("{} {} · {} · Lv {}", c.rarity.label(), c.card_type.label(), if c.is_mlb() { "MLB".to_string() } else { format!("LB{}", c.lb) }, c.level)).size(size::SM));
+                    });
                 }
-                ui.checkbox(&mut a.upcoming, "Not on Global yet").on_hover_text("uma.guide lists some cards ahead of their Global release");
+                ui.end_row();
+                let mut kinds: Vec<(u32, String)> = Vec::new();
+                for c in [&a, &b] {
+                    for e in self.info(c.id).map(|i| i.effects.clone()).unwrap_or_default() {
+                        if !kinds.iter().any(|(k, _)| *k == e.kind) {
+                            kinds.push((e.kind, e.name.clone()));
+                        }
+                    }
+                }
+                kinds.sort_by_key(|(k, _)| FX.iter().position(|f| f.0 == *k).unwrap_or(99));
+                for (kind, name) in kinds {
+                    let va = self.info(a.id).and_then(|i| i.effect(kind, u32::from(a.level))).unwrap_or(0);
+                    let vb = self.info(b.id).and_then(|i| i.effect(kind, u32::from(b.level))).unwrap_or(0);
+                    if va == 0 && vb == 0 {
+                        continue;
+                    }
+                    let unit = FX.iter().find(|f| f.0 == kind).map_or("", |f| f.4);
+                    ui.label(RichText::new(name).color(p.weak));
+                    for (v, other) in [(va, vb), (vb, va)] {
+                        let text = if v == 0 { "—".to_string() } else { format!("{v}{unit}") };
+                        ui.label(if v > other { semibold(text, size::BODY) } else { RichText::new(text).color(if v == 0 { p.weak } else { p.text }) });
+                    }
+                    ui.end_row();
+                }
+                ui.label(RichText::new("Skill hints").color(p.weak));
+                for c in [&a, &b] {
+                    let skills = self.card_skills(c.id);
+                    let golds: Vec<String> = skills.iter().filter(|s| self.kb.skills.get(s).is_some_and(|k| k.tier() == "Gold")).map(|s| self.kb.skill_name(*s)).collect();
+                    ui.label(format!("{} skills{}", skills.len(), if golds.is_empty() { String::new() } else { format!("\nGold: {}", golds.join(", ")) }));
+                }
+                ui.end_row();
+                ui.label(RichText::new("Unique effect").color(p.weak));
+                for c in [&a, &b] {
+                    let t = self.unique_text(c);
+                    ui.label(RichText::new(if t.is_empty() { "—".to_string() } else { t }).size(size::SM));
+                }
+                ui.end_row();
+            });
+        });
+        if close || modal.should_close() {
+            self.cards.compare.clear();
+            self.cards.compare_open = false;
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Add cards
+
+    /// Modal: every Global card as art tiles, newest first, searchable. Click one to set its LB and
+    /// level on the right, or click a diamond on a tile to save it at that limit break at once.
+    fn add_cards_dialog(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let screen = ctx.content_rect();
+        let (w, h) = ((screen.width() * 0.92).min(1180.0), (screen.height() * 0.8).max(360.0));
+        let mut close = false;
+        let mut save = false;
+        let mut quick: Option<(u32, u8)> = None;
+        let mut need_art: Vec<u32> = Vec::new();
+        let mut a = std::mem::take(&mut self.cards.add);
+        let modal = egui::Modal::new(egui::Id::unique("add_cards")).show(&ctx, |ui| {
+            let p = pal(ui);
+            ui.set_width(w);
+            ui.horizontal(|ui| {
+                ui.label(semibold("Add cards", size::XL));
+                ui.label(RichText::new("Click a card to set its limit break and level, or click a diamond on a card to save it at that LB.").size(size::SM).color(p.weak));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("✖ Close").clicked() {
+                        close = true;
+                    }
+                });
             });
             ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                ui.add_sized([260.0, 24.0], egui::TextEdit::singleline(&mut a.search).hint_text("🔍 Search uma, title or skill hint"));
+                if crate::ui_util::chip(ui, a.kind.is_none(), "All types", None).clicked() {
+                    a.kind = None;
+                }
+                for t in ["Speed", "Stamina", "Power", "Guts", "Wit", "Pal", "Group"] {
+                    let on = a.kind.as_deref() == Some(t);
+                    if kit::dot_chip(ui, on, &format!("{} {t}", type_icon(t)), None, Some(type_color_str(t))).clicked() {
+                        a.kind = if on { None } else { Some(t.to_string()) };
+                    }
+                }
+                ui.checkbox(&mut a.owned_only, "Owned only").on_hover_text("Only cards you have, to raise their LB or level");
+                ui.checkbox(&mut a.upcoming, "Not on Global yet").on_hover_text("uma.guide lists some cards ahead of their Global release");
+            });
+            ui.add_space(6.0);
             let q = a.search.trim().to_lowercase();
-            let kind = a.kind.clone();
             let today = crate::ui_util::today();
             let mut items: Vec<&CardInfo> = self
                 .kb
                 .cards
                 .values()
                 .filter(|c| a.upcoming || c.released(&today))
-                .filter(|c| kind.as_ref().is_none_or(|k| *k == c.kind))
+                .filter(|c| a.kind.as_ref().is_none_or(|k| *k == c.kind))
+                .filter(|c| !a.owned_only || self.owned_card(c.id).is_some())
                 .filter(|c| {
                     q.is_empty()
                         || crate::ui_util::matches_query(&format!("{} {} {} {}", c.uma, c.title, c.rarity, c.kind), &q)
@@ -155,99 +1060,47 @@ impl App {
                 .collect();
             items.sort_by(|x, y| y.release.cmp(&x.release).then(y.id.cmp(&x.id)));
             let mut picked = None;
-            ui.columns(2, |cols| {
-                egui::ScrollArea::vertical().id_salt("add_list").max_height(470.0).auto_shrink([false, false]).show(&mut cols[0], |ui| {
-                    for c in items.iter().take(300) {
-                        let owned = self.roster.cards.iter().find(|o| o.id == c.id);
-                        ui.horizontal(|ui| {
-                            match self.art_uri("cards", c.id) {
-                                Some(uri) => {
-                                    ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(30.0, 40.0)).corner_radius(CornerRadius::same(4)));
-                                }
-                                None => {
-                                    let (r, _) = ui.allocate_exact_size(vec2(30.0, 40.0), Sense::hover());
-                                    placeholder(ui.painter(), r, crate::ui_util::type_color_str(&c.kind), "?");
-                                }
+            let grid_h = (h - 90.0).max(260.0);
+            ui.horizontal_top(|ui| {
+                let left_w = ui.available_width() - 300.0;
+                ui.allocate_ui_with_layout(vec2(left_w, grid_h), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.label(RichText::new(format!("{} cards, newest first", items.len())).size(size::SM).color(p.weak));
+                    egui::ScrollArea::vertical().id_salt("add_grid").max_height(grid_h - 20.0).auto_shrink([false, false]).show(ui, |ui| {
+                        crate::ui_util::tile_grid(ui, items.len(), ADD_TILE, 10.0, 10.0, |ui, k| {
+                            let c = items[k];
+                            let (resp, lb) = self.add_tile(ui, c, a.pick == Some(c.id));
+                            if ui.is_rect_visible(resp.rect) && !self.card_art.contains(&c.id) {
+                                need_art.push(c.id);
                             }
-                            let label = format!("{} {} [{}]\n{} {} · released {}", c.rarity, c.uma, c.title, type_icon(&c.kind), c.kind, c.release);
-                            let mut text = RichText::new(label).size(12.5);
-                            if a.pick == Some(c.id) {
-                                text = text.strong();
-                            }
-                            if ui.selectable_label(a.pick == Some(c.id), text).clicked() {
-                                picked = Some(c.id);
-                            }
-                            if let Some(o) = owned {
-                                badge(ui, format!("owned LB{} Lv{}", o.lb, o.level), p.accent);
+                            match lb {
+                                Some(lb) => quick = Some((c.id, lb)),
+                                None if resp.clicked() => picked = Some(c.id),
+                                None => {}
                             }
                         });
-                    }
-                    if items.len() > 300 {
-                        ui.label(RichText::new("…more; search to narrow it down").size(12.0).color(p.weak));
-                    }
-                });
-                let ui = &mut cols[1];
-                let Some(id) = a.pick else {
-                    ui.label(RichText::new("Pick a card on the left.").color(p.weak));
-                    return;
-                };
-                let Some(c) = self.kb.cards.get(&id) else { return };
-                let rarity = Rarity::from_id(id).unwrap_or(Rarity::SSR);
-                ui.horizontal(|ui| {
-                    if let Some(uri) = self.art_uri("cards", id) {
-                        ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(96.0, 128.0)).corner_radius(CornerRadius::same(8)));
-                    }
-                    ui.vertical(|ui| {
-                        ui.label(semibold(&c.uma, 17.0));
-                        ui.label(RichText::new(format!("[{}]", c.title)).italics().color(p.weak));
-                        ui.label(format!("{} {} · released {}", c.rarity, c.kind, c.release));
-                        if let Some(o) = self.owned_card(id) {
-                            ui.label(RichText::new(format!("You have it at LB{} Lv{}.", o.lb, o.level)).color(p.accent));
-                        }
                     });
                 });
-                ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                    ui.label("Limit break");
-                    for lb in 0..=4u8 {
-                        if ui.selectable_label(a.lb == lb, if lb == 4 { "MLB".to_string() } else { lb.to_string() }).clicked() {
-                            a.lb = lb;
-                            a.level = rarity.max_level(lb);
-                        }
-                    }
+                ui.separator();
+                ui.vertical(|ui| {
+                    ui.set_width(280.0);
+                    self.add_editor(ui, &mut a, &mut save);
                 });
-                ui.horizontal(|ui| {
-                    ui.label("Level");
-                    ui.add(egui::DragValue::new(&mut a.level).range(1..=rarity.max_level(a.lb)));
-                    ui.label(RichText::new(format!("cap at LB{}: {}", a.lb, rarity.max_level(a.lb))).size(12.0).color(p.weak));
-                });
-                ui.add(egui::TextEdit::singleline(&mut a.notes).hint_text("Notes (optional)").desired_width(f32::INFINITY));
-                ui.add_space(6.0);
-                let verb = if self.owned_card(id).is_some() { "💾 Update card" } else { "＋ Add to roster" };
-                if ui.add(crate::ui_util::primary_button(ui, verb, 14.0)).clicked() {
-                    save = true;
-                }
             });
             if let Some(id) = picked {
-                a.pick = Some(id);
-                a.notes.clear();
-                // Start from what's owned, or a fresh copy at LB0.
-                match self.roster.cards.iter().find(|o| o.id == id) {
-                    Some(o) => {
-                        a.lb = o.lb;
-                        a.level = o.level;
-                    }
-                    None => {
-                        a.lb = 0;
-                        a.level = Rarity::from_id(id).map_or(1, |r| r.max_level(0));
-                    }
-                }
+                self.pick_add_card(&mut a, id);
             }
         });
+        if let Some((id, lb)) = quick {
+            a.pick = Some(id);
+            a.lb = lb;
+            a.level = Rarity::from_id(id).map_or(1, |r| r.max_level(lb));
+            a.notes = self.owned_card(id).map(|c| c.notes.clone()).unwrap_or_default();
+            save = true;
+        }
         self.cards.add = a;
+        self.queue_art(need_art);
         if save {
-            let ctx = ui.ctx().clone();
-            let result = self.save_added_card(&ctx);
+            let result = self.save_added_card();
             self.toast_flag(match result {
                 Ok(msg) => (msg, false),
                 Err(e) => (e, true),
@@ -258,8 +1111,122 @@ impl App {
         }
     }
 
+    /// Pick a card in the Add cards dialog: start from what's owned, or a fresh copy at LB0.
+    pub(crate) fn pick_add_card(&self, a: &mut AddCard, id: u32) {
+        a.pick = Some(id);
+        a.notes.clear();
+        match self.owned_card(id) {
+            Some(o) => {
+                a.lb = o.lb;
+                a.level = o.level;
+                a.notes = o.notes.clone();
+            }
+            None => {
+                a.lb = 0;
+                a.level = Rarity::from_id(id).map_or(1, |r| r.max_level(0));
+            }
+        }
+    }
+
+    /// A card tile in the Add cards dialog. Returns its response, and the LB of a diamond clicked.
+    fn add_tile(&self, ui: &mut egui::Ui, c: &CardInfo, picked: bool) -> (Response, Option<u8>) {
+        let p = pal(ui);
+        let owned = self.owned_card(c.id);
+        let (rect, resp) = ui.allocate_exact_size(ADD_TILE, Sense::click());
+        let img = Rect::from_min_size(rect.min, vec2(ADD_W, ADD_H));
+        let band = Rect::from_min_max(pos2(img.left(), img.bottom() - 24.0), img.right_bottom());
+        let slot = (ADD_W - 8.0) / 4.0;
+        let hit = |pos: Pos2| band.contains(pos).then(|| (((pos.x - img.left() - 4.0) / slot).floor().clamp(0.0, 3.0)) as u8 + 1);
+        let mut lb = None;
+        if resp.clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            lb = hit(pos);
+        }
+        if ui.is_rect_visible(rect) {
+            let alpha = if owned.is_some() { 255 } else { 150 };
+            match self.art_uri("cards", c.id) {
+                Some(uri) => egui::Image::new(uri).corner_radius(CornerRadius::same(6)).tint(Color32::from_white_alpha(alpha)).paint_at(ui, img),
+                None => placeholder(ui.painter(), img, type_color_str(&c.kind), &c.uma),
+            }
+            let painter = ui.painter();
+            if let Some(o) = owned {
+                painter.circle_filled(img.left_top() + vec2(11.0, 11.0), 8.0, p.good);
+                painter.text(img.left_top() + vec2(11.0, 11.0), Align2::CENTER_CENTER, "✔", FontId::proportional(10.0), Color32::WHITE);
+                draw_lb(painter, pos2(rect.left() + 1.0, img.bottom() + 9.0), o.lb, 4.5);
+                painter.text(pos2(rect.right() - 1.0, img.bottom() + 9.0), Align2::RIGHT_CENTER, format!("Lv{}", o.level), FontId::proportional(10.5), p.weak);
+            } else {
+                painter.text(pos2(rect.center().x, img.bottom() + 9.0), Align2::CENTER_CENTER, format!("{} · {}", c.rarity, c.release.get(..7).unwrap_or("")), FontId::proportional(10.5), p.weak);
+            }
+            painter.text(pos2(img.center().x, img.bottom() + 24.0), Align2::CENTER_CENTER, truncate(&c.uma, 13), FontId::proportional(11.5), if owned.is_some() { p.text } else { p.weak });
+            if resp.hovered() {
+                painter.rect_filled(band, CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, Color32::from_black_alpha(185));
+                let over = ui.input(|i| i.pointer.hover_pos()).and_then(hit);
+                draw_lb(painter, pos2(img.left() + 4.0 + slot / 2.0 - 5.5, band.center().y), over.unwrap_or(owned.map_or(0, |o| o.lb)), 5.5);
+            }
+            if picked {
+                kit::mark_ring(ui, img, p.accent, 8);
+            }
+        }
+        let have = owned.map_or("Not owned".to_string(), |o| format!("Owned: LB{} · Lv {}", o.lb, o.level));
+        let resp = resp.on_hover_text(format!("{} {} [{}]\n{} card · released {}\n{have}\nClick to edit · click a diamond to save at that LB", c.rarity, c.uma, c.title, c.kind, c.release));
+        (resp, lb)
+    }
+
+    /// The Add cards dialog's editor for the picked card.
+    fn add_editor(&self, ui: &mut egui::Ui, a: &mut AddCard, save: &mut bool) {
+        let p = pal(ui);
+        let Some(id) = a.pick else {
+            ui.add_space(30.0);
+            ui.label(RichText::new("Pick a card on the left.").color(p.weak));
+            return;
+        };
+        let Some(c) = self.kb.cards.get(&id) else { return };
+        let rarity = Rarity::from_id(id).unwrap_or(Rarity::SSR);
+        match self.art_uri("cards", id) {
+            Some(uri) => {
+                ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(108.0, 144.0)).corner_radius(CornerRadius::same(8)));
+            }
+            None => {
+                let (r, _) = ui.allocate_exact_size(vec2(108.0, 144.0), Sense::hover());
+                placeholder(ui.painter(), r, type_color_str(&c.kind), &c.uma);
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
+            ui.label(semibold(&c.uma, size::LG));
+            if let Some(o) = self.owned_card(id) {
+                badge(ui, format!("Owned · LB{} Lv{}", o.lb, o.level), p.good);
+            }
+        });
+        ui.label(RichText::new(format!("[{}]", c.title)).italics().color(p.weak));
+        ui.label(RichText::new(format!("{} {} · released {}", c.rarity, c.kind, c.release)).size(size::SM));
+        ui.add_space(8.0);
+        ui.label(RichText::new("Limit break").color(p.weak));
+        ui.horizontal_wrapped(|ui| {
+            for lb in 0..=4u8 {
+                if crate::onboarding_grid::lb_button(ui, lb, a.lb == lb).clicked() {
+                    a.lb = lb;
+                    a.level = rarity.max_level(lb);
+                }
+            }
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Level").color(p.weak));
+            ui.add(egui::Slider::new(&mut a.level, 1..=rarity.max_level(a.lb)));
+        });
+        ui.label(RichText::new(format!("The cap at LB{} is {}.", a.lb, rarity.max_level(a.lb))).size(size::XS).color(p.weak));
+        ui.add_space(4.0);
+        ui.add(egui::TextEdit::singleline(&mut a.notes).hint_text("Notes (optional)").desired_width(f32::INFINITY));
+        ui.add_space(8.0);
+        let verb = if self.owned_card(id).is_some() { "💾 Update card" } else { "＋ Add to roster" };
+        if ui.add(crate::ui_util::primary_button(ui, verb, size::BODY).min_size(vec2(160.0, 32.0))).clicked() {
+            *save = true;
+        }
+    }
+
     /// Write the picked card into account/support_cards.md, reload the roster, and fetch its art.
-    fn save_added_card(&mut self, ctx: &egui::Context) -> Result<String, String> {
+    fn save_added_card(&mut self) -> Result<String, String> {
         let root = self.root.clone().ok_or("umaLord folder not found.")?;
         let a = &self.cards.add;
         let id = a.pick.ok_or("Pick a card first.")?;
@@ -274,364 +1241,72 @@ impl App {
         self.write_digest();
         self.planner.rank_cache.borrow_mut().clear();
         self.cards.selected = Some(id);
-        let mut msg = format!(
-            "{} {} [{}] at LB{} Lv{}.",
-            if updated { "Updated" } else { "Added" },
-            info.uma,
-            info.title,
-            row.lb,
-            row.level
-        );
+        let lb = if row.lb >= 4 { "MLB".to_string() } else { format!("LB{}", row.lb) };
+        let mut msg = format!("{} {} [{}] at {lb} Lv{}.", if updated { "Updated" } else { "Added" }, info.uma, info.title, row.level);
         if !self.card_art.contains(&id) {
-            self.fetch_card_art(id, ctx);
+            self.queue_art([id]);
+            self.cards.art.watch = Some(id);
             msg += " Downloading its art from uma.guide…";
         }
         Ok(msg)
     }
 
-    /// Download a card's thumbnail from uma.guide into app/assets/cards/ (kept only if it decodes).
-    fn fetch_card_art(&mut self, id: u32, ctx: &egui::Context) {
-        let Some(root) = self.root.clone() else { return };
-        let dir = root.join("app").join("assets").join("cards");
-        let (tx, rx) = mpsc::channel();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let path = dir.join(format!("{id}.webp"));
-            let part = dir.join(format!("{id}.webp.part"));
-            let url = format!("https://uma.guide/img/card/composite/tex_support_card_{id}_thumb.webp");
-            let mut cmd = std::process::Command::new("curl.exe");
-            cmd.args(["-sSfL", "--max-time", "60", "-o"]).arg(&part).arg(&url);
-            crate::ask::hidden(&mut cmd);
-            let ok = cmd.status().is_ok_and(|s| s.success())
-                && std::fs::read(&part).ok().is_some_and(|b| image::load_from_memory_with_format(&b, image::ImageFormat::WebP).is_ok())
-                && std::fs::rename(&part, &path).is_ok();
-            if !ok {
-                let _ = std::fs::remove_file(&part);
+    /// Queue card art to download from uma.guide (not in tests or screenshot runs).
+    fn queue_art(&mut self, ids: impl IntoIterator<Item = u32>) {
+        if cfg!(test) || std::env::var_os("UMALORD_SCREENSHOT").is_some() || self.root.is_none() {
+            return;
+        }
+        for id in ids {
+            if !self.card_art.contains(&id) && self.cards.art.seen.insert(id) {
+                self.cards.art.pending.push_back(id);
             }
-            let _ = tx.send(ok.then_some(id));
-            ctx.request_repaint();
-        });
-        self.cards.add.art_rx = Some(rx);
+        }
     }
 
-    fn poll_card_art(&mut self) {
-        let Some(rx) = &self.cards.add.art_rx else { return };
-        match rx.try_recv() {
-            Ok(Some(id)) => {
+    /// Start queued downloads, four at a time, and collect finished ones.
+    fn pump_art(&mut self, ctx: &egui::Context) {
+        let mut done = Vec::new();
+        self.cards.art.running.retain(|rx| match rx.try_recv() {
+            Ok(r) => {
+                done.push(r);
+                false
+            }
+            Err(mpsc::TryRecvError::Empty) => true,
+            Err(mpsc::TryRecvError::Disconnected) => false,
+        });
+        for (id, ok) in done {
+            if ok {
                 self.card_art.insert(id);
-                self.cards.add.art_rx = None;
-            }
-            Ok(None) => {
+            } else if self.cards.art.watch == Some(id) {
                 self.toast("Saved, but the card art couldn't be downloaded; it shows as a placeholder.", crate::ui_util::ToastKind::Error);
-                self.cards.add.art_rx = None;
             }
-            Err(mpsc::TryRecvError::Disconnected) => self.cards.add.art_rx = None,
-            Err(mpsc::TryRecvError::Empty) => {}
-        }
-    }
-
-    fn card_filters(&mut self, ui: &mut egui::Ui) {
-        let s = &mut self.cards;
-        let search = ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search card, uma or note").desired_width(f32::INFINITY));
-        if self.focus_search.take() {
-            search.request_focus();
-        }
-        ui.add(egui::TextEdit::singleline(&mut s.hint_search).hint_text("💡 Teaches the skill…").desired_width(f32::INFINITY))
-            .on_hover_text("Keep only cards that can teach a skill whose name contains this, through a hint or an event");
-
-        section_label(ui, "Type", "Which stat the card trains. Pal and Group cards work differently.");
-        ui.horizontal_wrapped(|ui| {
-            for t in CardType::ALL {
-                let mut on = s.types.contains(&t);
-                let text = RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(crate::ui_util::type_text(ui, t.label()));
-                if ui.toggle_value(&mut on, text).changed() {
-                    toggle(&mut s.types, t, on);
-                }
-            }
-        });
-
-        section_label(ui, "Rarity", "SSR is the strongest, then SR, then R.");
-        ui.horizontal(|ui| {
-            for r in [Rarity::SSR, Rarity::SR, Rarity::R] {
-                if !self.roster.cards.iter().any(|c| c.rarity == r) {
-                    continue;
-                }
-                let mut on = s.rarities.contains(&r);
-                if ui.toggle_value(&mut on, r.label()).changed() {
-                    toggle(&mut s.rarities, r, on);
-                }
-            }
-        });
-
-        section_label(
-            ui,
-            "Limit break",
-            "Merging copies of a card raises its level cap: LB0 to LB4. LB4, called MLB (max limit break), is the card at full strength. The diamonds under each card show its LB.",
-        );
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut s.lb, LbFilter::Any, "Any");
-            ui.selectable_value(&mut s.lb, LbFilter::Mlb, "Maxed").on_hover_text("Max limit break (MLB, LB4) only");
-            ui.selectable_value(&mut s.lb, LbFilter::NotMlb, "Not maxed").on_hover_text("LB0 to LB3: more copies would make these stronger");
-        });
-
-        section_label(ui, "Sort by", "");
-        ui.radio_value(&mut s.sort, CardSort::Type, "Type, then limit break");
-        ui.radio_value(&mut s.sort, CardSort::Lb, "Rarity and limit break");
-        ui.radio_value(&mut s.sort, CardSort::Level, "Level");
-        ui.radio_value(&mut s.sort, CardSort::Uma, "Uma name");
-        ui.radio_value(&mut s.sort, CardSort::Newest, "Newest release");
-        ui.radio_value(&mut s.sort, CardSort::Effect, "An effect, at your level:").on_hover_text("Sort by one support effect, using each card's value at the level you own it");
-        let effect_name = effect::KEY.iter().find(|(k, _)| *k == s.sort_effect).map_or("?", |(_, n)| n);
-        egui::ComboBox::from_id_salt("sort_effect").selected_text(effect_name).width(ui.available_width() - 28.0).show_ui(ui, |ui| {
-            for (k, n) in effect::KEY {
-                if ui.selectable_value(&mut s.sort_effect, k, n).clicked() {
-                    s.sort = CardSort::Effect;
-                }
-            }
-        });
-
-        ui.add_space(14.0);
-        if ui.button("✖ Clear filters").clicked() {
-            *s = CardsState { selected: s.selected, sort: s.sort, sort_effect: s.sort_effect, ..Default::default() };
-        }
-    }
-
-    fn info(&self, id: u32) -> Option<&CardInfo> {
-        self.kb.cards.get(&id)
-    }
-
-    fn effect_value(&self, c: &SupportCard, kind: u32) -> i32 {
-        self.info(c.id).and_then(|i| i.effect(kind, u32::from(c.level))).unwrap_or(0)
-    }
-
-    fn filtered_cards(&self) -> Vec<usize> {
-        let s = &self.cards;
-        let q = s.search.trim().to_lowercase();
-        let hq = s.hint_search.trim().to_lowercase();
-        let cards = &self.roster.cards;
-        let hints_match = |c: &SupportCard| {
-            hq.is_empty() || self.info(c.id).is_some_and(|i| i.hints.iter().chain(&i.event_skills).any(|id| self.kb.skill_name(*id).to_lowercase().contains(&hq)))
-        };
-        let mut idx: Vec<usize> = (0..cards.len())
-            .filter(|&i| {
-                let c = &cards[i];
-                (s.types.is_empty() || s.types.contains(&c.card_type))
-                    && (s.rarities.is_empty() || s.rarities.contains(&c.rarity))
-                    && match s.lb {
-                        LbFilter::Any => true,
-                        LbFilter::Mlb => c.is_mlb(),
-                        LbFilter::NotMlb => !c.is_mlb(),
-                    }
-                    && (q.is_empty() || [c.title.as_str(), c.uma.as_str(), c.notes.as_str(), c.card_type.label()].iter().any(|t| t.to_lowercase().contains(&q)))
-                    && hints_match(c)
-            })
-            .collect();
-        idx.sort_by(|&a, &b| {
-            let (a, b) = (&cards[a], &cards[b]);
-            match s.sort {
-                CardSort::Type => a.card_type.cmp(&b.card_type).then(b.rarity.cmp(&a.rarity)).then(b.lb.cmp(&a.lb)),
-                CardSort::Lb => b.rarity.cmp(&a.rarity).then(b.lb.cmp(&a.lb)).then(a.card_type.cmp(&b.card_type)),
-                CardSort::Level => b.level.cmp(&a.level).then(b.rarity.cmp(&a.rarity)),
-                CardSort::Uma => a.uma.cmp(&b.uma),
-                CardSort::Newest => b.id.cmp(&a.id),
-                CardSort::Effect => self.effect_value(b, s.sort_effect).cmp(&self.effect_value(a, s.sort_effect)),
-            }
-            .then(a.uma.cmp(&b.uma))
-            .then(a.id.cmp(&b.id))
-        });
-        idx
-    }
-
-    fn card_grid(&mut self, ui: &mut egui::Ui, list: &[usize]) {
-        let mut clicked = None;
-        let mut groups: Vec<(Option<CardType>, Vec<usize>)> = Vec::new();
-        for &i in list {
-            let key = (self.cards.sort == CardSort::Type).then_some(self.roster.cards[i].card_type);
-            match groups.last_mut() {
-                Some((k, v)) if *k == key => v.push(i),
-                _ => groups.push((key, vec![i])),
+            if self.cards.art.watch == Some(id) {
+                self.cards.art.watch = None;
             }
         }
-        let weak = pal(ui).weak;
-        let tile = vec2(CARD_W, CARD_H + if self.cards.sort == CardSort::Effect { 50.0 } else { 36.0 });
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for (n, (key, items)) in groups.iter().enumerate() {
-                if let Some(t) = key {
-                    if n > 0 {
-                        ui.add_space(6.0);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label(semibold(format!("{} {}", type_icon(t.label()), t.label()), 17.0).color(crate::ui_util::type_text(ui, t.label())));
-                        ui.label(RichText::new(format!("{} cards", items.len())).color(weak));
-                    });
-                    ui.add_space(4.0);
+        let Some(root) = self.root.clone() else { return };
+        while self.cards.art.running.len() < 4 {
+            let Some(id) = self.cards.art.pending.pop_front() else { break };
+            let dir = root.join("app").join("assets").join("cards");
+            let (tx, rx) = mpsc::channel();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let path = dir.join(format!("{id}.webp"));
+                let part = dir.join(format!("{id}.webp.part"));
+                let url = format!("https://uma.guide/img/card/composite/tex_support_card_{id}_thumb.webp");
+                let mut cmd = std::process::Command::new("curl.exe");
+                cmd.args(["-sSfL", "--max-time", "60", "-o"]).arg(&part).arg(&url);
+                crate::ask::hidden(&mut cmd);
+                let ok = cmd.status().is_ok_and(|s| s.success())
+                    && std::fs::read(&part).ok().is_some_and(|b| image::load_from_memory_with_format(&b, image::ImageFormat::WebP).is_ok())
+                    && std::fs::rename(&part, &path).is_ok();
+                if !ok {
+                    let _ = std::fs::remove_file(&part);
                 }
-                tile_grid(ui, items.len(), tile, 12.0, 12.0, |ui, k| {
-                    let card = &self.roster.cards[items[k]];
-                    if self.card_tile(ui, card).clicked() {
-                        clicked = Some(card.id);
-                    }
-                });
-            }
-        });
-        if let Some(id) = clicked {
-            self.cards.selected = (self.cards.selected != Some(id)).then_some(id);
-        }
-    }
-
-    fn card_tile(&self, ui: &mut egui::Ui, card: &SupportCard) -> Response {
-        let show_effect = self.cards.sort == CardSort::Effect;
-        let (rect, resp) = ui.allocate_exact_size(vec2(CARD_W, CARD_H + if show_effect { 50.0 } else { 36.0 }), Sense::click());
-        if ui.is_rect_visible(rect) {
-            let img = Rect::from_min_size(rect.min, vec2(CARD_W, CARD_H));
-            match self.art_uri("cards", card.id) {
-                Some(uri) => egui::Image::new(uri).corner_radius(CornerRadius::same(8)).paint_at(ui, img),
-                None => placeholder(ui.painter(), img, type_color(card.card_type), &card.uma),
-            }
-            let p = pal(ui);
-            let y = img.bottom() + 11.0;
-            draw_lb(ui.painter(), Pos2::new(rect.left() + 2.0, y), card.lb, 6.0);
-            ui.painter().text(Pos2::new(rect.right() - 2.0, y), Align2::RIGHT_CENTER, format!("Lv {}", card.level), FontId::proportional(12.0), p.weak);
-            ui.painter().text(
-                Pos2::new(rect.center().x, y + 16.0),
-                Align2::CENTER_CENTER,
-                truncate(&card.uma, 16),
-                FontId::proportional(12.5),
-                p.text,
-            );
-            if show_effect {
-                let name = effect::KEY.iter().find(|(k, _)| *k == self.cards.sort_effect).map_or("", |(_, n)| n);
-                ui.painter().text(
-                    Pos2::new(rect.center().x, y + 31.0),
-                    Align2::CENTER_CENTER,
-                    format!("{} {}", short_effect(name), self.effect_value(card, self.cards.sort_effect)),
-                    FontId::proportional(11.5),
-                    p.accent,
-                );
-            }
-            tile_ring(ui, img, self.cards.selected == Some(card.id), resp.hovered(), 10);
-        }
-        let lb = if card.is_mlb() { "max limit break (MLB)".to_string() } else { format!("limit break {} of 4", card.lb) };
-        resp.on_hover_text(format!(
-            "{}\n{} {} card · {lb} · level {} of {}\nClick for details",
-            card.display_name(),
-            card.rarity.label(),
-            card.card_type.label(),
-            card.level,
-            card.rarity.max_level(card.lb)
-        ))
-    }
-
-    fn card_table(&mut self, ui: &mut egui::Ui, list: &[usize]) {
-        let mut clicked = None;
-        let mut new_sort = None;
-        let key_cols = [
-            (effect::FRIENDSHIP, "Friend."),
-            (effect::TRAINING, "Train."),
-            (effect::SPECIALTY, "Spec."),
-            (effect::RACE, "Race"),
-            (effect::HINT_FREQ, "Hint %"),
-        ];
-        let mut table = TableBuilder::new(ui)
-            .striped(true)
-            .sense(Sense::click())
-            .auto_shrink([false, false])
-            .column(Column::exact(24.0))
-            .column(Column::auto().at_least(120.0))
-            .column(Column::initial(220.0).at_least(120.0).clip(true))
-            .column(Column::auto())
-            .column(Column::auto())
-            .column(Column::auto().at_least(56.0))
-            .column(Column::auto());
-        for _ in key_cols {
-            table = table.column(Column::exact(54.0));
-        }
-        table
-            .column(Column::remainder().at_least(60.0))
-            .header(26.0, |mut header| {
-                let sortable = [
-                    ("", None),
-                    ("Uma", Some(CardSort::Uma)),
-                    ("Card", None),
-                    ("Rarity", None),
-                    ("Type", Some(CardSort::Type)),
-                    ("LB", Some(CardSort::Lb)),
-                    ("Level", Some(CardSort::Level)),
-                ];
-                for (label, sort) in sortable {
-                    header.col(|ui| match sort {
-                        Some(s) => {
-                            if ui.selectable_label(self.cards.sort == s, RichText::new(label).strong()).clicked() {
-                                new_sort = Some((s, None));
-                            }
-                        }
-                        None => {
-                            ui.strong(label);
-                        }
-                    });
-                }
-                for (k, label) in key_cols {
-                    header.col(|ui| {
-                        let on = self.cards.sort == CardSort::Effect && self.cards.sort_effect == k;
-                        let full = effect::KEY.iter().find(|(key, _)| *key == k).map_or(label, |(_, n)| n);
-                        if ui.selectable_label(on, RichText::new(label).strong()).on_hover_text(format!("{full}, at the level you own the card. Click to sort.")).clicked() {
-                            new_sort = Some((CardSort::Effect, Some(k)));
-                        }
-                    });
-                }
-                header.col(|ui| {
-                    ui.strong("Notes");
-                });
-            })
-            .body(|body| {
-                body.rows(30.0, list.len(), |mut row| {
-                    let card = &self.roster.cards[list[row.index()]];
-                    row.set_selected(self.cards.selected == Some(card.id));
-                    row.col(|ui| {
-                        if let Some(uri) = self.art_uri("cards", card.id) {
-                            ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(19.0, 25.0)).corner_radius(CornerRadius::same(3)));
-                        }
-                    });
-                    row.col(|ui| {
-                        ui.label(&card.uma);
-                    });
-                    row.col(|ui| {
-                        ui.label(&card.title);
-                    });
-                    row.col(|ui| {
-                        ui.label(card.rarity.label());
-                    });
-                    row.col(|ui| {
-                        ui.label(RichText::new(format!("{} {}", type_icon(card.card_type.label()), card.card_type.label())).color(crate::ui_util::type_text(ui, card.card_type.label())));
-                    });
-                    row.col(|ui| {
-                        lb_widget(ui, card.lb, 5.0);
-                    });
-                    row.col(|ui| {
-                        ui.label(format!("{} / {}", card.level, card.rarity.max_level(card.lb)));
-                    });
-                    for (k, _) in key_cols {
-                        row.col(|ui| {
-                            let v = self.effect_value(card, k);
-                            ui.label(if v == 0 { "·".to_string() } else { v.to_string() });
-                        });
-                    }
-                    row.col(|ui| {
-                        ui.label(&card.notes);
-                    });
-                    if row.response().clicked() {
-                        clicked = Some(card.id);
-                    }
-                });
+                let _ = tx.send((id, ok));
+                ctx.request_repaint();
             });
-        if let Some((s, k)) = new_sort {
-            self.cards.sort = s;
-            if let Some(k) = k {
-                self.cards.sort_effect = k;
-            }
-        }
-        if let Some(id) = clicked {
-            self.cards.selected = (self.cards.selected != Some(id)).then_some(id);
+            self.cards.art.running.push(rx);
         }
     }
 
@@ -672,9 +1347,18 @@ impl App {
                     if self.roster.umas.iter().any(|u| u.name == card.uma) {
                         ui.label(RichText::new(format!("Not usable when training {}.", card.uma)).size(12.0).color(p.weak));
                     }
-                    if !card.url.is_empty() {
-                        web_link(ui, "uma.guide", &card.url);
-                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("📋 Use in plan").on_hover_text("Put it in the current plan's deck").clicked() {
+                            self.use_card_in_plan(card.id);
+                        }
+                        let comparing = self.cards.compare.contains(&card.id);
+                        if ui.button(if comparing { "⇄ Comparing" } else { "⇄ Compare" }).on_hover_text("Pick it, then another card, to see their effects side by side").clicked() {
+                            self.toggle_compare(card.id);
+                        }
+                        if !card.url.is_empty() {
+                            web_link(ui, "uma.guide", &card.url);
+                        }
+                    });
                 });
             });
             if !card.notes.is_empty() {
@@ -789,14 +1473,85 @@ impl App {
     }
 }
 
+/// A quick action on a card tile.
+#[derive(Clone, Copy)]
+enum CardAction {
+    UseInPlan,
+    Compare,
+    Details,
+}
+
+const ADD_W: f32 = 78.0;
+const ADD_H: f32 = ADD_W * 346.0 / 260.0;
+const ADD_TILE: egui::Vec2 = egui::vec2(ADD_W, ADD_H + 32.0);
+
 fn short_effect(name: &str) -> &str {
     match name {
         "Friendship Bonus" => "Friendship",
         "Training Effectiveness" => "Training",
         "Specialty Priority" => "Specialty",
-        "Initial Friendship Gauge" => "Init bond",
+        "Initial Friendship Gauge" | "Initial Friendship Gauge (uma.guide: Starting Bond)" => "Start bond",
         "Energy Cost Reduction" => "Energy cut",
         "Wit Friendship Recovery" => "Wit recov.",
         n => n,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Cards table sorts by an effect at the owned level and by type; the LB chips, effect
+    /// minimums and "Teaches…" filter what they say.
+    #[test]
+    fn cards_sort_and_filter() {
+        let mut app = App::for_tests();
+        let v = |app: &App, i: usize| app.effect_value(&app.roster.cards[i], effect::FRIENDSHIP);
+        app.cards.sort = TableSort { key: "friendship", desc: true };
+        let list = app.filtered_cards();
+        assert!(list.windows(2).all(|w| v(&app, w[0]) >= v(&app, w[1])));
+
+        app.cards.sort = TableSort { key: "type", desc: false };
+        let types: Vec<u8> = app.filtered_cards().iter().map(|&i| app.roster.cards[i].card_type as u8).collect();
+        assert!(types.windows(2).all(|w| w[0] <= w[1]));
+
+        app.cards.filter.lbs = [4].into();
+        let mlb = app.filtered_cards();
+        assert!(!mlb.is_empty() && mlb.iter().all(|&i| app.roster.cards[i].lb >= 4));
+
+        app.cards.filter = CardFilter { minimums: vec![(effect::FRIENDSHIP, 25)], ..Default::default() };
+        assert!(app.filtered_cards().iter().all(|&i| v(&app, i) >= 25));
+
+        let first = app.roster.cards[0].id;
+        let skill = app.card_skills(first)[0];
+        app.cards.filter = CardFilter { teaches: vec![skill], ..Default::default() };
+        let teaching = app.filtered_cards();
+        assert!(teaching.iter().any(|&i| app.roster.cards[i].id == first));
+        assert!(teaching.iter().all(|&i| app.card_skills(app.roster.cards[i].id).contains(&skill)));
+
+        let back: CardFilter = serde_json::from_value(serde_json::to_value(&app.cards.filter).unwrap()).unwrap();
+        assert_eq!(back, app.cards.filter);
+    }
+
+    /// "Use in current plan" fills the first empty slot once; Compare opens at two cards.
+    #[test]
+    fn use_in_plan_and_compare() {
+        let mut app = App::for_tests();
+        app.planner.plan.deck = [None; 5];
+        app.planner.plan.trainee = None;
+        let id = app.roster.cards[0].id;
+        app.use_card_in_plan(id);
+        assert_eq!(app.planner.plan.deck[0], Some(id));
+        app.use_card_in_plan(id);
+        assert_eq!(app.planner.plan.deck.iter().filter(|d| **d == Some(id)).count(), 1);
+        let first_uma = app.roster.cards[0].uma.clone();
+        let other = app.roster.cards.iter().find(|c| c.uma != first_uma).unwrap().id;
+        app.toggle_compare(id);
+        assert!(!app.cards.compare_open);
+        app.toggle_compare(other);
+        assert!(app.cards.compare_open);
+        assert_eq!(app.cards.compare, vec![id, other]);
+        app.toggle_compare(id);
+        assert_eq!(app.cards.compare, vec![other]);
     }
 }

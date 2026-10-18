@@ -53,13 +53,26 @@ the steps to plan a career, and the game words the app uses.
     the day, your trainer card, your best and missing cards for the next CM, and a game
     term a day. Two per row on a wide window, one per row on a narrow one.
 - Collection: everything you own, in three sub-tabs.
+  - Filters are on the left (the << button folds them away). Quick views set common
+    filters in one click, and "Save these filters as a view" keeps your own. The filters
+    that are on show above the results: click one to remove it, or Reset all.
+  - Sort with the box above the results, or click a table column's header: both agree.
+    S / M / L changes the picture size. Table shows more columns (Columns picks which;
+    Copy as CSV copies them for a spreadsheet).
   - Umas show aptitudes, stats and growth, skills (with what is locked at your potential),
-    evolutions, career objectives and events.
+    evolutions, career objectives and events. The aptitude grid on the left keeps umas
+    graded A or better (click again: S only) at a surface, distance or style.
   - Support cards show support effects at your level next to MLB, the unique effect,
-    hints and events.
-  - "+ Add cards" (Support cards) adds cards you just got, or raises the LB and level
-    of ones you have. It saves account\support_cards.md and downloads the card's picture.
-  - Skills: every Global skill, what it does, and where you can get it.
+    hints and events. Filter by limit break, by a skill a card teaches, or by an effect's
+    minimum (for example Friendship 25 or more). Hover a card for its numbers, to put it
+    in your plan's deck, or to compare it with another card side by side.
+  - "+ Add cards" (Support cards) shows every card's picture. Click one to set its limit
+    break and level, or click a diamond on it to save it at that LB at once. It saves
+    account\support_cards.md and downloads any missing pictures.
+  - Skills: every Global skill, what it does, and where you can get it. "Ones I can get"
+    shows only skills from umas and cards you own. Pick a Champions Meeting or a course
+    on the left to see only skills that can trigger there; "Test on a course" races an
+    uma with and without the skill.
 - Career: plan a career, race it, and log what happened, in three sub-tabs.
 - Career > Plan: five steps down the page. Pick a goal, the training scenario and a
   trainee, and build a deck by clicking a slot and choosing from the card art.
