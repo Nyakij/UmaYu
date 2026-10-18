@@ -176,7 +176,11 @@ This folder is a personal knowledge base and decision log for the user's Uma Mus
 
 ## Environment notes
 
-- Windows, PowerShell 5.1. Not a git repo.
+- Windows, PowerShell 5.1. Git for Windows and the GitHub CLI (`gh`, signed in as brickc4) are installed.
+- **Git:** a public repo, https://github.com/brickc4/umaLord (branch `main`). Commits use the brickc4 noreply address, set in the repo's git config, so no personal email goes public.
+  - `.gitignore` keeps the user's data out: `account/`, `plans/` (except `_template.md`), `results/`, `insights.md`, `profiles/`. The app writes blank ones from `app/templates/` when they're missing (`profile::ensure_account`), and `find_root` accepts a folder with only `knowledge/data`, so a fresh clone runs. Also ignored: `app/target`, `app/.cargo` (per-machine toolchain paths; `setup-toolchain.ps1` writes it), `tools/opencode`, `dist`, `knowledge/digest`.
+  - The repo is public: before every push, check `git diff --cached --name-only` for personal files and search the staged text for names, emails, local paths and keys.
+  - **Releases:** build the zip with `tools\package.ps1` (it never includes the account), then `gh release create vX.Y.Z dist\umaLord-<date>.zip --title ... --notes-file <file>`. Pass notes as a file: PowerShell 5.1 breaks quoted multi-line `--notes`.
 - The user may send screenshots of rosters, results or sparks. Read them and transcribe the details into the matching file.
 - Roster screenshots show card art and uma icons, not names. To identify them, download uma.guide thumbnails and build labeled contact sheets with the scripts in `tools/`; they use WPF, so run them with `powershell -STA`:
   - `sheet.ps1`: card sheets per type and rarity. Thumbnails are `/img/card/composite/tex_support_card_<id>_thumb.webp`.
