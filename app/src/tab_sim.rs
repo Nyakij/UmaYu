@@ -285,19 +285,20 @@ impl App {
             return;
         };
 
-        section_label(ui, "Champions Meeting", "Recent and upcoming CMs. A ? means the course and conditions aren't announced yet.");
+        section_label(ui, "Champions Meeting", "Recent and upcoming CMs. A ? means it isn't announced yet: the date, course and conditions are Umalator's estimate.");
         let mut presets: Vec<_> = self.kb.umalator_presets.iter().filter(|e| e.is_cm()).cloned().collect();
         presets.sort_by(|a, b| b.date.cmp(&a.date));
         let today = crate::ui_util::today();
-        let upcoming: Vec<_> = presets.iter().filter(|e| e.date >= today).rev().take(3).cloned().collect();
-        let recent: Vec<_> = presets.iter().filter(|e| e.date < today).take(3).cloned().collect();
+        let upcoming: Vec<_> = self.kb.upcoming_cms(&today).into_iter().take(3).cloned().collect();
+        let recent: Vec<_> = presets.iter().filter(|e| !upcoming.iter().any(|u| u.name == e.name && u.date == e.date) && e.date < today).take(3).cloned().collect();
         ui.horizontal_wrapped(|ui| {
             for e in upcoming.iter().chain(&recent) {
                 let on = self.sim.course == e.course && self.sim.ground == i32::from(e.ground) && self.sim.season == i32::from(e.season);
-                let mark = if e.confirmed { "" } else { "? " };
+                let mark = if e.announced { "" } else { "? " };
                 let scenario = self.kb.cm_scenario(e).map(|s| format!("\nScenario: {s}")).unwrap_or_default();
-                let hover = format!("{} ({})\n{} · {}{scenario}{}", e.name, e.date, e.course_name, e.conditions, if e.confirmed { "" } else { "\nNot announced yet" });
-                if ui.add(egui::Button::new(RichText::new(format!("{mark}{} {}", e.name, &e.date[2..7])).size(12.0)).selected(on).corner_radius(CornerRadius::same(10)).small()).on_hover_text(hover).clicked() {
+                let off = if e.disabled_skills.is_empty() { String::new() } else { format!("\n{} skills won't activate; loading it drops them from both builds.", e.disabled_skills.len()) };
+                let hover = format!("{} ({})\n{} · {}{scenario}{off}\n{}", e.name, e.date, e.course_name, e.conditions, e.status_explained());
+                if ui.add(egui::Button::new(RichText::new(format!("{mark}{}", e.short_label())).size(12.0)).selected(on).corner_radius(CornerRadius::same(10)).small()).on_hover_text(hover).clicked() {
                     self.sim.course = e.course;
                     self.sim.ground = i32::from(e.ground);
                     self.sim.weather = i32::from(e.weather);
@@ -305,6 +306,10 @@ impl App {
                     self.sim.time = i32::from(e.time);
                     self.fill_aptitudes(0);
                     self.fill_aptitudes(1);
+                    let dropped = self.drop_disabled_skills(&e.disabled_skills);
+                    if dropped > 0 {
+                        self.toast(format!("Took out {dropped} skills that won't activate in the {}.", e.name), crate::ui_util::ToastKind::Info);
+                    }
                 }
             }
         });
@@ -1032,11 +1037,27 @@ impl App {
         self.sim.umas = [without, with];
         self.sim.from_plan = true;
         self.sim.compare = None;
+        let disabled = self.plan_cm().map(|e| e.disabled_skills.clone()).unwrap_or_default();
+        let dropped = self.drop_disabled_skills(&disabled);
+        if dropped > 0 {
+            notes.push(format!("left out {dropped} skills that won't activate in this CM"));
+        }
         let mut msg = "Loaded the plan: Uma 1 without the skills to buy, Uma 2 with them.".to_string();
         if !notes.is_empty() {
             msg += &format!(" Note: {}.", notes.join("; "));
         }
         Ok(msg)
+    }
+
+    /// Take skills a Champions Meeting turns off out of both builds; returns how many went.
+    pub(crate) fn drop_disabled_skills(&mut self, disabled: &[u32]) -> usize {
+        let mut n = 0;
+        for u in &mut self.sim.umas {
+            let before = u.skills.len();
+            u.skills.retain(|s| !disabled.contains(s));
+            n += before - u.skills.len();
+        }
+        n
     }
 
     /// Planner's "Simulate": load the plan and run Compare.

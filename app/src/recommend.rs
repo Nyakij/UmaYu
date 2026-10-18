@@ -161,6 +161,10 @@ impl App {
             }
         }
         let result = (|| {
+            // The plan's Champions Meeting turns some skills off.
+            if self.plan_disabled(id) {
+                return Some(false);
+            }
             let data = self.sim_data.as_ref()?;
             if !data.skills.contains_key(&id) {
                 return None;
@@ -494,6 +498,8 @@ impl App {
         let meta = self.plan_meta_skills();
         let items: Vec<(u32, f64, f64)> = candidates
             .iter()
+            // Never buy a skill the plan's Champions Meeting turns off.
+            .filter(|id| !self.plan_disabled(**id))
             .filter_map(|id| {
                 let s = self.kb.skills.get(id)?;
                 if s.sp == 0 || s.category == "Unique" {

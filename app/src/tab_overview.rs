@@ -156,43 +156,95 @@ impl App {
         }
     }
 
-    /// The soonest Champions Meeting: when, where, conditions, and a button to plan for it.
+    /// The soonest Champions Meeting: whether it's announced, countdowns to league selection,
+    /// Round 1 and the end (local time, UTC on hover), course and conditions, the skills that won't
+    /// activate, and a button to plan for it.
     fn next_cm_card(&mut self, ui: &mut egui::Ui) {
         let today = today();
         let Some(cm) = self.kb.upcoming_cms(&today).first().copied().cloned() else { return };
         let p = pal(ui);
-        let days = day_number(&cm.date) - day_number(&today);
+        let now = crate::live::now();
         let mut plan_it = false;
+        // Countdowns tick down while Home is open.
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(30));
         card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
+                    ui.set_max_width(ui.available_width() - 170.0);
+                    ui.horizontal_wrapped(|ui| {
+                        let running = cm.round1.is_some_and(|t| t <= now) && cm.ends.is_none_or(|e| e > now);
                         ui.label(RichText::new("🏆").size(20.0));
-                        ui.label(semibold(format!("Next Champions Meeting: {}", cm.name), 16.5));
-                        let when = match days {
-                            0 => "today".to_string(),
-                            1 => "tomorrow".to_string(),
-                            d => format!("in {d} days"),
-                        };
-                        badge(ui, format!("{} · {when}", cm.date), p.link);
+                        let heading = if running { "Champions Meeting on now" } else { "Next Champions Meeting" };
+                        ui.label(semibold(format!("{heading}: {}", cm.name), 16.5));
+                        if cm.announced {
+                            badge(ui, "✔ Announced", pal(ui).good).on_hover_text(cm.status_explained());
+                        } else {
+                            badge(ui, "≈ Estimated", pal(ui).warn).on_hover_text(cm.status_explained());
+                        }
                     });
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(&cm.course_name).strong());
+                        let course = ui.label(RichText::new(&cm.course_name).strong());
+                        if let Some(text) = &cm.official_conditions {
+                            course.on_hover_text(format!("As announced: {text}"));
+                        }
                         ui.label(RichText::new(format!("· {}", cm.conditions)).color(p.weak));
                         if let Some(sc) = self.kb.cm_scenario(&cm) {
                             ui.label(RichText::new(format!("· trained in {sc}")).color(p.weak));
                         }
                     });
-                    if cm.confirmed {
-                        ui.label(RichText::new("✔ Course and conditions are confirmed.").size(12.5).color(pal(ui).good));
+                    ui.add_space(4.0);
+                    let milestones: Vec<(&str, i64)> =
+                        [("League selection", cm.league_selection), ("Round 1", cm.round1), ("Ends", cm.ends)].into_iter().filter_map(|(l, t)| Some((l, t?))).collect();
+                    if milestones.is_empty() {
+                        let est = crate::live::date_epoch(&cm.date).map(|t| format!(" ({})", crate::live::fmt_until(t - now))).unwrap_or_default();
+                        ui.label(RichText::new(format!("Round 1 around {}{est}, by Umalator's estimate. The official date comes with the announcement.", crate::live::short_day(&cm.date))).color(p.weak));
                     } else {
-                        ui.label(RichText::new("? Not announced yet: the course and conditions are Umalator's best guess and may change.").size(12.5).color(pal(ui).warn));
+                        let next = milestones.iter().position(|(_, t)| *t > now);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 10.0;
+                            for (i, (label, t)) in milestones.iter().enumerate() {
+                                let past = *t <= now;
+                                let frame = egui::Frame::new()
+                                    .fill(if Some(i) == next { p.accent.gamma_multiply(if ui.visuals().dark_mode { 0.22 } else { 0.12 }) } else { p.raised })
+                                    .stroke(Stroke::new(1.0, if Some(i) == next { p.accent_strong } else { p.border }))
+                                    .corner_radius(CornerRadius::same(8))
+                                    .inner_margin(egui::Margin::symmetric(10, 5));
+                                frame
+                                    .show(ui, |ui| {
+                                        ui.vertical(|ui| {
+                                            ui.label(RichText::new(*label).size(11.5).color(p.weak));
+                                            ui.label(semibold(crate::live::fmt_local(*t), 14.0).color(if past { p.weak } else { p.text }));
+                                            let when = if past { format!("✔ {}", crate::live::fmt_until(t - now)) } else { crate::live::fmt_until(t - now) };
+                                            ui.label(RichText::new(when).size(12.0).color(if Some(i) == next { p.accent_strong } else { p.weak }));
+                                        });
+                                    })
+                                    .response
+                                    .on_hover_text(format!("{}\nShown in your computer's time zone.", crate::live::fmt_utc(*t)));
+                            }
+                        });
+                    }
+                    if !cm.disabled_skills.is_empty() {
+                        ui.add_space(4.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(RichText::new("Won't activate:").size(12.5).color(p.weak))
+                                .on_hover_text("The official announcement turns these skills off for this Champions Meeting. Auto-pick never buys them for it.");
+                            for (base, marks) in disabled_groups(&self.kb, &cm.disabled_skills) {
+                                egui::Frame::new().fill(p.raised).corner_radius(CornerRadius::same(10)).inner_margin(egui::Margin::symmetric(8, 1)).show(ui, |ui| {
+                                    ui.label(RichText::new(format!("{base} {marks}")).size(12.5).strikethrough().color(p.weak));
+                                });
+                            }
+                        });
                     }
                 });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
                     let b = crate::ui_util::primary_button(ui, "📋 Plan for it", 14.0).min_size(vec2(0.0, 32.0));
                     if ui.add(b).on_hover_text("Start a new plan with this course and its conditions filled in").clicked() {
                         plan_it = true;
+                    }
+                    if let Some(id) = cm.article {
+                        ui.add_space(4.0);
+                        crate::ui_util::web_link(ui, "The announcement", &crate::live::article_url(id));
                     }
                 });
             });
@@ -368,4 +420,26 @@ impl App {
             );
         });
     }
+}
+
+/// Disabled skills grouped by name: ("Night Races", "◎ ○ ×").
+pub(crate) fn disabled_groups(kb: &crate::knowledge::Knowledge, ids: &[u32]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for id in ids {
+        let name = kb.skill_name(*id);
+        let (base, mark) = match name.trim_end().char_indices().last() {
+            Some((i, c)) if matches!(c, '◎' | '○' | '×') => (name[..i].trim().to_string(), c.to_string()),
+            _ => (name.clone(), String::new()),
+        };
+        match out.iter_mut().find(|(b, _)| *b == base) {
+            Some((_, marks)) => {
+                if !mark.is_empty() {
+                    marks.push(' ');
+                    marks.push_str(&mark);
+                }
+            }
+            None => out.push((base, mark)),
+        }
+    }
+    out
 }

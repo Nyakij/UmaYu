@@ -6,6 +6,8 @@ What changed in each release. Releases are built from the tagged source by GitHu
 
 ### Added
 
+- **Live Champions Meeting schedule:** on launch the app reads the game's official news (umamusume.com) and Umalator's latest presets in the background. Home shows whether the next CM is announced, with countdowns to league selection, Round 1 and the end in your time zone, and the skills it turns off. The planner and Race sim chips read "Capricorn Cup · Oct 31". The status bar says how fresh the schedule is, and Settings → Data and updates can turn it off or refresh it. Without internet it uses the last fetch, or the bundled data.
+- **Skills a CM turns off** are never auto-picked for it, are struck through in the plan's skill list, and are taken out of builds when a CM or a plan for it is loaded into the Race sim.
 - **Settings** is now a proper window (⚙ or Ctrl+,) with five sections: Profile (rename the account, save, load, start over), Appearance (mode, themes with live previews, Seiun Sky, size and spacing), Data and updates (how old the game data and meta sheet are, and how to refresh them), AI assistant (the Ask tab's backend, model and key, moved out of the Ask tab), and About. Help has its own ? button.
 - **Two new themes:** Track day (trophy gold with a racetrack's rails) and Ink (high contrast black and white).
 - **Size and spacing:** make everything 90–125% as big, and switch to compact spacing.
@@ -22,6 +24,7 @@ What changed in each release. Releases are built from the tagged source by GitHu
 
 ### Fixed
 
+- The next Champions Meeting's date was Umalator's estimate (Capricorn Cup on Oct 25); it's now the official Round 1 (Oct 31), and plans saved with the old date still find it.
 - The Claude API key badge said a key was set even when none was.
 - Save my data no longer opens Explorer by itself; its message has a Show button instead.
 - Showing a profile with `UMALORD_PROFILE` (for screenshots) no longer overwrites the Ask tab's roster digest with that profile's roster.

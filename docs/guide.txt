@@ -137,6 +137,14 @@ Each row's ID is the uma.guide ID of that uma or card.
 
 Updating the game data
 ----------------------
+The Champions Meeting schedule updates by itself: when the app starts (at most every 6
+hours) it reads the game's official news on umamusume.com and Umalator's presets, in the
+background. Announced events show their league selection, Round 1 and end times in your
+time zone, and the skills that won't activate (auto-pick never buys those). Events not
+announced yet are marked "Estimated". Turn this off, or refresh by hand, in Settings > Data
+and updates. Without internet the app uses what it fetched last time, or the data it shipped
+with.
+
 knowledge\data was built from uma.guide on 2026-10-16, and knowledge\data\sim (the race
 simulator's skills and courses) from umalator.app on 2026-10-17. To refresh them, install
 Python 3, then run this from the umaLord folder:

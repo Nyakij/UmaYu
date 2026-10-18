@@ -212,11 +212,8 @@ impl App {
     /// The Champions Meeting number the plan is for: its linked CM, else the CM on its course
     /// nearest to today.
     pub(crate) fn plan_cm_number(&self) -> Option<u32> {
-        let p = &self.planner.plan;
         let presets = &self.kb.umalator_presets;
-        if let Some(date) = p.cm_date.as_deref()
-            && let Some(e) = presets.iter().find(|e| e.is_cm() && e.date == date)
-        {
+        if let Some(e) = self.plan_cm().filter(|e| e.id > 0) {
             return Some(e.id);
         }
         let course = self.plan_race_setup().course?;

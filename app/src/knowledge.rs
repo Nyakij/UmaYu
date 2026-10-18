@@ -355,9 +355,33 @@ pub struct UmalatorCourse {
     pub layout: String,
 }
 
-/// A Champions Meeting or League of Heroes preset from Umalator: its course and conditions.
-/// Condition codes are 1-based in GROUNDS / WEATHERS / SEASONS order; time 2..4 is Midday..Night.
-#[derive(Deserialize, Clone, Debug)]
+/// Where an event's dates and conditions come from, best first.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum EventSource {
+    /// The official Global news (umamusume.com).
+    Official,
+    /// Moomoolator's presets, fetched live from umalator.app.
+    Umalator,
+    /// `knowledge/data/umalator.json`, shipped with the app.
+    #[default]
+    Bundled,
+}
+
+impl EventSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            EventSource::Official => "umamusume.com",
+            EventSource::Umalator => "umalator.app",
+            EventSource::Bundled => "the bundled data",
+        }
+    }
+}
+
+/// A Champions Meeting or League of Heroes event: its course and conditions, from Umalator's
+/// presets, with the official announcement's dates, conditions and disabled skills on top
+/// (`live::merge`). Condition codes are 1-based in GROUNDS / WEATHERS / SEASONS order; time 2..4
+/// is Midday..Night.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct EventPreset {
     /// The event's number, e.g. 20 for CM 20.
     #[serde(default)]
@@ -378,14 +402,62 @@ pub struct EventPreset {
     /// e.g. "Good · Cloudy · Winter · Midday".
     #[serde(default)]
     pub conditions: String,
-    /// False until the course and conditions are announced.
+    /// Umalator's own flag: false until it considers the course and conditions final.
     #[serde(default)]
     pub confirmed: bool,
+    /// When league selection opens, Round 1 starts and the event ends (UTC seconds), from the
+    /// official announcement.
+    #[serde(default)]
+    pub league_selection: Option<i64>,
+    #[serde(default)]
+    pub round1: Option<i64>,
+    #[serde(default)]
+    pub ends: Option<i64>,
+    /// Skills that won't activate in this event (official announcement).
+    #[serde(default)]
+    pub disabled_skills: Vec<u32>,
+    #[serde(default)]
+    pub source: EventSource,
+    /// The official site has announced it: dates and conditions are final.
+    #[serde(default)]
+    pub announced: bool,
+    /// The official article's id (`live::article_url`).
+    #[serde(default)]
+    pub article: Option<u32>,
+    /// The conditions as the announcement wrote them.
+    #[serde(default)]
+    pub official_conditions: Option<String>,
 }
 
 impl EventPreset {
     pub fn is_cm(&self) -> bool {
         self.event == "Champions Meeting"
+    }
+
+    /// "Capricorn Cup · Oct 31".
+    pub fn short_label(&self) -> String {
+        format!("{} · {}", self.name, crate::live::short_day(&self.date))
+    }
+
+    /// "Announced on umamusume.com" or "Estimated by umalator.app".
+    pub fn status(&self) -> String {
+        if self.announced {
+            format!("Announced on {}", self.source.label())
+        } else {
+            format!("Estimated by {}", self.source.label())
+        }
+    }
+
+    /// A line for hovers: whether the date, course and conditions are final.
+    pub fn status_explained(&self) -> String {
+        if self.announced {
+            format!("Announced on {}: the dates, course and conditions are official.", self.source.label())
+        } else {
+            format!(
+                "Estimated: {} guesses the date, course and conditions until the official announcement, which can change them.",
+                if self.source == EventSource::Bundled { "the bundled Umalator data" } else { "umalator.app" }
+            )
+        }
     }
 }
 
@@ -740,11 +812,30 @@ impl Knowledge {
         self.tracks.get(&id).cloned().unwrap_or_else(|| format!("Track {id}"))
     }
 
-    /// Champions Meeting presets dated `today` (YYYY-MM-DD) or later, soonest first.
+    /// Champions Meeting events from `today` (YYYY-MM-DD) on, soonest first: those starting
+    /// today or later, and one still running (its official end hasn't passed).
     pub fn upcoming_cms(&self, today: &str) -> Vec<&EventPreset> {
-        let mut out: Vec<_> = self.umalator_presets.iter().filter(|e| e.is_cm() && e.date.as_str() >= today).collect();
+        let mut out: Vec<_> = self
+            .umalator_presets
+            .iter()
+            .filter(|e| e.is_cm() && (e.date.as_str() >= today || e.ends.is_some_and(|t| crate::live::utc_date(t).as_str() >= today)))
+            .collect();
         out.sort_by(|a, b| a.date.cmp(&b.date));
         out
+    }
+
+    /// The Champions Meeting a plan was made for. Live data moves estimated dates (and can change
+    /// the course), so it matches the cup's name within 21 days of the saved date first, then the
+    /// exact date, then the same course within 21 days.
+    pub fn find_cm(&self, date: &str, course: Option<u32>, name: Option<&str>) -> Option<&EventPreset> {
+        let cms = || self.umalator_presets.iter().filter(|e| e.is_cm());
+        let saved = crate::live::date_epoch(date);
+        let near = move |e: &&EventPreset| saved.zip(crate::live::date_epoch(&e.date)).is_some_and(|(a, b)| (a - b).abs() <= 21 * 86_400);
+        cms()
+            .filter(near)
+            .find(|e| name.is_some_and(|n| e.name.eq_ignore_ascii_case(n)))
+            .or_else(|| cms().find(|e| e.date == date))
+            .or_else(|| cms().filter(near).find(|e| course == Some(e.course)))
     }
 
     /// Human tag line for a skill, e.g. "Pace Chaser · Medium · Tokyo".

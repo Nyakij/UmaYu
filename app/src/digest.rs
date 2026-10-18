@@ -22,6 +22,36 @@ impl App {
         );
         let _ = writeln!(md, "Server: {}. {} umas, {} support cards.\n", self.roster.server.as_deref().unwrap_or("unknown"), self.roster.umas.len(), self.roster.cards.len());
 
+        // The live Champions Meeting schedule (official news over Umalator's estimates), which the
+        // app fetches into a cache outside this folder.
+        let cms: Vec<_> = kb.upcoming_cms(&crate::ui_util::today()).into_iter().take(4).collect();
+        if !cms.is_empty() {
+            let _ = writeln!(md, "## Champions Meeting schedule\n");
+            let _ = writeln!(
+                md,
+                "The next Champions Meetings. \"Announced\" rows come from the official news (umamusume.com) and are final; \"estimated\" rows are Umalator's guess and may change. Times are UTC.\n"
+            );
+            let _ = writeln!(md, "| Cup | Round 1 | League selection | Ends | Course | Conditions | Status | Won't activate |");
+            let _ = writeln!(md, "|---|---|---|---|---|---|---|---|");
+            let time = |t: Option<i64>| t.map(|t| format!("{} {}", crate::live::utc_date(t), crate::live::fmt_utc(t).split(" UTC").next().unwrap_or(""))).unwrap_or_else(|| "—".into());
+            for e in cms {
+                let disabled: Vec<String> = e.disabled_skills.iter().map(|s| kb.skill_name(*s)).collect();
+                let _ = writeln!(
+                    md,
+                    "| {} | {} | {} | {} | {} | {} | {} | {} |",
+                    e.name,
+                    e.round1.map_or_else(|| format!("{} (estimated)", e.date), |t| time(Some(t))),
+                    time(e.league_selection),
+                    time(e.ends),
+                    e.course_name,
+                    e.conditions,
+                    if e.announced { "announced".to_string() } else { format!("estimated ({})", e.source.label()) },
+                    if disabled.is_empty() { "—".into() } else { disabled.join(", ") }
+                );
+            }
+            let _ = writeln!(md);
+        }
+
         // Compact tables first, so list and comparison questions need one read and see every row.
         let _ = writeln!(md, "## At a glance: umas\n");
         let _ = writeln!(md, "One row per owned uma. Aptitude grades, S best to G worst. Growth is the stat growth bonus.\n");

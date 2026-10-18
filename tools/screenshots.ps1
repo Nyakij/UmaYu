@@ -25,7 +25,9 @@ param(
     [string]$Exe = '',
     [string]$ProfileFile = '',
     # Where the mascot goes: everywhere, home or off. Empty uses your saved setting.
-    [string]$Chibi = ''
+    [string]$Chibi = '',
+    # The live CM schedule: cache (what was fetched last, no network), fetch, or off (bundled data).
+    [string]$Live = 'cache'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,7 +89,7 @@ $names = if ($Pages.Count) { $Pages } else { @($all.Keys) }
 foreach ($n in $names) { if (-not $all.Contains($n)) { throw "Unknown page '$n'. Pages: $($all.Keys -join ', ')" } }
 
 $vars = 'SCREENSHOT', 'TAB', 'VIEW', 'SELECT', 'RUN', 'SCROLL', 'SETUP', 'SETTINGS', 'SETTINGS_PAGE', 'HELP', 'ADD', 'PICKER',
-    'WINDOW', 'THEME', 'LOOK', 'MASCOT', 'CHIBI', 'PROFILE', 'ASK', 'INSTALL', 'ROOT'
+    'WINDOW', 'THEME', 'LOOK', 'MASCOT', 'CHIBI', 'PROFILE', 'ASK', 'INSTALL', 'ROOT', 'LIVE'
 $running = New-Object System.Collections.ArrayList
 $count = 0
 foreach ($name in $names) {
@@ -103,6 +105,7 @@ foreach ($name in $names) {
             $env:UMALORD_LOOK = $look
             $env:UMALORD_MASCOT = '1'
             if ($Chibi) { $env:UMALORD_CHIBI = $Chibi }
+            $env:UMALORD_LIVE = $Live
             if ($ProfileFile) { $env:UMALORD_PROFILE = $ProfileFile }
             foreach ($kv in $all[$name].GetEnumerator()) { Set-Item "Env:UMALORD_$($kv.Key)" $kv.Value }
             # Setup pages show over an empty roster unless a step is named; others keep it closed.

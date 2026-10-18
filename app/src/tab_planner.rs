@@ -77,9 +77,12 @@ pub(crate) struct Plan {
     pub style: Style,
     /// Race id of the target course, if any.
     pub course: Option<u32>,
-    /// Date of the Champions Meeting preset the goal came from (`knowledge/data/umalator.json`).
+    /// Date of the Champions Meeting the goal came from, as it was when the plan was saved.
     #[serde(default)]
     pub cm_date: Option<String>,
+    /// That Champions Meeting's cup name, e.g. "Capricorn Cup" (`Knowledge::find_cm` matches it).
+    #[serde(default)]
+    pub cm_name: Option<String>,
     /// That preset's Umalator course id, which pins its inner or outer layout.
     #[serde(default)]
     pub umalator_course: Option<u32>,
@@ -117,6 +120,7 @@ impl Plan {
         }
         self.purpose = Purpose::ChampionsMeeting;
         self.cm_date = Some(preset.date.clone());
+        self.cm_name = Some(preset.name.clone());
         self.umalator_course = Some(preset.course);
         if let Some(s) = kb.cm_scenario(preset) {
             self.scenario = s.to_string();
@@ -212,6 +216,7 @@ impl Default for Plan {
             style: Style::Pace,
             course: None,
             cm_date: None,
+            cm_name: None,
             umalator_course: None,
             conditions: String::new(),
             spark_goal: String::new(),
@@ -871,10 +876,15 @@ impl App {
         }
     }
 
-    /// The Champions Meeting preset the plan came from, if it's still in umalator.json.
-    fn plan_cm(&self) -> Option<&EventPreset> {
-        let date = self.planner.plan.cm_date.as_deref()?;
-        self.kb.umalator_presets.iter().find(|e| e.is_cm() && e.date == date)
+    /// Whether the plan's Champions Meeting turns this skill off (official announcement).
+    pub(crate) fn plan_disabled(&self, skill: u32) -> bool {
+        self.plan_cm().is_some_and(|e| e.disabled_skills.contains(&skill))
+    }
+
+    /// The Champions Meeting the plan was made for (`Knowledge::find_cm`).
+    pub(crate) fn plan_cm(&self) -> Option<&EventPreset> {
+        let p = &self.planner.plan;
+        self.kb.find_cm(p.cm_date.as_deref()?, p.umalator_course, p.cm_name.as_deref())
     }
 
     /// One click on an upcoming Champions Meeting fills the course, distance, surface and conditions.
@@ -882,6 +892,7 @@ impl App {
         let p = pal(ui);
         let mut shown: Vec<EventPreset> = self.kb.upcoming_cms(&today()).into_iter().take(4).cloned().collect();
         // A plan linked to a CM that has since passed still shows it, so it can be unlinked.
+        let linked = self.plan_cm().map(|e| (e.name.clone(), e.date.clone()));
         if let Some(e) = self.plan_cm()
             && !shown.iter().any(|u| u.date == e.date)
         {
@@ -892,8 +903,8 @@ impl App {
             ui.vertical(|ui| {
                 ui.set_width(LABEL_W);
                 ui.label(RichText::new("Upcoming CM").color(p.weak));
-                if shown.iter().any(|e| !e.confirmed) {
-                    ui.label(RichText::new("? not announced").size(11.0).color(p.weak));
+                if shown.iter().any(|e| !e.announced) {
+                    ui.label(RichText::new("? estimated").size(11.0).color(p.weak)).on_hover_text("Not announced yet: Umalator's guess at the date, course and conditions.");
                 }
             });
             ui.horizontal_wrapped(|ui| {
@@ -901,17 +912,18 @@ impl App {
                     ui.label(RichText::new("none in knowledge/data/umalator.json; refresh it with tools/update_knowledge.py").size(12.5).color(p.weak));
                 }
                 for e in &shown {
-                    let on = self.planner.plan.cm_date.as_deref() == Some(e.date.as_str());
+                    let on = linked.as_ref().is_some_and(|(n, d)| *n == e.name && *d == e.date);
                     let small = egui::FontId::proportional(12.0);
                     let mut job = egui::text::LayoutJob::default();
-                    let (mark, mark_color) = if e.confirmed { ("✔ ", pal(ui).good) } else { ("? ", pal(ui).warn) };
+                    let (mark, mark_color) = if e.announced { ("✔ ", pal(ui).good) } else { ("? ", pal(ui).warn) };
                     job.append(mark, 0.0, egui::TextFormat::simple(egui::FontId::proportional(13.0), mark_color));
                     job.append(&e.name, 0.0, egui::TextFormat::simple(egui::FontId::new(13.5, egui::FontFamily::Name(crate::theme::SEMIBOLD.into())), p.text));
-                    job.append(&format!("  {}\n", short_date(&e.date)), 0.0, egui::TextFormat::simple(small.clone(), p.weak));
+                    job.append(&format!(" · {}\n", short_date(&e.date)), 0.0, egui::TextFormat::simple(small.clone(), p.weak));
                     job.append(&e.course_name, 0.0, egui::TextFormat::simple(small, p.weak));
-                    let status = if e.confirmed { "Confirmed." } else { "Course and conditions aren't announced yet; Umalator's preset may change." };
                     let action = if on { "Click again to unlink it (the course and conditions stay)." } else { "Click to fill the goal from it." };
-                    let hover = format!("{} {}\n{} · {}\n{status}\n{action}", e.name, e.date, e.course_name, e.conditions);
+                    let round1 = e.round1.map(|t| format!("Round 1: {} ({})\n", crate::live::fmt_local(t), crate::live::fmt_utc(t))).unwrap_or_default();
+                    let disabled = if e.disabled_skills.is_empty() { String::new() } else { format!("{} skills won't activate in it.\n", e.disabled_skills.len()) };
+                    let hover = format!("{} {}\n{} · {}\n{round1}{disabled}{}\n{action}", e.name, e.date, e.course_name, e.conditions, e.status_explained());
                     if ui.add(egui::Button::new(job).selected(on).corner_radius(CornerRadius::same(10))).on_hover_text(hover).clicked() {
                         pick = Some((e.clone(), on));
                     }
@@ -922,6 +934,7 @@ impl App {
         match pick {
             Some((e, true)) => {
                 self.planner.plan.cm_date = None;
+                self.planner.plan.cm_name = None;
                 self.planner.plan.umalator_course = None;
                 self.toast(format!("Unlinked the {}; the course and conditions stay.", e.name), crate::ui_util::ToastKind::Success);
             }
@@ -1765,6 +1778,8 @@ impl App {
         // The meta sheet's picks first, then by gain.
         rows.sort_by(|a, b| meta_w(&b.0).total_cmp(&meta_w(&a.0)).then(b.3.total_cmp(&a.3)).then(a.2.cmp(&b.2)).then(a.0.cmp(&b.0)));
         let mut chosen = self.planner.plan.skills.clone();
+        // The skills the plan's CM turns off, and its name, looked up once for every row.
+        let (disabled, cup) = self.plan_cm().map(|e| (e.disabled_skills.clone(), e.name.clone())).unwrap_or_default();
         // A long list scrolls inside the card rather than stretching the page.
         // The min height matters: below the first screenful, a nested area's available height is ~0.
         let height = (rows.len() as f32 * 28.0 + 24.0).min(360.0);
@@ -1802,7 +1817,14 @@ impl App {
                                 "Recommended by the meta sheet ({strength}): {why}.\nAuto-pick buys these first."
                             ));
                         }
-                        self.skill_link(ui, *s, *fit == Fit::Other && *gain <= 0.05 && !meta.contains_key(s));
+                        if disabled.contains(s) {
+                            ui.label(RichText::new("⊘").color(pal(ui).bad)).on_hover_text(format!(
+                                "Won't activate in the {cup}: the official announcement turns it off. Auto-pick never buys it."
+                            ));
+                            ui.label(RichText::new(self.kb.skill_name(*s)).size(13.0).strikethrough().color(p.weak));
+                        } else {
+                            self.skill_link(ui, *s, *fit == Fit::Other && *gain <= 0.05 && !meta.contains_key(s));
+                        }
                     });
                     let gain_text = if simulated.is_some() && self.planner.current_skill_values(key).is_some_and(|v| v.rows.contains_key(s)) {
                         RichText::new(format!("{gain:+.2} L")).color(if *gain > 0.05 { pal(ui).good } else { p.weak })
@@ -1980,12 +2002,13 @@ impl App {
         // Conditions from the plan, else from the plan's CM or the nearest event on this course,
         // else Umalator's defaults.
         let today = today();
+        let linked = self.plan_cm();
         let preset = course.and_then(|c| {
             let on_course = || kb.umalator_presets.iter().filter(move |e| e.course == c.id);
-            on_course().find(|e| p.cm_date.as_deref() == Some(e.date.as_str())).or_else(|| on_course().min_by_key(|e| days_apart(&e.date, &today)))
+            linked.filter(|e| e.course == c.id).or_else(|| on_course().min_by_key(|e| days_apart(&e.date, &today)))
         });
-        if let Some(e) = preset.filter(|e| exact.is_some() && !e.confirmed) {
-            notes.push(format!("the {}'s course and conditions aren't announced yet", e.name));
+        if let Some(e) = preset.filter(|e| exact.is_some() && !e.announced) {
+            notes.push(format!("the {}'s course and conditions are estimated, not announced yet", e.name));
         }
         let mut from_event = false;
         let mut codes = [None; 3];
@@ -2103,8 +2126,12 @@ impl App {
         let _ = writeln!(md, "- Target: {} {}, {}", p.distance.label(), p.surface.label(), p.style.label());
         let _ = writeln!(md, "- Course: {course}");
         if let Some(e) = self.plan_cm() {
-            let status = if e.confirmed { "confirmed" } else { "course and conditions not announced yet" };
+            let status = if e.announced { "announced".to_string() } else { "estimated, not announced yet".to_string() };
             let _ = writeln!(md, "- Champions Meeting: {} ({}), {}, {}; {status}", e.name, e.date, e.course_name, e.conditions);
+            if !e.disabled_skills.is_empty() {
+                let names: Vec<String> = e.disabled_skills.iter().map(|s| self.kb.skill_name(*s)).collect();
+                let _ = writeln!(md, "- Won't activate in this CM: {}", names.join(", "));
+            }
         }
         if let Some(c) = p.umalator_course {
             let _ = writeln!(md, "- Umalator course id: {c}");

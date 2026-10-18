@@ -11,6 +11,7 @@ mod career;
 mod data;
 mod digest;
 mod knowledge;
+mod live;
 mod meta;
 mod onboarding;
 mod plan_sim;
@@ -381,6 +382,40 @@ mod tests {
         }
     }
 
+    /// A plan saved against Umalator's guess (2026-10-25, course 10701, no cup name) still links
+    /// to the Capricorn Cup once the official news moves it to 2026-10-31, and the skills that CM
+    /// turns off can't activate and are never picked.
+    #[test]
+    fn old_plans_find_their_cm_after_live_data() {
+        let mut a = app();
+        let fixture = |n: &str| std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(n)).unwrap();
+        a.live.data = Some(live::LiveData {
+            announcements: live::parse_news(&fixture("news_sample.json")).unwrap(),
+            umalator_presets: live::parse_umalator_presets(&fixture("umalator_presets_sample.js")),
+            ..Default::default()
+        });
+        a.apply_live();
+        a.planner.demo(&a.roster, &a.kb, 100601);
+        let old: tab_planner::Plan = serde_json::from_str(r#"{"title":"old","cm_date":"2026-10-25","umalator_course":10701,"conditions":"Firm"}"#).unwrap();
+        assert_eq!(old.cm_name, None, "plans saved before cm_name existed load");
+        a.planner.plan.cm_date = old.cm_date;
+        a.planner.plan.umalator_course = old.umalator_course;
+        a.planner.plan.cm_name = None;
+        let cm = a.plan_cm().cloned().expect("still linked");
+        assert_eq!((cm.name.as_str(), cm.date.as_str(), cm.announced), ("Capricorn Cup", "2026-10-31", true));
+        assert!(a.plan_disabled(202231), "Night Races ◎");
+        assert_eq!(a.can_activate_on_plan(202231), Some(false));
+        let picks = a.recommend_skills(&[202231, 202232, 202233, 200512]);
+        assert!(picks.iter().all(|s| !cm.disabled_skills.contains(s)), "{picks:?}");
+        a.planner.plan.apply_cm(&a.kb, &cm);
+        assert_eq!(a.planner.plan.cm_name.as_deref(), Some("Capricorn Cup"));
+        assert!(a.plan_markdown(None).contains("- Won't activate in this CM: Night Races ◎"));
+        // Home shows it as the next CM in the week before.
+        assert_eq!(a.kb.upcoming_cms("2026-10-20").first().map(|e| e.name.as_str()), Some("Capricorn Cup"));
+        // And while it runs: Sagittarius started 2026-10-10 and ends 2026-10-16.
+        assert_eq!(a.kb.upcoming_cms("2026-10-13").first().map(|e| e.name.as_str()), Some("Sagittarius Cup"));
+    }
+
     /// The umalator.app link decodes back to both builds, the course and the plan's conditions.
     #[test]
     fn umalator_link_round_trips() {
@@ -609,6 +644,8 @@ pub(crate) struct App {
     pub look: theme::Look,
     /// The Settings window.
     pub settings: settings_page::SettingsState,
+    /// The live Champions Meeting schedule (official news and Umalator), refreshed in the background.
+    pub live: live::LiveState,
     /// First-run setup, and Settings → Profile's actions.
     pub onboarding: onboarding::OnboardingState,
     screenshot_to: Option<PathBuf>,
@@ -710,6 +747,7 @@ impl App {
             look: theme::Look::from_key(&env("UMALORD_LOOK").or_else(|| settings::get("look").and_then(|v| v.as_str().map(String::from))).unwrap_or_default()),
             onboarding: Default::default(),
             settings: Default::default(),
+            live: Default::default(),
             screenshot_to: env("UMALORD_SCREENSHOT").map(PathBuf::from),
             screenshot_requested: false,
             debug_question: env("UMALORD_ASK").filter(|q| !q.trim().is_empty()),
@@ -718,6 +756,10 @@ impl App {
             debug_scroll: env("UMALORD_SCROLL").and_then(|s| s.parse().ok()),
             debug_run: env("UMALORD_RUN").is_some_and(|v| v == "1"),
         };
+        // The live CM schedule: the cache now, a refresh on the first frame if it's stale. Tests
+        // stay on the bundled data, so they don't depend on the network or this PC's cache.
+        let live_mode = if cfg!(test) { Some("off".to_string()) } else { env("UMALORD_LIVE") };
+        app.live_start(live_mode.as_deref());
         app.tab = match env("UMALORD_TAB").as_deref() {
             Some("umas" | "cards" | "skills" | "collection") => Tab::Collection,
             Some("planner" | "sim" | "results" | "career") => Tab::Career,
@@ -842,6 +884,8 @@ impl App {
 
     fn reload(&mut self) {
         self.kb = Knowledge::load(self.root.as_deref());
+        self.live.bundled = self.kb.umalator_presets.clone();
+        self.apply_live();
         self.reload_roster();
         (self.sim_data, self.sim_error) = load_sim(self.root.as_deref());
         self.card_art = scan_art(self.root.as_deref(), "cards");
@@ -1161,6 +1205,12 @@ impl App {
                         ));
                 }
             }
+            ui.separator();
+            let (text, hover, warn) = self.live_status();
+            let r = ui.label(if warn { RichText::new(text).color(theme::pal(ui).warn) } else { RichText::new(text) });
+            if !hover.is_empty() {
+                r.on_hover_text(hover);
+            }
             if !self.roster.warnings.is_empty() {
                 ui.separator();
                 ui.label(RichText::new(format!("⚠ {} lines in your roster files couldn't be read", self.roster.warnings.len())).color(theme::pal(ui).warn))
@@ -1443,6 +1493,7 @@ impl App {
         self.dark = theme::is_dark(&ctx);
         ui_util::set_pose(self.pose());
         self.shortcuts(&ctx);
+        self.live_poll(&ctx);
         let p = theme::palette(self.dark);
         egui::Panel::top("top_bar")
             .frame(egui::Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 9)))

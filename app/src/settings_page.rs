@@ -528,6 +528,55 @@ impl App {
     fn settings_data(&mut self, ui: &mut egui::Ui, close: &mut bool) {
         let p = pal(ui);
         let day = |s: &Option<String>| s.as_deref().map(|b| b[..10.min(b.len())].to_string()).unwrap_or_else(|| "unknown".into());
+        heading(ui, "Champions Meeting schedule");
+        ui.label(
+            RichText::new(
+                "Official dates, race conditions and the skills that won't activate come from the game's news on umamusume.com. \
+                 Umalator (umalator.app) gives the exact course and estimates the events not announced yet.",
+            )
+            .size(size::SM)
+            .color(p.weak),
+        );
+        ui.add_space(4.0);
+        let mut on = crate::live::enabled();
+        if ui.checkbox(&mut on, "Fetch the latest schedule when the app starts (at most every 6 hours)").changed() {
+            crate::live::set_enabled(on);
+        }
+        let now = crate::live::now();
+        let source_line = |ui: &mut egui::Ui, name: &str, s: Option<&crate::live::SourceStatus>| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(semibold(name, size::BODY));
+                match s {
+                    Some(s) if s.ok => {
+                        ui.label(RichText::new(format!("✔ {}", s.message)).color(p.good));
+                    }
+                    Some(s) => {
+                        ui.label(RichText::new(format!("✖ {}", s.message)).color(p.warn));
+                    }
+                    None => {
+                        ui.label(RichText::new("not fetched yet").color(p.weak));
+                    }
+                }
+                if let Some(t) = s.and_then(|s| s.fetched_at) {
+                    ui.label(RichText::new(format!("· fetched {}", crate::live::fmt_ago(now - t))).color(p.weak));
+                }
+            });
+        };
+        let data = self.live.data.clone();
+        source_line(ui, "umamusume.com", data.as_ref().map(|d| &d.news));
+        source_line(ui, "umalator.app", data.as_ref().map(|d| &d.umalator));
+        ui.horizontal(|ui| {
+            if self.live.rx.is_some() {
+                ui.spinner();
+                ui.label(RichText::new("Checking…").color(p.weak));
+            } else if ui.add(egui::Button::new("🔄 Refresh now").min_size(vec2(0.0, 30.0))).on_hover_text("Fetch the news and Umalator's presets again").clicked() {
+                self.refresh_live(true);
+            }
+            if let Some(d) = &data {
+                ui.label(RichText::new(format!("Last checked {}.", crate::live::fmt_ago(now - d.checked_at))).size(size::SM).color(p.weak));
+            }
+        });
+        ui.add_space(6.0);
         heading(ui, "Game data");
         setting_row(ui, "uma.guide", "Every uma, support card, skill, race and event on the Global server.", |ui| {
             ui.label(format!(
