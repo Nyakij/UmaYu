@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::builder::{Builder, HpKind};
-use super::course::Course;
+use super::course::{Course, phase_start};
 use super::data::SimData;
 use super::hp::Hp;
 use super::params::{HorseDesc, RaceParams, adjusted_stats, base_stats, order_range_for};
@@ -107,7 +107,24 @@ pub struct Trace {
     pub hp: Vec<f32>,
     /// Own skill activations: (skill, start m, end m or -1).
     pub skills: Vec<(u32, f32, f32)>,
+    /// Where she was rushed: (start m, end m).
+    pub rushed: Option<(f32, f32)>,
+    /// Where her last spurt began, and where her HP ran out.
+    pub spurt_start: Option<f32>,
+    pub hp_out: Option<f32>,
 }
+
+/// Uma 2's lead over Uma 1 at one point of the race (Uma 1's distance), across all runs.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GapPoint {
+    pub m: f32,
+    pub p10: f32,
+    pub p50: f32,
+    pub p90: f32,
+}
+
+/// Bins in a skill's activation histogram.
+pub const START_BINS: usize = 50;
 
 #[derive(Clone, Debug, Default)]
 pub struct SkillStat {
@@ -115,6 +132,8 @@ pub struct SkillStat {
     /// Share of runs where it activated at least once.
     pub rate: f64,
     pub mean_start: f64,
+    /// Where it activated across runs: `START_BINS` equal stretches of the course.
+    pub starts: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -131,6 +150,12 @@ pub struct UmaStats {
     /// Mean last-spurt speed shortfall when not at full spurt (m/s).
     pub non_full_speed_loss: f64,
     pub skills: Vec<SkillStat>,
+    /// HP left at the finish, per run, sorted (0 when she ran dry).
+    pub hp_left: Vec<f64>,
+    /// Mean point the last spurt began (m), over runs where it did.
+    pub mean_spurt_start: Option<f64>,
+    /// Mean point HP ran out (m), over runs where it did.
+    pub mean_hp_out: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -144,7 +169,21 @@ pub struct CompareResult {
     pub umas: [UmaStats; 2],
     /// The run whose gap is closest to the median.
     pub median_run: [Trace; 2],
+    /// The gap over the race: P10, median and P90 at 101 points of Uma 1's distance.
+    pub gap_curve: Vec<GapPoint>,
     pub warnings: Vec<String>,
+}
+
+/// Where the last spurt began: the solver's transition point, or (-1 while spurting) the start
+/// of the final leg, where a full spurt begins.
+fn spurt_start(s: &Solver) -> Option<f64> {
+    if s.last_spurt_transition >= 0.0 {
+        Some(s.last_spurt_transition)
+    } else if s.is_last_spurt {
+        Some(phase_start(s.course.distance, 2))
+    } else {
+        None
+    }
 }
 
 fn median(sorted: &[f64]) -> f64 {
@@ -173,6 +212,10 @@ struct Tally {
     speed_loss: Vec<f64>,
     skill_runs: BTreeMap<u32, usize>,
     skill_starts: BTreeMap<u32, Vec<f64>>,
+    skill_hist: BTreeMap<u32, Vec<u32>>,
+    hp_left: Vec<f64>,
+    spurt_starts: Vec<f64>,
+    hp_outs: Vec<f64>,
 }
 
 impl Tally {
@@ -192,9 +235,20 @@ impl Tally {
         self.first_late += usize::from(s.first_in_late_race);
         self.times.push(finish_time);
         self.delays.push(s.start_delay);
+        self.hp_left.push(s.hp.value().max(0.0));
+        if let Some(m) = spurt_start(s) {
+            self.spurt_starts.push(m);
+        }
+        // The solver keeps the distance left when HP ran out.
+        if let Some(left) = s.hp_died_position {
+            self.hp_outs.push(s.course.distance - left);
+        }
+        let d = s.course.distance.max(1.0);
         let mut seen = Vec::new();
         for a in &s.activations {
             self.skill_starts.entry(a.id).or_default().push(a.start);
+            let bin = ((a.start / d * START_BINS as f64).floor().max(0.0) as usize).min(START_BINS - 1);
+            self.skill_hist.entry(a.id).or_insert_with(|| vec![0; START_BINS])[bin] += 1;
             if !seen.contains(&a.id) {
                 seen.push(a.id);
                 *self.skill_runs.entry(a.id).or_default() += 1;
@@ -218,8 +272,20 @@ impl Tally {
             skills: self
                 .skill_runs
                 .iter()
-                .map(|(id, runs)| SkillStat { id: *id, rate: *runs as f64 / n * 100.0, mean_start: mean(&self.skill_starts[id]) })
+                .map(|(id, runs)| SkillStat {
+                    id: *id,
+                    rate: *runs as f64 / n * 100.0,
+                    mean_start: mean(&self.skill_starts[id]),
+                    starts: self.skill_hist.get(id).cloned().unwrap_or_default(),
+                })
                 .collect(),
+            hp_left: {
+                let mut v = self.hp_left.clone();
+                v.sort_by(f64::total_cmp);
+                v
+            },
+            mean_spurt_start: (!self.spurt_starts.is_empty()).then(|| mean(&self.spurt_starts)),
+            mean_hp_out: (!self.hp_outs.is_empty()).then(|| mean(&self.hp_outs)),
         }
     }
 }
@@ -324,6 +390,8 @@ pub fn run_comparison(
     let mut median_run: [Trace; 2] = Default::default();
     let (mut p1, mut p2): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
     let (mut tr1, mut tr2) = (Trace::default(), Trace::default());
+    // Per run, Uma 2's lead at 101 points of Uma 1's distance.
+    let mut curves: Vec<[f32; 101]> = Vec::with_capacity(n);
 
     for i in 0..n {
         if progress.is_some_and(Progress::cancelled) {
@@ -382,6 +450,19 @@ pub fn run_comparison(
         let m = p1.len().min(p2.len());
         let gap = if m == 0 { 0.0 } else { (p2[m - 1] - p1[m - 1]) / 2.5 };
         gaps.push(gap);
+        if !p1.is_empty() && !p2.is_empty() {
+            let mut curve = [0f32; 101];
+            let mut i = 0;
+            for (k, c) in curve.iter_mut().enumerate().take(100) {
+                let target = d * k as f64 / 100.0;
+                while i + 1 < p1.len() && p1[i] < target {
+                    i += 1;
+                }
+                *c = ((p2[i.min(p2.len() - 1)] - p1[i]) / 2.5) as f32;
+            }
+            curve[100] = gap as f32;
+            curves.push(curve);
+        }
         t1.add(&solvers[0], time1);
         t2.add(&solvers[1], time2);
         if i == cutoff {
@@ -392,7 +473,11 @@ pub fn run_comparison(
         if traces && i >= cutoff && (gap - est_median).abs() < best_median_diff {
             best_median_diff = (gap - est_median).abs();
             for (k, tr) in [(0usize, &mut tr1), (1, &mut tr2)] {
-                tr.skills = solvers[k].activations.iter().map(|a| (a.id, a.start as f32, a.end as f32)).collect();
+                let s = &solvers[k];
+                tr.skills = s.activations.iter().map(|a| (a.id, a.start as f32, a.end as f32)).collect();
+                tr.rushed = s.rushed_span.map(|(a, b)| (a as f32, if b < 0.0 { d as f32 } else { b as f32 }));
+                tr.spurt_start = spurt_start(s).map(|m| m as f32);
+                tr.hp_out = s.hp_died_position.map(|left| (d - left) as f32);
             }
             median_run = [std::mem::take(&mut tr1), std::mem::take(&mut tr2)];
         }
@@ -401,6 +486,14 @@ pub fn run_comparison(
         }
     }
     gaps.sort_by(f64::total_cmp);
+    let gap_curve = (0..=100)
+        .map(|k| {
+            let mut col: Vec<f32> = curves.iter().map(|c| c[k]).collect();
+            col.sort_by(f32::total_cmp);
+            let at = |q: f64| col.get(((col.len().saturating_sub(1)) as f64 * q).round() as usize).copied().unwrap_or(0.0);
+            GapPoint { m: (d * k as f64 / 100.0) as f32, p10: at(0.1), p50: at(0.5), p90: at(0.9) }
+        })
+        .collect();
     CompareResult {
         min: gaps.first().copied().unwrap_or(0.0),
         max: gaps.last().copied().unwrap_or(0.0),
@@ -409,6 +502,7 @@ pub fn run_comparison(
         gaps,
         umas: [t1.stats(), t2.stats()],
         median_run,
+        gap_curve,
         warnings,
     }
 }

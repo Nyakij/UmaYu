@@ -115,13 +115,25 @@ the steps to plan a career, and the game words the app uses.
   - "Save plan" writes it to the plans folder.
 - Career > Race sim: the Moomoolator race simulator (umalator.app), built into the app.
   No browser needed.
-  - Compare: two builds over many runs, with the gap in lengths, full-spurt and HP
-    survival rates, rushing, skill activations and a speed/HP chart.
-  - Skill chart: how many lengths each skill adds on the course.
-  - Stamina: how much HP the build has left at the finish.
-  - HP calc: a quick estimate of the Stamina needed, for every running style.
-  - Pick a Champions Meeting to load its course and conditions, or any course yourself.
+  - Race setup (left): pick a Champions Meeting to load its course and conditions, or any
+    course yourself. "What to test": Compare, Skills (how many lengths each skill adds),
+    Stamina (HP left at the finish) or Quick (an instant stamina estimate). The rarely
+    needed options are under "Advanced options".
+  - The two builds sit side by side. "Use meta stats" fills the meta sheet's stats for
+    the CM; "Stat templates" has other starting points; Swap and Copy move builds around.
     "Load from Planner" loads the plan's build.
+  - Compare's results start with the verdict (who wins, how often, by how much, and
+    whether that's more than noise), then five tabs:
+    - Overview: the gap of every race as a chart (or the cumulative share), and where
+      along the course the lengths are won.
+    - Race: the course, Uma 2's lead along it, speed and HP, all lined up. Replay plays
+      the typical race with two dots and skills popping up.
+    - Skills: where each skill fired and how often (grey rows never fired, with why),
+      and two buttons: what each of Uma 2's skills is worth, and where her next training
+      points matter most. They run in the background.
+    - Stamina: HP left at the finish, and what a full spurt needs.
+    - Runs: your last 10 runs (pin one to compare against), each uma's numbers, and
+      Copy summary / Save chart as PNG / Save to plan.
 - Career > Results: log careers, Team Trials, Champions Meeting, League of Heroes and
   sparks.
 - Notes and files: read the notes, plans and logs. It isn't a tab any more: open it from

@@ -177,6 +177,7 @@ impl App {
             conditions: conditions_text(s.ground, s.weather, s.season, s.time),
             umas: s.umas.clone(),
             opts: s.opts.clone(),
+            race: (s.ground, s.weather, s.season, s.time),
         });
         let r = run_comparison(&data, &course, &race, &s.umas[0], &s.umas[1], &s.opts, true, true, None);
         let summary = format!(
@@ -190,15 +191,25 @@ impl App {
 
     /// Write the Race sim's last Compare into the plan's `## Simulation` section.
     pub(crate) fn save_sim_to_plan(&mut self) -> Result<String, String> {
-        use std::fmt::Write;
-        let r = self.sim.compare.clone().ok_or("Run the simulation first.")?;
-        let ran = self.sim.ran.clone().ok_or("Run the simulation first.")?;
-        let data = self.sim_data.clone().ok_or("No simulator data.")?;
+        let md = self.sim_markdown()?;
         if self.planner.open_file.is_none() {
             self.save_plan();
         }
         let path = self.planner.open_file.clone().ok_or("Save the plan first.")?;
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        let start = text.find("## Simulation").ok_or("The plan file has no ## Simulation section.")?;
+        let end = text[start + 3..].find("\n## ").map_or(text.len(), |i| start + 3 + i + 1);
+        let new = format!("{}{}{}", &text[..start], md, &text[end..]);
+        std::fs::write(&path, new).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+        Ok(format!("Wrote the results into {}.", path.display()))
+    }
+
+    /// The Race sim's last Compare as markdown: setup, results and a link to reproduce it.
+    pub(crate) fn sim_markdown(&self) -> Result<String, String> {
+        use std::fmt::Write;
+        let r = self.sim.compare.clone().ok_or("Run the simulation first.")?;
+        let ran = self.sim.ran.clone().ok_or("Run the simulation first.")?;
+        let data = self.sim_data.clone().ok_or("No simulator data.")?;
         let o = &ran.opts;
         let onoff = |b: bool| if b { "on" } else { "off" };
         let mut md = String::new();
@@ -255,11 +266,7 @@ impl App {
             "uma2": umalator_uma_json(&ran.umas[1]),
         });
         let _ = writeln!(md, "\nReproduce in Moomoolator: https://umalator.app/#{}\n", umalator_hash(&state));
-        let start = text.find("## Simulation").ok_or("The plan file has no ## Simulation section.")?;
-        let end = text[start + 3..].find("\n## ").map_or(text.len(), |i| start + 3 + i + 1);
-        let new = format!("{}{}{}", &text[..start], md, &text[end..]);
-        std::fs::write(&path, new).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
-        Ok(format!("Wrote the results into {}.", path.display()))
+        Ok(md)
     }
 }
 

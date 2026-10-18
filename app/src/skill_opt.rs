@@ -540,6 +540,7 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
 }
 
 /// The verify run for any set (plan-form ids): mean gap against the base, with its 95% interval.
+#[cfg(test)]
 pub(crate) fn check_set(input: &Input, ids: &[u32]) -> Verify {
     let set = Set { ids: ids.to_vec() };
     let fin = set.build(&input.base, &input.data);

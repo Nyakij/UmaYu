@@ -5,20 +5,20 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, mpsc};
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
+use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 
 use crate::App;
 use crate::knowledge::{Distance, Style};
 use crate::sim::builder::build_skill_data;
-use crate::sim::course::{Course, phase_start};
+use crate::sim::course::Course;
 use crate::sim::data::SimData;
 use crate::sim::hpcalc;
 use crate::sim::params::{APTITUDES, HorseDesc, NIGE, OIKOMI, OONIGE, SASI, SENKOU, base_stats, parse_aptitude, strategy_name};
 use crate::sim::run::{ChartRow, CompareResult, HpCalcResult, Progress, SimOptions, Trace, UmaBuild, race_params, run_chart, run_comparison, run_hpcalc};
+use crate::theme::size;
 use crate::sim::solver::Perspective;
-use crate::tab_umas::filter_heading;
 use crate::theme::pal;
-use crate::ui_util::{card, card_titled, page_header, search_combo, section_label, semibold, stat_row, tier_color};
+use crate::ui_util::{card, card_titled, page_header, search_combo, semibold, stat_row, tier_color};
 
 pub const GROUNDS: [&str; 4] = ["Firm", "Good", "Soft", "Heavy"];
 pub const WEATHERS: [&str; 4] = ["Sunny", "Cloudy", "Rainy", "Snowy"];
@@ -28,7 +28,6 @@ const MOODS: [&str; 5] = ["Awful", "Bad", "Normal", "Good", "Great"];
 const STRATEGIES: [i32; 5] = [NIGE, SENKOU, SASI, OIKOMI, OONIGE];
 /// Moomoolator shows finish times as simulated seconds × 1.18 (the game's clock).
 const GAME_CLOCK: f64 = 1.18;
-const UMA_COLORS: [Color32; 2] = [Color32::from_rgb(56, 189, 248), Color32::from_rgb(244, 114, 182)];
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Mode {
@@ -36,6 +35,46 @@ pub(crate) enum Mode {
     Chart,
     Stamina,
     HpCalc,
+}
+
+/// The results dashboard's tabs.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum ResultTab {
+    Overview,
+    Race,
+    Skills,
+    Stamina,
+    Runs,
+}
+
+/// Leave-one-out ("what each skill is worth") or +50 per stat ("where training points matter").
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum ExtraKind {
+    Contribution,
+    Sensitivity,
+}
+
+pub(crate) struct ExtraJob {
+    kind: ExtraKind,
+    progress: Arc<Progress>,
+    rx: mpsc::Receiver<Vec<(String, f64)>>,
+}
+
+/// A finished Compare, kept for the Runs tab.
+#[derive(Clone)]
+pub(crate) struct HistoryEntry {
+    pub label: String,
+    pub verdict: String,
+    pub when: String,
+    pub gaps: Vec<f64>,
+}
+
+/// The replay of the median race on the course strip.
+pub(crate) struct Replay {
+    /// Seconds into the race (simulated).
+    pub t: f32,
+    pub playing: bool,
+    pub speed: f32,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -79,6 +118,20 @@ pub(crate) struct SimState {
     pub from_plan: bool,
     /// The run's inputs, frozen when it started, for saving and labels.
     pub ran: Option<RunInfo>,
+    pub result_tab: ResultTab,
+    /// Overview's chart: the cumulative share instead of the histogram.
+    pub cdf: bool,
+    /// The last 10 Compares, oldest first, and the one pinned as a ghost.
+    pub history: Vec<HistoryEntry>,
+    pub pinned: Option<usize>,
+    pub extra: Option<ExtraJob>,
+    /// Leave-one-out and +50 stat results for the last run: (label, lengths).
+    pub contribution: Option<Vec<(String, f64)>>,
+    pub sensitivity: Option<Vec<(String, f64)>>,
+    pub replay: Replay,
+    /// Where the results were drawn last frame, and a pending "Save chart as PNG".
+    pub results_rect: Option<Rect>,
+    pub save_png: bool,
 }
 
 #[derive(Clone)]
@@ -87,6 +140,8 @@ pub(crate) struct RunInfo {
     pub conditions: String,
     pub umas: [UmaBuild; 2],
     pub opts: SimOptions,
+    /// Ground, weather, season, time of day.
+    pub race: (i32, i32, i32, i32),
 }
 
 /// The settings a run starts from, copied so the state can change while it runs.
@@ -144,6 +199,16 @@ impl Default for SimState {
             stamina: None,
             from_plan: false,
             ran: None,
+            result_tab: ResultTab::Overview,
+            cdf: false,
+            history: Vec::new(),
+            pinned: None,
+            extra: None,
+            contribution: None,
+            sensitivity: None,
+            replay: Replay { t: 0.0, playing: false, speed: 1.0 },
+            results_rect: None,
+            save_png: false,
         }
     }
 }
@@ -252,6 +317,20 @@ impl App {
 
     /// Collect a finished run, and keep repainting while one is going.
     pub(crate) fn sim_poll(&mut self, ctx: &egui::Context) {
+        if let Some(job) = &self.sim.extra {
+            match job.rx.try_recv() {
+                Ok(items) => {
+                    let kind = job.kind;
+                    self.sim.extra = None;
+                    match kind {
+                        ExtraKind::Contribution => self.sim.contribution = Some(items),
+                        ExtraKind::Sensitivity => self.sim.sensitivity = Some(items),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => self.sim.extra = None,
+            }
+        }
         let Some(job) = &self.sim.job else { return };
         match job.rx.try_recv() {
             Ok(result) => {
@@ -260,6 +339,10 @@ impl App {
                         if !r.warnings.is_empty() {
                             self.toast(format!("Left out: {}", r.warnings.join("; ")), crate::ui_util::ToastKind::Warn);
                         }
+                        self.remember_run(&r);
+                        self.sim.contribution = None;
+                        self.sim.sensitivity = None;
+                        self.sim.replay = Replay { t: 0.0, playing: false, speed: self.sim.replay.speed };
                         self.sim.compare = Some(r);
                     }
                     JobResult::Chart(rows) => self.sim.chart = Some(rows),
@@ -275,46 +358,70 @@ impl App {
         }
     }
 
+    /// The left panel, "Race setup": the CM, the course, conditions, what to test, and the
+    /// advanced options folded away. Fits a 960×600 window without scrolling.
     fn sim_race_panel(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
-        ui.label(semibold("The race", 17.0));
-        ui.label(RichText::new("Where and how the umas race. Pick a Champions Meeting to fill it all in.").size(12.5).color(p.weak));
+        ui.horizontal(|ui| {
+            ui.label(semibold("Race setup", size::LG));
+            ui.label(RichText::new("ⓘ").color(p.weak)).on_hover_text(
+                "A Rust port of Moomoolator's engine (umalator.app, engine v2). It simulates the umas against a virtual pacemaker; \
+                 order conditions count as met. The same seed gives the same results as the site.",
+            );
+        });
         let Some(data) = self.sim_data.clone() else {
-            ui.label(RichText::new(self.sim_error.clone().unwrap_or_default()).color(pal(ui).warn));
-            ui.label(RichText::new("Run: python -I -X utf8 tools/update_knowledge.py --only umalator").size(12.0).color(p.weak));
+            ui.label(RichText::new(self.sim_error.clone().unwrap_or_default()).color(p.warn));
+            ui.label(RichText::new("Run: python -I -X utf8 tools/update_knowledge.py --only umalator").size(size::SM).color(p.weak));
             return;
         };
+        ui.add_space(2.0);
 
-        section_label(ui, "Champions Meeting", "Recent and upcoming CMs. A ? means it isn't announced yet: the date, course and conditions are Umalator's estimate.");
-        let mut presets: Vec<_> = self.kb.umalator_presets.iter().filter(|e| e.is_cm()).cloned().collect();
-        presets.sort_by(|a, b| b.date.cmp(&a.date));
+        // The next Champions Meetings, one per row, and earlier ones in a dropdown.
         let today = crate::ui_util::today();
         let upcoming: Vec<_> = self.kb.upcoming_cms(&today).into_iter().take(3).cloned().collect();
-        let recent: Vec<_> = presets.iter().filter(|e| !upcoming.iter().any(|u| u.name == e.name && u.date == e.date) && e.date < today).take(3).cloned().collect();
-        ui.horizontal_wrapped(|ui| {
-            for e in upcoming.iter().chain(&recent) {
-                let on = self.sim.course == e.course && self.sim.ground == i32::from(e.ground) && self.sim.season == i32::from(e.season);
-                let mark = if e.announced { "" } else { "? " };
-                let scenario = self.kb.cm_scenario(e).map(|s| format!("\nScenario: {s}")).unwrap_or_default();
-                let off = if e.disabled_skills.is_empty() { String::new() } else { format!("\n{} skills won't activate; loading it drops them from both builds.", e.disabled_skills.len()) };
-                let hover = format!("{} ({})\n{} · {}{scenario}{off}\n{}", e.name, e.date, e.course_name, e.conditions, e.status_explained());
-                if ui.add(egui::Button::new(RichText::new(format!("{mark}{}", e.short_label())).size(12.0)).selected(on).corner_radius(CornerRadius::same(10)).small()).on_hover_text(hover).clicked() {
-                    self.sim.course = e.course;
-                    self.sim.ground = i32::from(e.ground);
-                    self.sim.weather = i32::from(e.weather);
-                    self.sim.season = i32::from(e.season);
-                    self.sim.time = i32::from(e.time);
-                    self.fill_aptitudes(0);
-                    self.fill_aptitudes(1);
-                    let dropped = self.drop_disabled_skills(&e.disabled_skills);
-                    if dropped > 0 {
-                        self.toast(format!("Took out {dropped} skills that won't activate in the {}.", e.name), crate::ui_util::ToastKind::Info);
+        let mut past: Vec<_> = self.kb.umalator_presets.iter().filter(|e| e.is_cm() && e.date < today && !upcoming.iter().any(|u| u.name == e.name && u.date == e.date)).cloned().collect();
+        past.sort_by(|a, b| b.date.cmp(&a.date));
+        let mut chosen = None;
+        for e in &upcoming {
+            let on = self.sim.course == e.course && self.sim.ground == i32::from(e.ground) && self.sim.season == i32::from(e.season);
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+            let fill = if on { p.accent.gamma_multiply(if ui.visuals().dark_mode { 0.28 } else { 0.16 }) } else if resp.hovered() { p.hover } else { egui::Color32::TRANSPARENT };
+            ui.painter().rect(rect, CornerRadius::same(7), fill, Stroke::new(1.0, if on { p.accent_strong } else { p.border }), egui::StrokeKind::Inside);
+            let (mark, status, color) = if e.announced { ("✔", "announced", p.good) } else { ("?", "estimated", p.warn) };
+            ui.painter().text(rect.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, format!("{mark} {}", e.short_label()), FontId::proportional(size::SM), p.text);
+            ui.painter().text(rect.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, status, FontId::proportional(size::XS), color);
+            let scenario = self.kb.cm_scenario(e).map(|s| format!("\nScenario: {s}")).unwrap_or_default();
+            let off = if e.disabled_skills.is_empty() { String::new() } else { format!("\n{} skills won't activate; picking it drops them from both builds.", e.disabled_skills.len()) };
+            if resp.on_hover_text(format!("{} ({})\n{} · {}{scenario}{off}\n{}", e.name, e.date, e.course_name, e.conditions, e.status_explained())).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                chosen = Some(e.clone());
+            }
+            ui.add_space(2.0);
+        }
+        if !past.is_empty() {
+            egui::ComboBox::from_id_salt("sim_past_cm").width(ui.available_width() - 8.0).selected_text(RichText::new("Earlier Champions Meetings…").size(size::SM)).show_ui(ui, |ui| {
+                for e in past.iter().take(12) {
+                    if ui.selectable_label(false, format!("{} · {}", e.short_label(), e.course_name)).clicked() {
+                        chosen = Some(e.clone());
                     }
                 }
+            });
+        }
+        if let Some(e) = chosen {
+            self.sim.course = e.course;
+            self.sim.ground = i32::from(e.ground);
+            self.sim.weather = i32::from(e.weather);
+            self.sim.season = i32::from(e.season);
+            self.sim.time = i32::from(e.time);
+            self.fill_aptitudes(0);
+            self.fill_aptitudes(1);
+            let dropped = self.drop_disabled_skills(&e.disabled_skills);
+            if dropped > 0 {
+                self.toast(format!("Took out {dropped} skills that won't activate in the {}.", e.name), crate::ui_util::ToastKind::Info);
             }
-        });
+        }
+        ui.add_space(4.0);
 
-        filter_heading(ui, "Course");
+        // The course, and a strip of it.
         let items = || {
             let mut items: Vec<(Option<u32>, String, String)> = Vec::new();
             let mut by_track: Vec<(&u32, &Course)> = data.courses.iter().collect();
@@ -341,102 +448,103 @@ impl App {
             self.fill_aptitudes(1);
         }
         if let Some(c) = data.courses.get(&self.sim.course) {
-            let corners = c.corners.len();
-            let ups = c.slopes.iter().filter(|s| s.slope > 0.0).count();
-            let downs = c.slopes.iter().filter(|s| s.slope < 0.0).count();
-            ui.label(RichText::new(format!("{} · {corners} corners · {ups} uphills, {downs} downhills", distance_of(c).label())).size(12.0).color(p.weak));
+            crate::charts::course_strip(ui, c, 50.0, &[]);
         }
+        ui.add_space(4.0);
 
-        section_label(ui, "Conditions", "Ground, weather, season and time of day. Some skills only work in some of them.");
-        for (list, value) in [(&GROUNDS, &mut self.sim.ground), (&WEATHERS, &mut self.sim.weather), (&SEASONS, &mut self.sim.season)] {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                for (i, name) in list.iter().enumerate() {
-                    ui.selectable_value(value, i as i32 + 1, RichText::new(*name).size(12.5));
-                }
-            });
-        }
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            for (code, name) in TIMES {
-                ui.selectable_value(&mut self.sim.time, code, RichText::new(name).size(12.5));
-            }
+        // Conditions: ground and weather, season and time of day.
+        egui::Grid::new("sim_conditions").num_columns(4).spacing([6.0, 4.0]).show(ui, |ui| {
+            let pick = |ui: &mut egui::Ui, id: &str, value: &mut i32, names: &[(i32, &str)]| {
+                let current = names.iter().find(|(c, _)| c == value).map_or("?", |(_, n)| n);
+                egui::ComboBox::from_id_salt(id).width(74.0).selected_text(RichText::new(current).size(size::SM)).show_ui(ui, |ui| {
+                    for (c, n) in names {
+                        ui.selectable_value(value, *c, *n);
+                    }
+                });
+            };
+            let list = |names: &[&'static str; 4]| -> Vec<(i32, &'static str)> { names.iter().enumerate().map(|(i, n)| (i as i32 + 1, *n)).collect() };
+            ui.label(RichText::new("Ground").size(size::SM).color(p.weak));
+            pick(ui, "sim_ground", &mut self.sim.ground, &list(&GROUNDS));
+            ui.label(RichText::new("Weather").size(size::SM).color(p.weak));
+            pick(ui, "sim_weather", &mut self.sim.weather, &list(&WEATHERS));
+            ui.end_row();
+            ui.label(RichText::new("Season").size(size::SM).color(p.weak));
+            pick(ui, "sim_season", &mut self.sim.season, &list(&SEASONS));
+            ui.label(RichText::new("Time").size(size::SM).color(p.weak));
+            pick(ui, "sim_time", &mut self.sim.time, &TIMES);
+            ui.end_row();
         });
+        ui.add_space(6.0);
 
-        section_label(ui, "What to test", "");
-        for (m, label, hover) in [
-            (Mode::Compare, "⚖ Compare two umas", "Race Uma 1 against Uma 2 many times. Shows who wins and by how much."),
-            (Mode::Chart, "📊 Which skills help most", "Adds each skill to Uma 1 in turn and measures how many lengths it gains on this course."),
-            (Mode::Stamina, "♥ Enough stamina?", "Runs Uma 1 alone and shows the HP she has left at the finish."),
-            (Mode::HpCalc, "⚡ Quick stamina estimate", "A formula instead of a race: instant, rougher."),
-        ] {
-            let b = egui::Button::selectable(self.sim.mode == m, label).min_size(vec2(ui.available_width(), 26.0));
-            if ui.add(b).on_hover_text(hover).clicked() {
-                self.sim.mode = m;
-            }
-        }
-
-        section_label(ui, "Options", "The defaults match umalator.app. Leave them unless you know you want something else.");
-        let o = &mut self.sim.opts;
-        ui.horizontal(|ui| {
-            ui.label("Runs").on_hover_text("How many races to run. More is steadier but slower; 1000 is plenty.");
-            ui.add(egui::DragValue::new(&mut o.samples).range(20..=10_000).speed(10));
-            ui.label("Seed").on_hover_text("The starting point for the random numbers. The same seed gives the same results.");
-            ui.add_enabled(!self.sim.auto_seed, egui::DragValue::new(&mut o.seed).range(0.0..=4_294_967_295.0).speed(1.0).fixed_decimals(0));
+        // What to test.
+        ui.label(RichText::new("WHAT TO TEST").size(size::XS).color(p.weak));
+        let modes = [
+            (Mode::Compare, "⚖ Compare".to_string(), "Race Uma 1 against Uma 2 many times: who wins, by how much, and where."),
+            (Mode::Chart, "📊 Skills".to_string(), "Add each skill to Uma 1 in turn and measure how many lengths it gains on this course."),
+            (Mode::Stamina, "♥ Stamina".to_string(), "Run Uma 1 alone and see the HP she has left at the finish."),
+            (Mode::HpCalc, "⚡ Quick".to_string(), "A formula instead of races: an instant, rougher stamina estimate."),
+        ];
+        ui.scope(|ui| {
+            ui.spacing_mut().button_padding.x = 5.0;
+            crate::ui_util::segmented(ui, &mut self.sim.mode, &modes);
         });
-        ui.checkbox(&mut self.sim.auto_seed, "New seed each run").on_hover_text("Off: rerun with the same seed for repeatable results");
-        ui.checkbox(&mut o.sync_rng, "Sync RNG").on_hover_text("Both umas see the same random events, so the gap shows the build difference");
-        ui.checkbox(&mut o.wit_check, "Wit check").on_hover_text("Skills can fail to activate on a Wit roll");
-        ui.checkbox(&mut o.rushed, "Rushed (kakari)").on_hover_text("Umas can get over-eager mid-race and burn HP, as in the game");
-        ui.checkbox(&mut o.lane_movement, "Lane movement").on_hover_text("Umas move between lanes on corners and straights");
-        ui.checkbox(&mut o.lead_competition, "Spot struggle").on_hover_text("Front runners fighting for the lead early on");
-        let mut dueling = o.compete_fight;
-        if ui.checkbox(&mut dueling, "Dueling").on_hover_text("Late-race duels on the final straight").changed() {
-            o.compete_fight = dueling;
-            o.dueling = dueling.then_some([30.0, 30.0, 25.0, 20.0, 15.0]);
-        }
-        if let (true, Some(r)) = (o.compete_fight, o.dueling.as_mut()) {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Duel %").size(12.0));
-                for (i, n) in ["Run", "Front", "Pace", "Late", "End"].iter().enumerate() {
-                    ui.label(RichText::new(*n).size(11.5).color(p.weak));
-                    ui.add(egui::DragValue::new(&mut r[i]).range(0.0..=100.0).speed(1.0));
-                }
-            });
-        }
         if self.sim.mode == Mode::Stamina {
             ui.checkbox(&mut self.sim.force_full, "Force a full spurt").on_hover_text("Shows how far short of a full spurt the build is");
         }
         if self.sim.mode == Mode::HpCalc {
             ui.horizontal(|ui| {
-                ui.label("Recovery skills (% of max HP)");
+                ui.label(RichText::new("Recovery skills (% of max HP)").size(size::SM));
                 ui.add(egui::DragValue::new(&mut self.sim.heal_pct).range(0.0..=50.0).speed(0.5));
             });
         }
+        ui.add_space(4.0);
 
-        ui.add_space(10.0);
-        let busy = self.sim.job.is_some();
-        if busy {
-            let job = self.sim.job.as_ref().unwrap();
-            let done = job.progress.done.load(Ordering::Relaxed) as f32;
-            let total = job.progress.total.load(Ordering::Relaxed).max(1) as f32;
-            ui.add(egui::ProgressBar::new((done / total).min(1.0)).text(job.label.clone()).show_percentage());
-            if ui.button("✖ Cancel").clicked() {
-                job.progress.cancel.store(true, Ordering::Relaxed);
+        egui::CollapsingHeader::new(RichText::new("Advanced options").size(size::SM)).id_salt("sim_advanced").show(ui, |ui| {
+            ui.label(RichText::new("The defaults match umalator.app. Leave them unless you know you want something else.").size(size::XS).color(p.weak));
+            let o = &mut self.sim.opts;
+            ui.horizontal(|ui| {
+                ui.label("Runs").on_hover_text("How many races to run. More is steadier but slower; 1000 is plenty.");
+                ui.add(egui::DragValue::new(&mut o.samples).range(20..=10_000).speed(10));
+                ui.label("Seed").on_hover_text("The starting point for the random numbers. The same seed gives the same results.");
+                ui.add_enabled(!self.sim.auto_seed, egui::DragValue::new(&mut o.seed).range(0.0..=4_294_967_295.0).speed(1.0).fixed_decimals(0));
+            });
+            ui.checkbox(&mut self.sim.auto_seed, "New seed each run").on_hover_text("Off: rerun with the same seed for repeatable results");
+            ui.checkbox(&mut o.sync_rng, "Sync RNG").on_hover_text("Both umas see the same random events, so the gap shows the build difference");
+            ui.checkbox(&mut o.wit_check, "Wit check").on_hover_text("Skills can fail to activate on a Wit roll");
+            ui.checkbox(&mut o.rushed, "Rushed (kakari)").on_hover_text("Umas can get over-eager mid-race and burn HP, as in the game");
+            ui.checkbox(&mut o.lane_movement, "Lane movement").on_hover_text("Umas move between lanes on corners and straights");
+            ui.checkbox(&mut o.lead_competition, "Spot struggle").on_hover_text("Front runners fighting for the lead early on");
+            let mut dueling = o.compete_fight;
+            if ui.checkbox(&mut dueling, "Dueling").on_hover_text("Late-race duels on the final straight").changed() {
+                o.compete_fight = dueling;
+                o.dueling = dueling.then_some([30.0, 30.0, 25.0, 20.0, 15.0]);
             }
-        } else if self.sim.mode != Mode::HpCalc {
-            let run = crate::ui_util::primary_button(ui, "▶ Run", 16.0).min_size(vec2(ui.available_width(), 36.0));
-            if ui.add(run).on_hover_text("Start the simulation. It runs in the background; you can keep using the app.").clicked() {
-                let ctx = ui.ctx().clone();
-                self.sim_start(&ctx);
+            if let (true, Some(r)) = (o.compete_fight, o.dueling.as_mut()) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Duel %").size(size::SM));
+                    for (i, n) in ["Run", "Front", "Pace", "Late", "End"].iter().enumerate() {
+                        ui.label(RichText::new(*n).size(size::XS).color(p.weak));
+                        ui.add(egui::DragValue::new(&mut r[i]).range(0.0..=100.0).speed(1.0));
+                    }
+                });
             }
+        });
+    }
+
+    /// Keep a finished Compare in the history (the last 10).
+    fn remember_run(&mut self, r: &CompareResult) {
+        let Some(ran) = &self.sim.ran else { return };
+        let course = self.sim_data.as_ref().map_or(String::new(), |d| d.course_name(ran.course));
+        let name = |u: &UmaBuild| u.outfit.and_then(|o| self.kb.umas.get(&o)).map_or("no outfit".to_string(), |i| i.name.clone());
+        let label = format!("{} vs {} · {course} · {} · {} races", name(&ran.umas[0]), name(&ran.umas[1]), ran.conditions, r.gaps.len());
+        let wins = r.gaps.iter().filter(|g| **g > 0.0).count() as f64 / r.gaps.len().max(1) as f64 * 100.0;
+        let verdict = if r.mean >= 0.0 { format!("Uma 2 by {:.2} L ({wins:.0}%)", r.mean) } else { format!("Uma 1 by {:.2} L ({:.0}%)", -r.mean, 100.0 - wins) };
+        let when = crate::live::fmt_local(crate::live::now());
+        self.sim.history.push(HistoryEntry { label, verdict, when, gaps: r.gaps.clone() });
+        if self.sim.history.len() > 10 {
+            self.sim.history.remove(0);
+            self.sim.pinned = self.sim.pinned.and_then(|i| i.checked_sub(1));
         }
-        ui.add_space(10.0);
-        ui.label(
-            RichText::new("A Rust port of Moomoolator's engine (umalator.app, engine v2). It simulates one uma at a time against a virtual pacemaker; order conditions count as met. Same seed, same results as the site.")
-                .size(11.5)
-                .color(p.weak),
-        );
     }
 
     /// Start the selected mode in a background thread.
@@ -457,7 +565,13 @@ impl App {
         let progress = Arc::new(Progress::default());
         let (tx, rx) = mpsc::channel();
         let (opts, u1, u2) = (self.sim.opts.clone(), self.sim.umas[0].clone(), self.sim.umas[1].clone());
-        self.sim.ran = Some(RunInfo { course: self.sim.course, conditions: conditions_text(s.ground, s.weather, s.season, s.time), umas: [u1.clone(), u2.clone()], opts: opts.clone() });
+        self.sim.ran = Some(RunInfo {
+            course: self.sim.course,
+            conditions: conditions_text(s.ground, s.weather, s.season, s.time),
+            umas: [u1.clone(), u2.clone()],
+            opts: opts.clone(),
+            race: (s.ground, s.weather, s.season, s.time),
+        });
         let repaint = ctx.clone();
         let p2 = progress.clone();
         let label;
@@ -533,24 +647,30 @@ impl App {
     }
 
     fn sim_main(&mut self, ui: &mut egui::Ui) {
-        let p = pal(ui);
         let course = self.sim_data.as_ref().map(|d| format!("{} · {}", d.course_name(self.sim.course), conditions_text(self.sim.ground, self.sim.weather, self.sim.season, self.sim.time)));
         let what = match self.sim.mode {
-            Mode::Compare => "Set up two umas below, then press ▶ Run: they race each other many times on",
-            Mode::Chart => "Set up the uma below, then press ▶ Run: each skill is added in turn to see how much it helps on",
-            Mode::Stamina => "Set up the uma below, then press ▶ Run: she races alone to check her HP lasts on",
-            Mode::HpCalc => "Set up the uma below: the table estimates her HP needs instantly on",
+            Mode::Compare => "Two umas race each other many times on",
+            Mode::Chart => "Each skill is added to Uma 1 in turn to see how much it helps on",
+            Mode::Stamina => "Uma 1 races alone to check her HP lasts on",
+            Mode::HpCalc => "An instant estimate of Uma 1's HP needs on",
         };
         let subtitle = format!("{what} {}.", course.unwrap_or_default());
         let mut run = false;
         page_header(ui, "🏁 Race sim", &subtitle, |ui| {
             if self.sim.mode != Mode::HpCalc {
-                if self.sim.job.is_some() {
-                    ui.spinner();
-                    ui.label(RichText::new("Running…").color(p.weak));
-                } else {
-                    let b = crate::ui_util::primary_button(ui, "▶ Run", 14.5).min_size(vec2(84.0, 30.0));
-                    run = ui.add(b).on_hover_text("Start the simulation. It runs in the background; you can keep using the app.").clicked();
+                match &self.sim.job {
+                    Some(job) => {
+                        if ui.small_button("✖").on_hover_text("Stop the run").clicked() {
+                            job.progress.cancel.store(true, Ordering::Relaxed);
+                        }
+                        let done = job.progress.done.load(Ordering::Relaxed) as f32;
+                        let total = job.progress.total.load(Ordering::Relaxed).max(1) as f32;
+                        ui.add(egui::ProgressBar::new((done / total).min(1.0)).desired_width(160.0).text(job.label.clone()));
+                    }
+                    None => {
+                        let b = crate::ui_util::primary_button(ui, "▶ Run", 14.5).min_size(vec2(84.0, 30.0));
+                        run = ui.add(b).on_hover_text("Start the simulation. It runs in the background; you can keep using the app.").clicked();
+                    }
                 }
             }
             if ui.add(egui::Button::new("📋 Load from Planner").min_size(vec2(0.0, 30.0))).on_hover_text("Fill in the Planner's trainee, target stats, skills, course and conditions").clicked() {
@@ -577,22 +697,42 @@ impl App {
             }
         }
         ui.add_space(6.0);
+        let top = ui.cursor().top();
         match self.sim.mode {
-            Mode::Compare => self.compare_results(ui),
+            Mode::Compare => self.compare_dashboard(ui),
             Mode::Chart => self.chart_results(ui),
             Mode::Stamina => self.stamina_results(ui),
             Mode::HpCalc => self.hp_calc(ui),
         }
+        // Where the results were drawn, for "Save chart as PNG".
+        self.sim.results_rect = Some(Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.cursor().top())));
+        if self.sim.save_png {
+            self.sim.save_png = false;
+            self.save_results_png(ui.ctx());
+        }
+    }
+
+    /// Stats from the community meta sheet for the Champions Meeting the sim is set to, if any.
+    fn sim_meta_stats(&self) -> Option<(String, [f64; 5])> {
+        let e = self.kb.umalator_presets.iter().find(|e| e.is_cm() && e.course == self.sim.course && i32::from(e.ground) == self.sim.ground && i32::from(e.season) == self.sim.season)?;
+        let ev = self.kb.pvp_meta.as_ref()?.events.iter().find(|m| m.series == "CM" && m.number == e.id)?;
+        let mut out = [0.0; 5];
+        for (i, s) in ev.stats.iter().take(5).enumerate() {
+            let digits: String = s.chars().take_while(char::is_ascii_digit).collect();
+            out[i] = digits.parse().ok()?;
+        }
+        Some((format!("CM {} {}", e.id, e.name), out))
     }
 
     fn uma_panel(&mut self, ui: &mut egui::Ui, i: usize) {
         let Some(data) = self.sim_data.clone() else { return };
         let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
         let title = if self.sim.mode == Mode::Compare { format!("Uma {}", i + 1) } else { "Uma".to_string() };
         card(ui, |ui| {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-                ui.painter().circle_filled(r.center(), 5.0, UMA_COLORS[i]);
+                ui.painter().circle_filled(r.center(), 5.0, crate::charts::uma_color(i, dark));
                 ui.label(semibold(&title, 15.5));
                 if let Some(uri) = self.sim.umas[i].outfit.and_then(|o| self.art_uri("umas", o)) {
                     ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(26.0, 26.0)).corner_radius(CornerRadius::same(13)));
@@ -615,7 +755,7 @@ impl App {
                 };
                 let current = self.sim.umas[i].outfit;
                 let text = current.and_then(|o| self.kb.umas.get(&o)).map_or("No outfit (no unique)".to_string(), |u| format!("{} [{}]", u.name, u.outfit));
-                if let Some(o) = search_combo(ui, ("sim_outfit", i), text, 250.0, items, current.as_ref()) {
+                if let Some(o) = search_combo(ui, ("sim_outfit", i), text, (ui.available_width() - 130.0).clamp(140.0, 250.0), items, current.as_ref()) {
                     self.set_outfit(i, o);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -624,9 +764,15 @@ impl App {
                         if ui.small_button(if i == 0 { "Copy →" } else { "← Copy" }).on_hover_text(format!("Copy this build to Uma {}", other + 1)).clicked() {
                             self.sim.umas[other] = self.sim.umas[i].clone();
                         }
+                        if i == 0 && ui.small_button("⇄ Swap").on_hover_text("Swap Uma 1 and Uma 2").clicked() {
+                            self.sim.umas.swap(0, 1);
+                        }
                     }
                 });
             });
+            let meta = self.sim_meta_stats();
+            let plan_target = self.planner.plan.target;
+            let other_desc = self.sim.umas[1 - i].desc.clone();
             let u = &mut self.sim.umas[i];
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Stars").color(p.weak));
@@ -656,6 +802,35 @@ impl App {
                     });
                 }
             });
+            // Stat templates, and the meta sheet's stats for this CM.
+            let mut set_stats: Option<[f64; 5]> = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                match &meta {
+                    Some((label, stats)) => {
+                        if ui.small_button("📈 Use meta stats").on_hover_text(format!("The community meta sheet's recommended stats for {label}: {}. Community opinion, not game data.", stats.map(|v| format!("{v:.0}")).join(" / "))).clicked() {
+                            set_stats = Some(*stats);
+                        }
+                    }
+                    None => {
+                        ui.add_enabled(false, egui::Button::new("📈 Use meta stats").small()).on_disabled_hover_text("Pick a Champions Meeting on the left: the meta sheet recommends stats per CM.");
+                    }
+                }
+                egui::ComboBox::from_id_salt(("stat_template", i)).selected_text(RichText::new("Stat templates").size(size::SM)).show_ui(ui, |ui| {
+                    if ui.selectable_label(false, "Umalator's default (1200 / 1200 / 800 / 400 / 400)").clicked() {
+                        set_stats = Some([1200.0, 1200.0, 800.0, 400.0, 400.0]);
+                    }
+                    if plan_target.iter().any(|v| *v > 0) && ui.selectable_label(false, format!("Your plan's targets ({})", plan_target.map(|v| v.to_string()).join(" / "))).clicked() {
+                        set_stats = Some(plan_target.map(f64::from));
+                    }
+                    if ui.selectable_label(false, format!("Uma {}'s stats", 2 - i)).clicked() {
+                        set_stats = Some([other_desc.speed, other_desc.stamina, other_desc.power, other_desc.guts, other_desc.wisdom]);
+                    }
+                });
+            });
+            if let Some(s) = set_stats {
+                [u.desc.speed, u.desc.stamina, u.desc.power, u.desc.guts, u.desc.wisdom] = s;
+            }
             let mut refill = false;
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Style").color(p.weak));
@@ -753,7 +928,8 @@ impl App {
         ui.add_space(6.0);
     }
 
-    fn compare_results(&mut self, ui: &mut egui::Ui) {
+    /// Compare's results: the verdict, then tabs.
+    fn compare_dashboard(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
         let Some(r) = self.sim.compare.clone() else {
             if self.sim.job.is_none() {
@@ -761,45 +937,518 @@ impl App {
             }
             return;
         };
-        let runs = r.gaps.len();
-        // The verdict in one sentence first.
-        let ahead = r.gaps.iter().filter(|g| **g > 0.0).count() as f64 / runs.max(1) as f64 * 100.0;
-        let (winner, color, lead, share) = if r.mean >= 0.0 { ("Uma 2", UMA_COLORS[1], r.mean, ahead) } else { ("Uma 1", UMA_COLORS[0], -r.mean, 100.0 - ahead) };
+        self.verdict_card(ui, &r);
+        ui.add_space(6.0);
+        let tabs = [
+            (ResultTab::Overview, "Overview".to_string(), "Who wins, by how much, and how the gaps spread"),
+            (ResultTab::Race, "Race".to_string(), "The course, where the lengths are won, and speed and HP along the race"),
+            (ResultTab::Skills, "Skills".to_string(), "Where each skill fired, what each is worth, and where training points matter"),
+            (ResultTab::Stamina, "Stamina".to_string(), "HP at the finish and what a full spurt needs"),
+            (ResultTab::Runs, "Runs".to_string(), "Earlier runs to compare against, each uma's numbers, and export"),
+        ];
+        crate::ui_util::segmented(ui, &mut self.sim.result_tab, &tabs);
+        ui.add_space(6.0);
+        match self.sim.result_tab {
+            ResultTab::Overview => self.results_overview(ui, &r),
+            ResultTab::Race => self.results_race(ui, &r),
+            ResultTab::Skills => self.results_skills(ui, &r),
+            ResultTab::Stamina => self.results_stamina(ui, &r),
+            ResultTab::Runs => self.results_runs(ui, &r),
+        }
+    }
+
+    /// "Uma 2 wins 83% of 1000 races, by 3.52 L (≈ 0.40 s) on average", with the 95% interval and a
+    /// plain note when the gap is within noise.
+    fn verdict_card(&self, ui: &mut egui::Ui, r: &CompareResult) {
+        let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
+        let runs = r.gaps.len().max(1);
+        let ahead = r.gaps.iter().filter(|g| **g > 0.0).count() as f64 / runs as f64 * 100.0;
+        let (winner, k, lead, share) = if r.mean >= 0.0 { ("Uma 2", 1, r.mean, ahead) } else { ("Uma 1", 0, -r.mean, 100.0 - ahead) };
+        let n = runs as f64;
+        let sd = (r.gaps.iter().map(|g| (g - r.mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+        let half = 1.96 * sd / n.sqrt();
+        let d = self.sim.ran.as_ref().and_then(|x| self.sim_data.as_ref()?.courses.get(&x.course)).map_or(2000.0, |c| c.distance);
+        let speed = d / r.umas[0].mean_time.max(1.0);
+        let secs = lead * 2.5 / speed.max(1.0);
         card(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(semibold(format!("{winner} wins"), 17.0).color(color));
-                ui.label(RichText::new(format!(
-                    "by {lead:.2} lengths on average ({:.1} m), and finishes ahead in {share:.0}% of {runs} races.",
-                    lead * 2.5
-                )));
-            });
-            if lead < 0.1 {
-                ui.label(RichText::new("That's a very small gap: the two builds are about even.").size(12.5).color(p.weak));
+            let mut job = egui::text::LayoutJob::default();
+            let font = egui::FontId::new(size::XL, egui::FontFamily::Name(crate::theme::SEMIBOLD.into()));
+            job.append(&format!("{winner} wins {share:.0}% of {runs} races"), 0.0, egui::TextFormat::simple(font.clone(), crate::charts::uma_color(k, dark)));
+            job.append(&format!(", by {lead:.2} L (≈ {secs:.2} s) on average."), 0.0, egui::TextFormat::simple(font, p.text));
+            ui.add(egui::Label::new(job).wrap());
+            ui.label(RichText::new(format!("95% interval for the average gap: {:+.2} to {:+.2} L (1 L = 2.5 m). Simulator output.", r.mean - half, r.mean + half)).size(size::SM).color(p.weak));
+            if lead < half || lead < 0.1 {
+                ui.label(RichText::new("The gap is within noise: treat the two builds as even, or run more races.").size(size::SM).color(p.warn));
             }
         });
-        ui.add_space(8.0);
+    }
+
+    fn results_overview(&mut self, ui: &mut egui::Ui, r: &CompareResult) {
+        let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
+        let colors = [crate::charts::uma_color(0, dark), crate::charts::uma_color(1, dark)];
+        let runs = r.gaps.len();
         let sign = |v: f64| format!("{v:+.2} L");
         stat_row(
             ui,
             &[
-                ("⚖", "Average gap", sign(r.mean), "Uma 2's lead over Uma 1".into(), if r.mean >= 0.0 { UMA_COLORS[1] } else { UMA_COLORS[0] }),
+                ("⚖", "Average gap", sign(r.mean), "Uma 2's lead over Uma 1".into(), if r.mean >= 0.0 { colors[1] } else { colors[0] }),
                 ("◎", "Typical gap", sign(r.median), format!("median of {runs} runs"), p.accent),
                 ("↧", "Worst for Uma 2", sign(r.min), "smallest gap".into(), p.weak),
                 ("↥", "Best for Uma 2", sign(r.max), "largest gap".into(), p.weak),
             ],
         );
-        ui.add_space(10.0);
-        crate::ui_util::card_explained(ui, "Gap per run", "How often each gap came up. Bars right of zero are races Uma 2 won.", |ui| histogram(ui, &r.gaps));
+        ui.add_space(8.0);
+        let ghost = self.sim.pinned.and_then(|i| self.sim.history.get(i)).map(|h| (h.gaps.clone(), h.label.clone()));
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(semibold("Gap per race", size::MD));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let options = [(false, "Histogram".to_string(), "How many races ended with each gap"), (true, "Cumulative".to_string(), "The share of races that ended below each gap")];
+                    crate::ui_util::segmented(ui, &mut self.sim.cdf, &options);
+                });
+            });
+            ui.label(RichText::new("Every race's gap at the finish. Right of zero, Uma 2 won.").size(size::SM).color(p.weak));
+            let mut legend = vec![(colors[0], "Uma 1 ahead"), (colors[1], "Uma 2 ahead")];
+            if ghost.is_some() {
+                legend.push((p.text.gamma_multiply(0.55), "pinned run (outline)"));
+            }
+            crate::charts::legend(ui, &legend);
+            crate::charts::distribution(ui, &r.gaps, ghost.as_ref().map(|g| g.0.as_slice()), self.sim.cdf, colors, 210.0);
+            if let Some((_, label)) = &ghost {
+                ui.label(RichText::new(format!("Pinned: {label}")).size(size::XS).color(p.weak));
+            }
+        });
+        if let Some(course) = self.ran_course() {
+            card(ui, |ui| {
+                ui.label(semibold("Where the lengths are won", size::MD));
+                ui.label(RichText::new("Uma 2's lead along the race: the line is the median race, the band holds 8 races in 10.").size(size::SM).color(p.weak));
+                self.strip_with_spurts(ui, &course, r);
+                crate::charts::gap_chart(ui, &r.gap_curve, course.distance as f32, 170.0, colors[1]);
+            });
+        }
+        if self.sim.from_plan {
+            ui.horizontal(|ui| {
+                if ui.button("💾 Save to plan").on_hover_text("Writes these results into the plan's ## Simulation section").clicked() {
+                    match self.save_sim_to_plan() {
+                        Ok(msg) => self.toast(msg, crate::ui_util::ToastKind::Success),
+                        Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
+                    }
+                }
+                ui.label(RichText::new("Uma 1 is the plan's trainee without her bought skills; Uma 2 has them.").size(size::SM).color(p.weak));
+            });
+        }
+    }
+
+    /// The course the last run used.
+    fn ran_course(&self) -> Option<Course> {
+        let id = self.sim.ran.as_ref().map_or(self.sim.course, |x| x.course);
+        self.sim_data.as_ref()?.courses.get(&id).cloned()
+    }
+
+    /// The course strip, lined up with the charts, with each uma's mean spurt start.
+    fn strip_with_spurts(&mut self, ui: &mut egui::Ui, course: &Course, r: &CompareResult) -> crate::charts::StripGeom {
+        let dark = ui.visuals().dark_mode;
+        let labels = ["Uma 1 spurts", "Uma 2 spurts"];
+        let mut markers: Vec<(f64, &str, Color32)> = (0..2).filter_map(|k| r.umas[k].mean_spurt_start.map(|m| (m, labels[k], crate::charts::uma_color(k, dark)))).collect();
+        // Both at about the same point: one marker.
+        if markers.len() == 2 && (markers[0].0 - markers[1].0).abs() < course.distance * 0.01 {
+            markers = vec![(markers[0].0, "Both spurt", pal(ui).text)];
+        }
+        crate::charts::course_strip_in(ui, course, 74.0, &markers, (crate::charts::AXIS_L, crate::charts::AXIS_R)).1
+    }
+
+    fn results_race(&mut self, ui: &mut egui::Ui, r: &CompareResult) {
+        let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
+        let Some(course) = self.ran_course() else { return };
+        let d = course.distance as f32;
+        let colors = [crate::charts::uma_color(0, dark), crate::charts::uma_color(1, dark)];
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(semibold("The race", size::MD));
+                ui.add_space(8.0);
+                crate::charts::legend(ui, &[(colors[0], "Uma 1"), (colors[1], "Uma 2")]);
+            });
+            ui.label(RichText::new("All charts share the course's distance axis. Speed and HP are the median race (the one whose gap is closest to the median).").size(size::SM).color(p.weak));
+            self.replay_controls(ui, &r.median_run);
+            let geom = self.strip_with_spurts(ui, &course, r);
+            self.replay_dots(ui, geom, &r.median_run);
+            ui.add_space(4.0);
+            ui.label(RichText::new("Uma 2's lead (L)").size(size::SM).color(p.weak));
+            crate::charts::gap_chart(ui, &r.gap_curve, d, 150.0, colors[1]);
+            ui.add_space(4.0);
+            ui.label(RichText::new("Speed (m/s): bars above are skills firing; dashes, the last spurt; ✕, HP ran out").size(size::SM).color(p.weak));
+            let lines = [
+                crate::charts::TraceLine { trace: &r.median_run[0], color: colors[0], label: "Uma 1" },
+                crate::charts::TraceLine { trace: &r.median_run[1], color: colors[1], label: "Uma 2" },
+            ];
+            crate::charts::speed_chart(ui, d, &lines, 230.0, &|id| self.skill_label(id));
+            ui.add_space(4.0);
+            ui.label(RichText::new("HP: shaded, rushed; +, a recovery skill").size(size::SM).color(p.weak));
+            let recovery = |id: u32| self.kb.skills.get(&id).is_some_and(|s| s.category == "Recovery");
+            crate::charts::hp_chart(ui, d, &lines, 150.0, &recovery, &|id| self.skill_label(id));
+        });
+    }
+
+    /// ▶ Replay: play, pause and scrub the median race along the course strip.
+    fn replay_controls(&mut self, ui: &mut egui::Ui, traces: &[Trace; 2]) {
+        let len = traces.iter().map(|t| t.pos.len()).max().unwrap_or(0);
+        if len == 0 {
+            return;
+        }
+        let total = len as f32 * crate::sim::run::DT as f32;
+        let rp = &mut self.sim.replay;
+        if rp.playing {
+            rp.t += ui.input(|i| i.stable_dt).min(0.1) * rp.speed;
+            if rp.t >= total {
+                rp.t = total;
+                rp.playing = false;
+            }
+            ui.ctx().request_repaint();
+        }
+        ui.horizontal(|ui| {
+            let label = if rp.playing { "⏸ Pause" } else if rp.t > 0.0 && rp.t < total { "▶ Resume" } else { "▶ Replay" };
+            if ui.button(label).on_hover_text("Watch the median race: two dots run the course, and skills pop up as they fire").clicked() {
+                if !rp.playing && rp.t >= total {
+                    rp.t = 0.0;
+                }
+                rp.playing = !rp.playing;
+            }
+            ui.add(egui::Slider::new(&mut rp.t, 0.0..=total).show_value(false)).on_hover_text("Scrub through the race");
+            ui.label(RichText::new(format!("{:.1} s", rp.t * GAME_CLOCK as f32)).size(size::SM));
+            for s in [1.0, 2.0, 4.0] {
+                ui.selectable_value(&mut rp.speed, s, format!("{s:.0}×"));
+            }
+        });
+    }
+
+    /// The two dots of the replay on the strip, with skills popping up as they fire.
+    fn replay_dots(&self, ui: &egui::Ui, geom: crate::charts::StripGeom, traces: &[Trace; 2]) {
+        let rp = &self.sim.replay;
+        if rp.t <= 0.0 && !rp.playing {
+            return;
+        }
+        let dark = ui.visuals().dark_mode;
+        let p = pal(ui);
+        let i = (rp.t / crate::sim::run::DT as f32) as usize;
+        let painter = ui.painter();
+        for (k, t) in traces.iter().enumerate() {
+            let Some(&m) = t.pos.get(i.min(t.pos.len().saturating_sub(1))) else { continue };
+            let c = pos2(geom.x(m), geom.track.center().y + if k == 0 { -4.0 } else { 4.0 });
+            let color = crate::charts::uma_color(k, dark);
+            painter.circle(c, 6.0, color, Stroke::new(1.5, p.surface));
+            for (id, s, _) in &t.skills {
+                if m >= *s && m - *s < geom.distance * 0.04 {
+                    let text = crate::ui_util::truncate(&self.skill_label(*id), 20);
+                    let y = if k == 0 { geom.track.top() - 16.0 } else { geom.track.bottom() + 12.0 };
+                    let g = painter.layout_no_wrap(text, FontId::proportional(10.5), crate::charts::ink_on(color));
+                    let r = Rect::from_center_size(pos2(c.x, y), g.size() + vec2(8.0, 4.0));
+                    painter.rect_filled(r, CornerRadius::same(4), color);
+                    painter.galley(r.min + vec2(4.0, 2.0), g, crate::charts::ink_on(color));
+                }
+            }
+        }
+    }
+
+    fn results_skills(&mut self, ui: &mut egui::Ui, r: &CompareResult) {
+        let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
+        let Some(course) = self.ran_course() else { return };
+        let Some(ran) = self.sim.ran.clone() else { return };
+        let d = course.distance as f32;
+        card(ui, |ui| {
+            ui.label(semibold("Where each skill fired", size::MD));
+            ui.label(RichText::new("Each row is one skill: where along the course it activated across the races (darker, more often), its average start (the line) and how often it fired.").size(size::SM).color(p.weak));
+            for k in [1usize, 0] {
+                let mut rows: Vec<crate::charts::TimelineRow> = Vec::new();
+                for id in &ran.umas[k].skills {
+                    let stat = r.umas[k].skills.iter().find(|s| s.id == *id);
+                    let note = if stat.is_none() { Some(self.never_fired_reason(*id, k, &course, &ran)) } else { None };
+                    rows.push(crate::charts::TimelineRow {
+                        name: self.skill_label(*id),
+                        color: crate::charts::uma_color(k, dark),
+                        rate: stat.map_or(0.0, |s| s.rate),
+                        mean_start: stat.map_or(0.0, |s| s.mean_start),
+                        hist: stat.map(|s| s.starts.clone()).unwrap_or_default(),
+                        note,
+                        always: if stat.is_none() { self.skill_not_logged(*id).map(str::to_string) } else { None },
+                    });
+                }
+                if rows.is_empty() {
+                    continue;
+                }
+                ui.add_space(4.0);
+                ui.label(semibold(format!("Uma {}", k + 1), size::BODY).color(crate::charts::uma_color(k, dark)));
+                crate::charts::skill_timeline(ui, d, &rows);
+            }
+        });
+        // What each skill is worth, and where training points matter: runs on demand.
+        let running = self.sim.extra.as_ref().map(|j| j.kind);
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(semibold("What each of Uma 2's skills is worth", size::MD));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.extra_button(ui, ExtraKind::Contribution, running));
+            });
+            ui.label(RichText::new("Uma 2 against Uma 2 without each skill in turn, 200 races each: the lengths she'd lose without it.").size(size::SM).color(p.weak));
+            match &self.sim.contribution {
+                Some(items) => {
+                    crate::charts::hbars(ui, items, "L", crate::charts::uma_color(1, dark), p.bad);
+                }
+                None => {
+                    ui.label(RichText::new("Press the button to run it in the background.").size(size::SM).color(p.weak));
+                }
+            }
+        });
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(semibold("Where Uma 2's next training points matter", size::MD));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| self.extra_button(ui, ExtraKind::Sensitivity, running));
+            });
+            ui.label(RichText::new("Uma 2 with +50 in each stat in turn, 300 races each: the lengths each +50 gains.").size(size::SM).color(p.weak));
+            match &self.sim.sensitivity {
+                Some(items) => {
+                    crate::charts::hbars(ui, items, "L", crate::charts::uma_color(1, dark), p.bad);
+                }
+                None => {
+                    ui.label(RichText::new("Press the button to run it in the background.").size(size::SM).color(p.weak));
+                }
+            }
+        });
+    }
+
+    /// Skills the simulator applies without logging them as firing: passives raise a stat for the
+    /// whole race, and gate skills act at the start.
+    pub(crate) fn skill_not_logged(&self, id: u32) -> Option<&'static str> {
+        let k = self.kb.skills.get(&id)?;
+        if k.category == "Passive" {
+            Some("Passive: on for the whole race while its condition holds")
+        } else if k.effect_text().contains("Start Reaction") {
+            Some("Acts at the gate: a quicker start")
+        } else {
+            None
+        }
+    }
+
+    /// The likely reason a skill never activated: off in this CM, conditions that can't be met here,
+    /// or (conditions met) failed wit checks and rare conditions.
+    fn never_fired_reason(&self, id: u32, k: usize, course: &Course, ran: &RunInfo) -> String {
+        let cm = self.kb.umalator_presets.iter().find(|e| e.is_cm() && e.course == ran.course && e.disabled_skills.contains(&id));
+        if let Some(e) = cm {
+            return format!("Turned off in the {}", e.name);
+        }
+        let Some(data) = self.sim_data.as_ref() else { return "Never activated".into() };
+        let u = &ran.umas[k];
+        let conditions = [ran.race.0, ran.race.1, ran.race.2, ran.race.3].map(|v| v.clamp(1, 9) as u8);
+        let stats = [u.desc.speed, u.desc.stamina, u.desc.power, u.desc.guts, u.desc.wisdom];
+        match crate::recommend::skill_can_activate(data, course, conditions, stats, u.desc.strategy, id) {
+            Some(false) => "Its conditions can't be met on this course".into(),
+            None => "The simulator can't run this skill".into(),
+            Some(true) if ran.opts.wit_check => "Never fired: failed Wit checks, or a rare condition".into(),
+            Some(true) => "Never fired: its condition didn't come up".into(),
+        }
+    }
+
+    fn extra_button(&mut self, ui: &mut egui::Ui, kind: ExtraKind, running: Option<ExtraKind>) {
+        match running {
+            Some(k) if k == kind => {
+                let job = self.sim.extra.as_ref().expect("job");
+                if ui.small_button("✖").on_hover_text("Stop").clicked() {
+                    job.progress.cancel.store(true, Ordering::Relaxed);
+                }
+                let done = job.progress.done.load(Ordering::Relaxed) as f32;
+                let total = job.progress.total.load(Ordering::Relaxed).max(1) as f32;
+                ui.add(egui::ProgressBar::new((done / total).min(1.0)).desired_width(120.0).show_percentage());
+            }
+            Some(_) => {
+                ui.add_enabled(false, egui::Button::new("▶ Run"));
+            }
+            None => {
+                let label = if match kind {
+                    ExtraKind::Contribution => self.sim.contribution.is_some(),
+                    ExtraKind::Sensitivity => self.sim.sensitivity.is_some(),
+                } {
+                    "↻ Run again"
+                } else {
+                    "▶ Run"
+                };
+                if ui.button(label).on_hover_text("Runs in the background on the last run's setup").clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.start_extra(&ctx, kind);
+                }
+            }
+        }
+    }
+
+    /// Leave-one-out or +50 stat runs on the last run's setup, in the background.
+    pub(crate) fn start_extra(&mut self, ctx: &egui::Context, kind: ExtraKind) {
+        let (Some(data), Some(ran)) = (self.sim_data.clone(), self.sim.ran.clone()) else { return };
+        let Some(course) = data.courses.get(&ran.course).cloned().map(Arc::new) else { return };
+        let race = race_params(ran.race.0, ran.race.1, ran.race.2, ran.race.3, None);
+        let u2 = ran.umas[1].clone();
+        let names: Vec<(u32, String)> = u2.skills.iter().map(|id| (*id, self.skill_label(*id))).collect();
+        let progress = Arc::new(Progress::default());
+        let (tx, rx) = mpsc::channel();
+        let (p2, repaint) = (progress.clone(), ctx.clone());
+        let base_opts = ran.opts.clone();
+        std::thread::spawn(move || {
+            let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
+            // Each item: (label, build A, build B); the value is B's lead over A.
+            let items: Vec<(String, UmaBuild, UmaBuild, usize)> = match kind {
+                ExtraKind::Contribution => names
+                    .iter()
+                    .map(|(id, name)| {
+                        let mut without = u2.clone();
+                        without.skills.retain(|s| s != id);
+                        (name.clone(), without, u2.clone(), 200)
+                    })
+                    .collect(),
+                ExtraKind::Sensitivity => ["Speed", "Stamina", "Power", "Guts", "Wit"]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| {
+                        let mut plus = u2.clone();
+                        let s = [&mut plus.desc.speed, &mut plus.desc.stamina, &mut plus.desc.power, &mut plus.desc.guts, &mut plus.desc.wisdom];
+                        *s.into_iter().nth(i).expect("five stats") += 50.0;
+                        (format!("+50 {name}"), u2.clone(), plus, 300)
+                    })
+                    .collect(),
+            };
+            p2.total.store(items.len(), Ordering::Relaxed);
+            let chunk = items.len().div_ceil(threads).max(1);
+            let mut out: Vec<(String, f64)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = items
+                    .chunks(chunk)
+                    .map(|part| {
+                        let (data, course, race, base_opts, p2) = (&data, &course, &race, &base_opts, &p2);
+                        scope.spawn(move || {
+                            part.iter()
+                                .filter_map(|(label, a, b, runs)| {
+                                    if p2.cancel.load(Ordering::Relaxed) {
+                                        return None;
+                                    }
+                                    let opts = SimOptions { samples: *runs, ..base_opts.clone() };
+                                    let r = run_comparison(data, course, race, a, b, &opts, true, false, None);
+                                    p2.done.fetch_add(1, Ordering::Relaxed);
+                                    Some((label.clone(), r.mean))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect();
+                handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+            });
+            out.sort_by(|a, b| b.1.total_cmp(&a.1));
+            let _ = tx.send(out);
+            repaint.request_repaint();
+        });
+        self.sim.extra = Some(ExtraJob { kind, progress, rx });
+    }
+
+    fn results_stamina(&mut self, ui: &mut egui::Ui, r: &CompareResult) {
+        let Some(course) = self.ran_course() else { return };
+        let Some(ran) = self.sim.ran.clone() else { return };
+        let wide = ui.available_width() >= 900.0;
+        let draw = |ui: &mut egui::Ui, k: usize| self.stamina_card(ui, k, &course, &ran.umas[k], &r.umas[k].hp_left, r.umas[k].full_spurt_rate, r.umas[k].survival_rate);
+        if wide {
+            ui.columns(2, |cols| {
+                draw(&mut cols[0], 0);
+                draw(&mut cols[1], 1);
+            });
+        } else {
+            draw(ui, 0);
+            draw(ui, 1);
+        }
+    }
+
+    /// One uma's stamina: HP at the finish across races, max HP against what the race needs, and the
+    /// Stamina or recovery a full spurt would take (Moomoolator's HP calculator).
+    #[allow(clippy::too_many_arguments)]
+    fn stamina_card(&self, ui: &mut egui::Ui, k: usize, course: &Course, u: &UmaBuild, hp_left: &[f64], full_spurt: f64, survival: f64) {
+        let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
+        let color = crate::charts::uma_color(k, dark);
+        let style = match u.desc.strategy {
+            NIGE => 0,
+            SENKOU => 1,
+            SASI => 2,
+            OIKOMI => 3,
+            _ => 4,
+        };
+        let e = hpcalc::estimate(course, u.desc.stamina, u.desc.guts, u.desc.wisdom, u.desc.speed, style, 0.0);
+        card(ui, |ui| {
+            ui.label(semibold(format!("Uma {}", k + 1), size::MD).color(color));
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("Full spurt {full_spurt:.0}%")).size(size::SM));
+                ui.label(RichText::new("·").color(p.weak));
+                ui.label(RichText::new(format!("finished with HP left {survival:.0}%")).size(size::SM));
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("HP left at the finish, per race").size(size::SM).color(p.weak));
+            crate::charts::mini_hist(ui, hp_left, color, "HP", 80.0);
+            ui.add_space(6.0);
+            // Max HP against what the race needs, as one bar.
+            ui.label(RichText::new("Max HP and what a full-speed race needs (HP calculator)").size(size::SM).color(p.weak));
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
+            let scale = e.max_hp.max(e.total_needed).max(1.0) as f32 * 1.12;
+            let x = |v: f64| rect.left() + rect.width() * (v as f32 / scale);
+            let painter = ui.painter();
+            let bar = Rect::from_min_max(pos2(rect.left(), rect.top() + 16.0), pos2(x(e.max_hp), rect.bottom() - 4.0));
+            painter.rect_filled(bar, CornerRadius::same(3), color.gamma_multiply(0.8));
+            painter.text(bar.right_center() + vec2(-6.0, 0.0), Align2::RIGHT_CENTER, format!("max {:.0}", e.max_hp), FontId::proportional(10.5), crate::charts::ink_on(color));
+            let need = x(e.total_needed);
+            painter.line_segment([pos2(need, rect.top() + 12.0), pos2(need, rect.bottom())], Stroke::new(2.0, if e.full_spurt { p.text } else { p.bad }));
+            painter.text(pos2(need, rect.top()), Align2::CENTER_TOP, format!("needs {:.0}", e.total_needed), FontId::proportional(10.5), p.text);
+            resp.on_hover_text(format!("Max HP {:.0}; a full spurt needs about {:.0} ({:.0} before the final leg, {:.0} after).", e.max_hp, e.total_needed, e.phase01_hp, e.phase2_hp));
+            let line = if e.full_spurt {
+                format!("Enough for a full spurt, with {:.0} HP to spare. Minimum Stamina for it: {}.", e.surplus, e.min_stamina)
+            } else {
+                format!("Short of a full spurt: needs {} Stamina, or recovery skills worth {:.1}% of max HP.", e.min_stamina, e.heal_needed)
+            };
+            ui.label(RichText::new(line).size(size::SM).color(if e.full_spurt { p.text } else { p.warn }));
+            ui.label(RichText::new("The HP calculator ignores mood, aptitude and ground; the races above don't.").size(size::XS).color(p.weak));
+        });
+    }
+
+    fn results_runs(&mut self, ui: &mut egui::Ui, r: &CompareResult) {
+        let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
+        card(ui, |ui| {
+            ui.label(semibold("Recent runs", size::MD));
+            ui.label(RichText::new("The last 10 runs this session. Pin one to draw its gaps as an outline on Overview's chart.").size(size::SM).color(p.weak));
+            let mut pin = None;
+            for (i, h) in self.sim.history.iter().enumerate().rev() {
+                ui.horizontal(|ui| {
+                    let pinned = self.sim.pinned == Some(i);
+                    let latest = i + 1 == self.sim.history.len();
+                    if ui.selectable_label(pinned, if pinned { "📌 Pinned" } else { "📌 Pin" }).on_hover_text("Compare this run's gaps with the current one").clicked() {
+                        pin = Some(if pinned { None } else { Some(i) });
+                    }
+                    ui.label(RichText::new(&h.when).size(size::SM).color(p.weak));
+                    ui.label(RichText::new(&h.verdict).size(size::SM).strong());
+                    ui.label(RichText::new(&h.label).size(size::SM).color(p.weak));
+                    if latest {
+                        ui.label(RichText::new("(this run)").size(size::XS).color(p.weak));
+                    }
+                });
+            }
+            if let Some(v) = pin {
+                self.sim.pinned = v;
+            }
+        });
         card_titled(ui, "Each uma", |ui| {
             egui::Grid::new("sim_uma_stats").num_columns(3).striped(true).spacing([24.0, 4.0]).show(ui, |ui| {
                 ui.label("");
-                ui.label(semibold("Uma 1", 14.0).color(UMA_COLORS[0]));
-                ui.label(semibold("Uma 2", 14.0).color(UMA_COLORS[1]));
+                ui.label(semibold("Uma 1", 14.0).color(crate::charts::uma_color(0, dark)));
+                ui.label(semibold("Uma 2", 14.0).color(crate::charts::uma_color(1, dark)));
                 ui.end_row();
-                let rows: [(&str, Box<dyn Fn(&crate::sim::run::UmaStats) -> String>); 9] = [
+                let rows: [(&str, Box<dyn Fn(&crate::sim::run::UmaStats) -> String>); 11] = [
                     ("Finish (game clock)", Box::new(|u| format!("{}  ({:.2} s)", game_time(u.mean_time), u.mean_time))),
                     ("Full spurt", Box::new(|u| format!("{:.1}%", u.full_spurt_rate))),
                     ("HP survival", Box::new(|u| format!("{:.1}%", u.survival_rate))),
+                    ("Last spurt starts", Box::new(|u| u.mean_spurt_start.map_or("—".into(), |m| format!("{m:.0} m")))),
+                    ("HP runs out (when it does)", Box::new(|u| u.mean_hp_out.map_or("—".into(), |m| format!("{m:.0} m")))),
                     ("Spurt speed lost when short", Box::new(|u| if u.full_spurt_rate >= 99.9 { "—".into() } else { format!("{:.2} m/s", -u.non_full_speed_loss) })),
                     ("Rushed", Box::new(|u| if u.rushed_rate > 0.0 { format!("{:.1}% ({:.0} m)", u.rushed_rate, u.rushed_mean_length) } else { "0%".into() })),
                     ("Start delay", Box::new(|u| format!("{:.3} s", u.mean_start_delay))),
@@ -815,37 +1464,55 @@ impl App {
                 }
             });
         });
-        card_titled(ui, "Skill activations", |ui| {
-            ui.columns(2, |cols| {
-                for (k, col) in cols.iter_mut().enumerate() {
-                    col.label(semibold(format!("Uma {}", k + 1), 13.5).color(UMA_COLORS[k]));
-                    egui::Grid::new(("sim_skills", k)).num_columns(3).striped(true).spacing([12.0, 3.0]).show(col, |ui| {
-                        for s in &r.umas[k].skills {
-                            ui.label(self.skill_label(s.id));
-                            ui.label(format!("{:.0}%", s.rate)).on_hover_text("Runs where it activated");
-                            ui.label(RichText::new(format!("{:.0} m", s.mean_start)).color(p.weak)).on_hover_text("Mean activation point");
-                            ui.end_row();
+        card_titled(ui, "Export", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("📋 Copy summary").on_hover_text("Copy the setup and results as markdown, to paste into notes or a plan").clicked() {
+                    match self.sim_markdown() {
+                        Ok(md) => {
+                            ui.ctx().copy_text(md);
+                            self.toast("Copied the summary as markdown.", crate::ui_util::ToastKind::Success);
                         }
-                    });
+                        Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
+                    }
                 }
-            });
-        });
-        if let Some(course) = self.sim_data.as_ref().and_then(|d| d.courses.get(&self.sim.ran.as_ref().map_or(self.sim.course, |x| x.course))).cloned() {
-            card_titled(ui, "Speed and HP, median run", |ui| {
-                trace_chart(ui, &course, &[(&r.median_run[0], UMA_COLORS[0]), (&r.median_run[1], UMA_COLORS[1])], &|id| self.skill_label(id));
-            });
-        }
-        if self.sim.from_plan {
-            ui.horizontal(|ui| {
-                if ui.button("💾 Save to plan").on_hover_text("Writes these results into the plan's ## Simulation section").clicked() {
+                if ui.button("🖼 Save chart as PNG").on_hover_text("Save the results shown on the tab you pick next (Overview, Race…) as a picture in Pictures\\umaLord").clicked() {
+                    self.sim.save_png = true;
+                }
+                if self.sim.from_plan && ui.button("💾 Save to plan").on_hover_text("Writes these results into the plan's ## Simulation section").clicked() {
                     match self.save_sim_to_plan() {
                         Ok(msg) => self.toast(msg, crate::ui_util::ToastKind::Success),
                         Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
                     }
                 }
-                ui.label(RichText::new("Uma 1 is the plan's trainee without her bought skills; Uma 2 has them.").size(12.0).color(p.weak));
             });
-        }
+        });
+    }
+
+    /// Save the results area as a PNG in Pictures\umaLord, by cropping a screenshot.
+    fn save_results_png(&self, ctx: &egui::Context) {
+        let Some(rect) = self.sim.results_rect else { return };
+        let Some(dir) = std::env::var_os("USERPROFILE").map(|h| std::path::PathBuf::from(h).join("Pictures").join("umaLord")) else { return };
+        let stamp = crate::live::fmt_local(crate::live::now()).replace([':', ' ', ','], "-");
+        let path = dir.join(format!("race-sim-{stamp}.png"));
+        let ppp = ctx.pixels_per_point();
+        let ctx2 = ctx.clone();
+        ctx.request_screenshot(move |img| {
+            let [w, h] = img.size;
+            let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
+            let Some(full) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) else { return };
+            let x0 = ((rect.left() * ppp).max(0.0) as u32).min(w as u32 - 1);
+            let y0 = ((rect.top() * ppp).max(0.0) as u32).min(h as u32 - 1);
+            let cw = ((rect.width() * ppp) as u32).min(w as u32 - x0).max(1);
+            let ch = ((rect.height() * ppp) as u32).min(h as u32 - y0).max(1);
+            let crop = image::imageops::crop_imm(&full, x0, y0, cw, ch).to_image();
+            let saved = std::fs::create_dir_all(&dir).is_ok() && crop.save(&path).is_ok();
+            if saved {
+                crate::ui_util::toast_action(&ctx2, format!("Saved {}", path.display()), crate::ui_util::ToastKind::Success, "Show", crate::ui_util::ToastAction::Open(path.clone()));
+            } else {
+                crate::ui_util::toast(&ctx2, format!("Couldn't save {}", path.display()), crate::ui_util::ToastKind::Error);
+            }
+            ctx2.request_repaint();
+        });
     }
 
     fn chart_results(&mut self, ui: &mut egui::Ui) {
@@ -906,9 +1573,10 @@ impl App {
 
     fn stamina_results(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
+        let dark = ui.visuals().dark_mode;
         let Some(r) = self.sim.stamina.clone() else {
             if self.sim.job.is_none() {
-                ui.label(RichText::new("▶ Run simulates Uma 1 alone and reports the HP left at the finish.").color(p.weak));
+                ui.label(RichText::new("▶ Run simulates Uma 1 alone and reports the HP she has left at the finish.").color(p.weak));
             }
             return;
         };
@@ -918,19 +1586,24 @@ impl App {
             ui,
             &[
                 ("♥", "Max HP", format!("{:.0}", r.max_hp), "from Stamina".into(), p.accent),
-                ("◎", "HP left", format!("{:.0}", med(&r.remaining)), "median; below 0 means she ran dry".into(), if med(&r.remaining) >= 0.0 { pal(ui).good } else { pal(ui).warn }),
+                ("◎", "HP left", format!("{:.0}", med(&r.remaining)), "median; below 0 means she ran dry".into(), if med(&r.remaining) >= 0.0 { p.good } else { p.warn }),
                 ("⚡", "Full spurt", format!("{:.0}%", r.full_spurt_runs as f64 / r.runs.max(1) as f64 * 100.0), "of runs at top speed to the end".into(), p.gold),
                 ("🏁", "HP survival", format!("{survived:.0}%"), "of runs finished with HP left".into(), p.link),
                 ("↘", "Downhill saving", format!("{:.0}", med(&r.downhill_save)), "median HP saved on slopes".into(), p.weak),
             ],
         );
         ui.add_space(6.0);
-        ui.label(RichText::new(format!("HP used before the last spurt (median): {:.0}", med(&r.required))).color(p.weak));
-        if let Some(course) = self.sim_data.as_ref().and_then(|d| d.courses.get(&self.sim.course)).cloned() {
-            card_titled(ui, "Speed and HP, median run", |ui| {
-                trace_chart(ui, &course, &[(&r.median_run, UMA_COLORS[0])], &|id| self.skill_label(id));
-            });
-        }
+        let Some(course) = self.sim_data.as_ref().and_then(|d| d.courses.get(&self.sim.course)).cloned() else { return };
+        let u = self.sim.umas[0].clone();
+        let full = r.full_spurt_runs as f64 / r.runs.max(1) as f64 * 100.0;
+        self.stamina_card(ui, 0, &course, &u, &r.remaining, full, survived);
+        card(ui, |ui| {
+            ui.label(semibold("Speed and HP, median run", size::MD));
+            let lines = [crate::charts::TraceLine { trace: &r.median_run, color: crate::charts::uma_color(0, dark), label: "Uma 1" }];
+            crate::charts::speed_chart(ui, course.distance as f32, &lines, 220.0, &|id| self.skill_label(id));
+            let recovery = |id: u32| self.kb.skills.get(&id).is_some_and(|s| s.category == "Recovery");
+            crate::charts::hp_chart(ui, course.distance as f32, &lines, 150.0, &recovery, &|id| self.skill_label(id));
+        });
     }
 
     fn hp_calc(&mut self, ui: &mut egui::Ui) {
@@ -1078,102 +1751,51 @@ impl App {
     }
 }
 
-/// A histogram of the per-run gaps.
-fn histogram(ui: &mut egui::Ui, sorted: &[f64]) {
-    let p = pal(ui);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 120.0), Sense::hover());
-    if sorted.is_empty() || !ui.is_rect_visible(rect) {
-        return;
-    }
-    let (lo, hi) = (sorted[0], sorted[sorted.len() - 1]);
-    let span = (hi - lo).max(0.01);
-    let bins = 40usize;
-    let mut counts = vec![0usize; bins];
-    for v in sorted {
-        counts[(((v - lo) / span) * (bins as f64 - 1.0)).round() as usize] += 1;
-    }
-    let max = *counts.iter().max().unwrap_or(&1) as f32;
-    let plot = Rect::from_min_max(rect.min + vec2(0.0, 4.0), rect.max - vec2(0.0, 18.0));
-    let w = plot.width() / bins as f32;
-    for (i, c) in counts.iter().enumerate() {
-        let h = plot.height() * *c as f32 / max;
-        let mid = lo + span * (i as f64 + 0.5) / bins as f64;
-        let color = if mid >= 0.0 { UMA_COLORS[1] } else { UMA_COLORS[0] };
-        let r = Rect::from_min_max(pos2(plot.left() + i as f32 * w + 1.0, plot.bottom() - h), pos2(plot.left() + (i + 1) as f32 * w - 1.0, plot.bottom()));
-        ui.painter().rect_filled(r, CornerRadius::same(2), color.gamma_multiply(0.75));
-    }
-    if lo < 0.0 && hi > 0.0 {
-        let x = plot.left() + plot.width() * ((-lo) / span) as f32;
-        ui.painter().line_segment([pos2(x, plot.top()), pos2(x, plot.bottom())], Stroke::new(1.0, p.weak));
-    }
-    let font = FontId::proportional(11.0);
-    ui.painter().text(pos2(plot.left(), rect.bottom()), Align2::LEFT_BOTTOM, format!("{lo:+.2} L (Uma 1 ahead)"), font.clone(), p.weak);
-    ui.painter().text(pos2(plot.right(), rect.bottom()), Align2::RIGHT_BOTTOM, format!("{hi:+.2} L (Uma 2 ahead)"), font, p.weak);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Speed (solid) and HP (faint) against distance for one run per uma, with the course's phases,
-/// slopes and each uma's skill activations. Hover for values.
-fn trace_chart(ui: &mut egui::Ui, course: &Course, traces: &[(&Trace, Color32)], name: &dyn Fn(u32) -> String) {
-    let p = pal(ui);
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 260.0), Sense::hover());
-    if !ui.is_rect_visible(rect) || traces.iter().all(|(t, _)| t.pos.is_empty()) {
-        return;
-    }
-    let painter = ui.painter_at(rect);
-    let plot = Rect::from_min_max(rect.min + vec2(42.0, 22.0), rect.max - vec2(42.0, 20.0));
-    let d = course.distance as f32;
-    let x = |m: f32| plot.left() + plot.width() * (m / d).clamp(0.0, 1.0);
-    // Phases and slopes.
-    for (ph, label) in [(0, "Opening"), (1, "Middle"), (2, "Final"), (3, "Last spurt")] {
-        let s = phase_start(course.distance, ph) as f32;
-        painter.line_segment([pos2(x(s), plot.top()), pos2(x(s), plot.bottom())], Stroke::new(1.0, p.border));
-        painter.text(pos2(x(s) + 3.0, plot.bottom() + 2.0), Align2::LEFT_TOP, label, FontId::proportional(10.5), p.weak);
-    }
-    for s in &course.slopes {
-        let c = if s.slope > 0.0 { pal(ui).warn } else { p.link };
-        let r = Rect::from_min_max(pos2(x(s.start as f32), plot.bottom() - 4.0), pos2(x((s.start + s.length) as f32), plot.bottom()));
-        painter.rect_filled(r, CornerRadius::ZERO, c.gamma_multiply(0.5));
-    }
-    let speeds: Vec<f32> = traces.iter().flat_map(|(t, _)| t.speed.iter().copied()).filter(|v| *v > 5.0).collect();
-    let (vmin, vmax) = (speeds.iter().copied().fold(f32::MAX, f32::min).max(10.0), speeds.iter().copied().fold(0.0, f32::max) + 0.3);
-    let hmax = traces.iter().flat_map(|(t, _)| t.hp.iter().copied()).fold(1.0f32, f32::max);
-    let y_v = |v: f32| plot.bottom() - plot.height() * ((v - vmin) / (vmax - vmin).max(0.1)).clamp(0.0, 1.0);
-    let y_h = |h: f32| plot.bottom() - plot.height() * (h / hmax).clamp(0.0, 1.0);
-    for (t, color) in traces {
-        let pts_v: Vec<Pos2> = t.pos.iter().zip(&t.speed).map(|(m, v)| pos2(x(*m), y_v(*v))).collect();
-        let pts_h: Vec<Pos2> = t.pos.iter().zip(&t.hp).map(|(m, h)| pos2(x(*m), y_h(*h))).collect();
-        painter.add(Shape::line(pts_h, Stroke::new(1.2, color.gamma_multiply(0.4))));
-        painter.add(Shape::line(pts_v, Stroke::new(1.8, *color)));
-    }
-    // Skill activation bars above the plot, one row per uma.
-    for (k, (t, color)) in traces.iter().enumerate() {
-        let y = rect.top() + 4.0 + k as f32 * 8.0;
-        for (_, s, e) in &t.skills {
-            let end = if *e > *s { *e } else { *s + d * 0.004 };
-            painter.rect_filled(Rect::from_min_max(pos2(x(*s), y), pos2(x(end), y + 5.0)), CornerRadius::same(2), color.gamma_multiply(0.8));
+    /// A real Compare, then every dashboard tab draws in both modes; the extras finish in the
+    /// background; the history keeps the run.
+    #[test]
+    fn dashboard_draws_and_extras_run() {
+        let mut a = App::for_tests();
+        a.tab = crate::Tab::Career;
+        a.career_tab = crate::CareerTab::Race;
+        a.sim.opts.samples = 60;
+        a.sim.auto_seed = false;
+        let ctx = egui::Context::default();
+        a.sim_start(&ctx);
+        let start = std::time::Instant::now();
+        while a.sim.job.is_some() {
+            assert!(start.elapsed().as_secs() < 60, "the run never finished");
+            a.sim_poll(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
-    }
-    let font = FontId::proportional(10.5);
-    painter.text(pos2(plot.left() - 4.0, plot.top()), Align2::RIGHT_TOP, format!("{vmax:.1}"), font.clone(), p.weak);
-    painter.text(pos2(plot.left() - 4.0, plot.bottom()), Align2::RIGHT_BOTTOM, format!("{vmin:.1}"), font.clone(), p.weak);
-    painter.text(pos2(plot.left() - 4.0, plot.center().y), Align2::RIGHT_CENTER, "m/s", font.clone(), p.weak);
-    painter.text(pos2(plot.right() + 4.0, plot.top()), Align2::LEFT_TOP, format!("{hmax:.0}"), font.clone(), p.weak);
-    painter.text(pos2(plot.right() + 4.0, plot.center().y), Align2::LEFT_CENTER, "HP", font, p.weak);
-    if let Some(hp) = resp.hover_pos().filter(|h| plot.contains(*h)) {
-        let m = (hp.x - plot.left()) / plot.width() * d;
-        painter.line_segment([pos2(hp.x, plot.top()), pos2(hp.x, plot.bottom())], Stroke::new(1.0, p.weak));
-        let mut lines = vec![format!("{m:.0} m")];
-        for (k, (t, _)) in traces.iter().enumerate() {
-            if let Some(i) = t.pos.iter().position(|v| *v >= m) {
-                lines.push(format!("Uma {}: {:.2} m/s, HP {:.0}", k + 1, t.speed[i], t.hp[i]));
-            }
-            for (id, s, e) in &t.skills {
-                let end = if *e > *s { *e } else { *s + 15.0 };
-                if m >= *s && m <= end {
-                    lines.push(format!("  Uma {}: {}", k + 1, name(*id)));
-                }
+        let r = a.sim.compare.clone().expect("a result");
+        assert_eq!(r.gap_curve.len(), 101);
+        assert!(r.gap_curve.iter().all(|g| g.p10 <= g.p50 && g.p50 <= g.p90));
+        assert_eq!(a.sim.history.len(), 1);
+        for kind in [ExtraKind::Contribution, ExtraKind::Sensitivity] {
+            a.start_extra(&ctx, kind);
+            while a.sim.extra.is_some() {
+                assert!(start.elapsed().as_secs() < 120, "the extra run never finished");
+                a.sim_poll(&ctx);
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
-        resp.on_hover_text_at_pointer(lines.join("\n"));
+        assert_eq!(a.sim.sensitivity.as_ref().map(Vec::len), Some(5));
+        assert!(a.sim.contribution.is_some());
+        for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+            crate::theme::install(&ctx, mode);
+            for tab in [ResultTab::Overview, ResultTab::Race, ResultTab::Skills, ResultTab::Stamina, ResultTab::Runs] {
+                a.sim.result_tab = tab;
+                a.sim.cdf = tab == ResultTab::Runs;
+                a.sim.pinned = Some(0);
+                a.sim.replay.t = 20.0;
+                let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0))), ..Default::default() };
+                let _ = ctx.run_ui(input, |ui| a.frame(ui));
+            }
+        }
     }
 }

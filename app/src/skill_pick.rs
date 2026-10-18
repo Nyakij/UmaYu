@@ -408,6 +408,9 @@ impl App {
                             start_chart = true;
                         }
                         if let Some(job) = &self.planner.skill_job {
+                            if ui.small_button("✖").on_hover_text("Stop simulating").clicked() {
+                                job.cancel();
+                            }
                             ui.add(egui::ProgressBar::new(job.fraction()).desired_width(120.0).text(format!("{} skills", job.count())));
                         }
                     }
@@ -753,9 +756,11 @@ impl App {
                     ui.label(RichText::new(format!("{e:.2}")).size(size::SM));
                 }
                 "act" => match out.as_ref().and_then(|o| o.activation.get(&r.id)) {
-                    // Passives raise a stat for the race; the simulator doesn't log them as triggers.
-                    Some(a) if *a <= 0.0 && self.kb.skills.get(&r.id).is_some_and(|k| k.category == "Passive") => {
-                        ui.label(RichText::new("passive").size(size::SM).color(p.weak)).on_hover_text("A passive: it raises a stat for the whole race while its condition holds, so it never \"triggers\"");
+                    // Passives and gate skills: the simulator applies them without logging a trigger.
+                    Some(a) if *a <= 0.0 && self.skill_not_logged(r.id).is_some() => {
+                        let how = self.skill_not_logged(r.id).unwrap_or_default();
+                        let word = if how.starts_with("Passive") { "passive" } else { "at gate" };
+                        ui.label(RichText::new(word).size(size::SM).color(p.weak)).on_hover_text(format!("{how}: the simulator doesn't log it as triggering"));
                     }
                     Some(a) => {
                         ui.label(format!("{:.0}%", a * 100.0));

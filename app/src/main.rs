@@ -678,6 +678,10 @@ pub(crate) struct App {
     pub home: home::HomeState,
     /// UMALORD_RAIL: start with the Collection filters folded, for screenshots.
     pub debug_rail: bool,
+    /// UMALORD_EXTRA: after a Compare, also run "what each skill is worth" and "where training points matter".
+    pub debug_extra: bool,
+    /// UMALORD_REPLAY: the replay's position once the run finishes.
+    pub debug_replay: Option<f32>,
     /// First-run setup, and Settings → Profile's actions.
     pub onboarding: onboarding::OnboardingState,
     screenshot_to: Option<PathBuf>,
@@ -784,6 +788,8 @@ impl App {
             live: Default::default(),
             home: Default::default(),
             debug_rail: false,
+            debug_extra: false,
+            debug_replay: None,
             screenshot_to: env("UMALORD_SCREENSHOT").map(PathBuf::from),
             screenshot_requested: false,
             debug_question: env("UMALORD_ASK").filter(|q| !q.trim().is_empty()),
@@ -883,6 +889,20 @@ impl App {
                 label: format!("the {}", e.name),
             });
         }
+        // UMALORD_RESULTS=overview|race|skills|stamina|runs: the Race sim dashboard's tab.
+        if let Some(t) = env("UMALORD_RESULTS") {
+            app.sim.result_tab = match t.as_str() {
+                "race" => tab_sim::ResultTab::Race,
+                "skills" => tab_sim::ResultTab::Skills,
+                "stamina" => tab_sim::ResultTab::Stamina,
+                "runs" => tab_sim::ResultTab::Runs,
+                _ => tab_sim::ResultTab::Overview,
+            };
+        }
+        // UMALORD_EXTRA=1: also run the Skills tab's two background runs after the Compare.
+        app.debug_extra = env("UMALORD_EXTRA").as_deref() == Some("1");
+        // UMALORD_REPLAY=<seconds>: hold the replay at that point of the median race.
+        app.debug_replay = env("UMALORD_REPLAY").and_then(|s| s.parse::<f32>().ok());
         // UMALORD_RAIL=1: fold the Collection filters into the rail (in memory only).
         if env("UMALORD_RAIL").as_deref() == Some("1") {
             app.debug_rail = true;
@@ -1522,7 +1542,21 @@ impl App {
                 _ => {}
             }
         }
-        let simulating = self.sim.job.is_some() || self.planner.skill_job.is_some() || self.planner.pick_job.is_some();
+        if self.sim.job.is_none() && self.sim.compare.is_some()
+            && let Some(t) = self.debug_replay.take()
+        {
+            self.sim.replay.t = t;
+        }
+        if self.debug_extra && self.sim.job.is_none() && self.sim.extra.is_none() && self.sim.compare.is_some() {
+            if self.sim.contribution.is_none() {
+                self.start_extra(ctx, tab_sim::ExtraKind::Contribution);
+            } else if self.sim.sensitivity.is_none() {
+                self.start_extra(ctx, tab_sim::ExtraKind::Sensitivity);
+            } else {
+                self.debug_extra = false;
+            }
+        }
+        let simulating = self.sim.job.is_some() || self.planner.skill_job.is_some() || self.planner.pick_job.is_some() || self.sim.extra.is_some() || self.debug_extra;
         let installing = self.ask.oc.install_rx.is_some() || simulating;
         // UMALORD_ASK=<question>: ask it on start, and hold the screenshot until it's answered.
         if !installing && let Some(q) = self.debug_question.take() {
