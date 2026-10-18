@@ -1,0 +1,152 @@
+{
+"updated": "2026-10-17",
+"about": "Career scenarios on Global, for the planner's career simulation (end-of-run SP) and scenario-aware card picks. Claude keeps this file. Each number is either sourced (see `sources`) or listed under `assumed`, which are estimates to tune when real careers disagree: log careers with their final SP in results/careers.md.",
+"sources": {
+  "gametora_ura": "https://gametora.com/umamusume/ura-finals (base training values after the July 2026 Global update, fixed events, link character)",
+  "gametora_unity": "https://gametora.com/umamusume/unity-cup (Global base training values, unity training and Spirit Burst SP)",
+  "gametora_trackblazer": "https://gametora.com/umamusume/trackblazer (base training values, races-centred objectives, no scenario link)",
+  "gametora_grand_concert": "https://gametora.com/umamusume/our-grand-concert (base training values, link characters, lesson and live SP, lyrics-event golds)",
+  "umareference_training": "https://www.umareference.com/guide/support-cards-in-detail/calculating-training-stat-gain (training gain formula: mood 0.1 per step, +5% per support card)",
+  "umareference_appearance": "https://www.umareference.com/guide/support-cards-in-detail/stat-stick-passives (weights: 100 per facility, 50 for not appearing, specialty priority added to its own facility; community reverse-engineering)",
+  "umamusumedb": "https://umamusumedb.com/tools/training-calculator/ (facility level multipliers 1.0 to 2.0; friendship training at bond 80)",
+  "game8_race": "https://game8.co/games/Umamusume-Pretty-Derby/archives/572831 (race rewards at 1st place: G1 45 SP, G2/G3 35, OP/Pre-OP 30; Trackblazer 35/25/20)",
+  "game8_bond": "https://game8.co/games/Umamusume-Pretty-Derby/archives/542672 (bond +7 per training, +5 per hint)",
+  "uma_guide_cms": "knowledge/data/cm_schedule.json (which scenario was current for each Champions Meeting)"
+},
+"common": {
+  "turns": 72,
+  "summer_camp_turns": [36, 37, 38, 39, 60, 61, 62, 63],
+  "level_multiplier": [1.0, 1.25, 1.5, 1.75, 2.0],
+  "trainings_per_level": 4,
+  "mood_step": 0.1,
+  "support_bonus": 0.05,
+  "appearance_weight": 100,
+  "absent_weight": 50,
+  "rainbow_bond": 80,
+  "bond_per_training": 7,
+  "bond_per_hint": 5,
+  "race_sp": {"G1": 45, "G2": 35, "G3": 35, "OP": 30},
+  "assumed": {
+    "mood": 2,
+    "race_energy": 15,
+    "rest_energy": 50,
+    "rest_below_energy": 30,
+    "objective_win_rate": 0.75,
+    "placed_reward_factor": 0.6,
+    "optional_races": 5,
+    "hint_chance": 0.06,
+    "chain_event_chance": 0.9,
+    "random_event_chance": 0.4,
+    "date_event_chance": 0.8,
+    "uma_event_chance": 0.6,
+    "summer_camp_level": 5,
+    "event_energy_per_turn": 1.5
+  }
+},
+"scenarios": [
+  {
+    "name": "URA Finale",
+    "global": true,
+    "source": "gametora_ura",
+    "base_training": [
+      [11, 0, 6, 0, 0, 4, -21],
+      [0, 10, 0, 6, 0, 4, -19],
+      [0, 6, 9, 0, 0, 4, -20],
+      [5, 0, 5, 8, 0, 4, -22],
+      [2, 0, 0, 0, 10, 5, 5]
+    ],
+    "stat_caps": [1400, 1400, 1400, 1400, 1400],
+    "link": ["Aoi Kiryuin"],
+    "link_note": "With an Aoi Kiryuin card, the Three-Legged Race event gives a Lv 3 hint for 鋼の意志 instead of Lv 1.",
+    "race_sp": {"G1": 45, "G2": 35, "G3": 35, "OP": 30},
+    "finale_races": 3,
+    "extra_sp": [
+      {"what": "Three-Legged Race (50,000 fans by early November, year 2)", "sp": 20, "sourced": true},
+      {"what": "100,000 fans by the end of year 2", "sp": 30, "sourced": true},
+      {"what": "240,000 fans by the end of year 3", "sp": 30, "sourced": true},
+      {"what": "After the URA Finale Finals (scaled by race bonus)", "sp": 80, "race_bonus": true, "sourced": true},
+      {"what": "Happy Meek duel wins, assumed 2 of 5 (30 SP each)", "sp": 60, "sourced": false}
+    ],
+    "link_bonus": {"sp": 0, "stats": 0},
+    "card_note": "Plain training scenario: training, friendship and specialty carry a deck."
+  },
+  {
+    "name": "Unity Cup",
+    "global": true,
+    "source": "gametora_unity",
+    "base_training": [
+      [8, 0, 4, 0, 0, 2, -19],
+      [0, 7, 0, 3, 0, 2, -17],
+      [0, 4, 6, 0, 0, 2, -18],
+      [3, 0, 3, 6, 0, 2, -20],
+      [2, 0, 0, 0, 6, 3, 5]
+    ],
+    "stat_caps": [1300, 1300, 1300, 1300, 1800],
+    "link": ["Haru Urara", "Rice Shower", "Matikanefukukitaru", "Taiki Shuttle"],
+    "link_note": "The story characters. Scenario-linked cards add +1 to every stat in unity training, and Spirit Bursts with them give 20/10 stats and 10 SP instead of 15/7 and 5. GameTora names Haru Urara as linked; the other three are the remaining story characters.",
+    "race_sp": {"G1": 45, "G2": 35, "G3": 35, "OP": 30},
+    "finale_races": 3,
+    "extra_sp": [
+      {"what": "Unity (special) trainings, assumed 20 at 3 flames (3 SP each)", "sp": 60, "sourced": false},
+      {"what": "Spirit Bursts, assumed 8 (5 SP each, 10 with a linked card)", "sp": 40, "link_extra": 5, "per": 8, "sourced": false},
+      {"what": "Extreme Spirit Bursts, assumed 4 (15 SP each, 20 with a linked card)", "sp": 60, "link_extra": 5, "per": 4, "sourced": false},
+      {"what": "Team Zenith Declares War with 10 to 12 bursts", "sp": 30, "sourced": true}
+    ],
+    "link_bonus": {"sp": 10, "stats": 20, "assumed": "one extra Spirit Burst per linked card: +5 SP and +10/+3 stats over a normal burst, plus +1 per stat in about 10 unity trainings"},
+    "card_note": "Team members on a facility (flames) matter as much as your cards; Pal cards can't join the team. Linked story characters burst for more."
+  },
+  {
+    "name": "Trackblazer",
+    "global": true,
+    "source": "gametora_trackblazer",
+    "base_training": [
+      [8, 0, 4, 0, 0, 2, -19],
+      [0, 7, 0, 3, 0, 2, -17],
+      [0, 4, 6, 0, 0, 2, -18],
+      [3, 0, 3, 6, 0, 2, -20],
+      [2, 0, 0, 0, 6, 3, 5]
+    ],
+    "stat_caps": [1200, 1200, 1200, 1200, 1200],
+    "stat_caps_note": "GameTora expected Global to start at 1200 each; JP's are 1200/1900/1200/1200/1500.",
+    "link": [],
+    "link_note": "No scenario link.",
+    "race_sp": {"G1": 35, "G2": 25, "G3": 25, "OP": 20},
+    "finale_races": 3,
+    "optional_races": 22,
+    "optional_races_note": "Assumed: the objectives need 660 Grade Points from races (G1 100 each), so careers race far more than in other scenarios.",
+    "extra_sp": [],
+    "link_bonus": {"sp": 0, "stats": 0},
+    "card_note": "Races are the main source of stats and skill points, and race rewards scale with Race Bonus, so race bonus cards gain the most."
+  },
+  {
+    "name": "Grand Concert",
+    "aliases": ["Grand Live", "Our Grand Concert"],
+    "global": true,
+    "source": "gametora_grand_concert",
+    "base_training": [
+      [8, 0, 4, 0, 0, 4, -19],
+      [0, 8, 0, 6, 0, 4, -20],
+      [0, 4, 9, 0, 0, 4, -20],
+      [2, 0, 2, 7, 0, 4, -20],
+      [2, 0, 0, 0, 6, 5, 5]
+    ],
+    "stat_caps": [1600, 1300, 1300, 1500, 1300],
+    "link": ["Silence Suzuka", "Agnes Tachyon", "Smart Falcon", "Mihono Bourbon", "Light Hello"],
+    "link_note": "Linked cards give more performance tokens. With a linked character's card, the lyrics event (16+ songs by early November, year 3) can give that character's gold hint.",
+    "link_golds": {"Smart Falcon": "Full Speed!", "Mihono Bourbon": "Concentration", "Silence Suzuka": "Trackblazer", "Agnes Tachyon": "Come What May"},
+    "race_sp": {"G1": 45, "G2": 35, "G3": 35, "OP": 30},
+    "finale_races": 0,
+    "extra_sp": [
+      {"what": "Song lessons, assumed 22 learned (25 SP each, paid at the next live)", "sp": 550, "sourced": false},
+      {"what": "Live Technique lessons, assumed 44 (5 SP each)", "sp": 220, "sourced": false},
+      {"what": "RUN×RUN! song bonus", "sp": 22, "sourced": true}
+    ],
+    "sp_per_training_from": [[24, 2], [36, 3]],
+    "sp_per_training_note": "Yume wo Kakeru! (after the 1st live) and Grow Up, Shine! (after the 2nd) add +2 and +3 Skill Pts to every later training; assumed both learned.",
+    "link_bonus": {"sp": 30, "stats": 0, "assumed": "more performance tokens per training: about one extra song lesson (25 SP) and a technique lesson over a career"},
+    "event_chance_multiplier": 1.2,
+    "event_chance_note": "Assumed: the Support Event Chance Up live bonus.",
+    "card_note": "Lives add Friendship Bonus, Speciality Rate and Support Event Chance; linked cards fill the token needs and unlock their gold hints."
+  }
+]
+}

@@ -1,0 +1,185 @@
+# umaLord — Uma Musume advisor for one account
+
+This folder is a personal knowledge base and decision log for the user's Uma Musume: Pretty Derby account. Claude's job here:
+
+1. **Answer questions about this account.** Which umas and support cards they own, star/potential levels, limit breaks, and what to train next and why.
+2. **Plan careers** for a stated purpose: Team Trials, Champions Meeting, parent/grandparent (sparks), League of Heroes, or anything else they name.
+3. **Simulate.** Use the app's built-in race simulator (a port of Moomoolator), or the simulators listed in [sources.md](sources.md), to compare hypothetical builds before recommending one.
+4. **Form and revise opinions.** Keep evidence-backed opinions in [insights.md](insights.md). Revise them as the user reports real results over time.
+
+## Where things live
+
+| Path | What it holds | Who updates it |
+|---|---|---|
+| `sources.md` | Guide sites and simulator sites, plus what each is good for | User gives URLs; Claude notes what each site covers |
+| `account/umas.md` | Owned trainees: stars, potential level, notes | Claude, from what the user reports |
+| `account/support_cards.md` | Owned support cards: rarity, type, LB, level | Claude, from what the user reports |
+| `account/parents.md` | Saved legacy umas (parents) and their sparks | Claude, from what the user reports |
+| `profiles/*.umalord.json` | Saved accounts: one file per account with its roster, parents, plans, results and insights (`profile.rs`). `profiles/backups/` holds the automatic backups made before an import or Start over. `friend-2026-10-18.umalord.json` is the friend's account the app was first built for | The app (⚙ → Save my data, `--export-profile`) |
+| `app/templates/` | The blank account files that Start over and a new install begin from | Claude |
+| `app/tests/fixtures/` | A copy of the friend's `umas.md` and `support_cards.md`: the roster every test runs against, since `account/` may be empty | Claude; refresh it only on purpose |
+| `knowledge/data/*.json` | Global game data from uma.guide: every uma, support card, skill, race and glossary term, one record per line; `cm_schedule.json` (the scenario current at each CM) | `tools/update_knowledge.py`; don't edit by hand |
+| `knowledge/data/pvp_meta.json` | The community PvP meta sheet, per CM/LoH and running style: recommended decks by tier, umas, stats and skill advice. Opinion, not game data | `tools/update_knowledge.py --only meta`; don't edit by hand |
+| `knowledge/data/sim/*.json` | Moomoolator's Global data, unchanged: skill conditions and effects, skill groups, courses | `tools/update_knowledge.py`; don't edit by hand |
+| `knowledge/scenarios.json` | Each Global training scenario: base training values, linked characters, skill-point sources, and the career simulation's assumptions, each marked sourced or assumed | Claude, from sources; tune assumptions when real careers disagree |
+| `knowledge/digest/owned.md` | The owned roster with names resolved and effects at the owned level, for AI assistants | The app writes it; don't edit |
+| `AGENTS.md`, `opencode.json` | Instructions and read-only permissions for OpenCode, which powers the Ask tab's free backend | Claude |
+| `knowledge/umas/<name>.md` | One file per uma, using `knowledge/templates/uma.md` | Claude, for analysis that goes beyond the data |
+| `knowledge/support_cards/<name>.md` | One file per card, using `knowledge/templates/support_card.md` | Claude, for analysis that goes beyond the data |
+| `knowledge/skills.md`, `knowledge/mechanics.md`, `knowledge/racecourses.md` | Skill interactions, game mechanics, track data | Claude, from guide sites |
+| `plans/<date>-<uma>-<purpose>.md` | Career plans, and the simulations behind them | The app's Career → Plan page writes them; Claude adds the simulation and recommendation |
+| `results/*.md` | Real outcomes: careers, Team Trials, Champions Meeting, League of Heroes, sparks | The app's Career → Results page, or Claude logging what the user reports |
+| `insights.md` | Claude's current opinions, with the evidence and confidence for each | Claude |
+| `app/` | Rust desktop app (eframe/egui): roster, knowledge, planner, race simulator, results, notes, and Ask | Claude |
+| `LICENSE-GPL-3.0.txt` | The app's license. `app/src/sim/` ports Moomoolator's GPL-3.0-or-later engine, so the app as shared is GPL-3.0-or-later | — |
+
+## Knowledge data (`knowledge/data/`)
+
+- To refresh it, run `python -I -X utf8 tools/update_knowledge.py` from the project root. The script downloads uma.guide's data chunks and extracts the `JSON.parse` blocks as text, without running the site's code. It then writes `umas.json`, `cards.json`, `skills.json`, `races.json`, `glossary.json` and `meta.json`. `--only umalator` or `--only cm` refreshes just one part. It also writes:
+  - `cm_schedule.json`: uma.guide's Champions Meeting list by number, with the training scenario current for each (read as text from the same chunk). A Moomoolator preset's `id` is its CM number.
+  - `sim/`: Moomoolator's Global data files byte for byte (`skill_data.json`, `skill_meta.json`, `course_data.json`, `skillnames.json`, `tracknames.json`, `umas.json`, `not-in-game.json`), which the app's simulator reads.
+  - `umalator.json` from umalator.app (Moomoolator, the simulator), which holds:
+    - the skill IDs the simulator can load, and which of them aren't on Global yet
+    - its courses, including inner and outer layouts
+    - its Champions Meeting presets: date, course, conditions and a `confirmed` flag
+  - `pvp_meta.json` (`--only meta` refreshes just this) from the community "PvP Deck & Uma Recommendation" Google Sheet (Lightning, Daptrius, Henry; https://docs.google.com/spreadsheets/d/100t3hnYl5Qm2UR8RtPlH-8Xd9KQbBlxEdXUOIR4d394/), read from its CSV exports as text. For each CM and LoH and each style:
+    - the Beginner, Standard and Whale decks (five cards plus the borrow card) with card IDs from the PvP Rankings tab, and each card's note ("2SP + Gold"), LB minimum and fallback from the PvP List tab, matched by position; honorable mentions; placeholders like "any Wit card"
+    - the recommended umas (outfit resolved where the sheet's "(Cheerleader)" names it or the uma has one alt outfit), the style ranking, recommended stats and the sheet's analysis
+    - its acceleration and skill advice as written, plus `skills`: the advice resolved to skill IDs (skill names; "Ignited PWR"; "3 Lanes", which the sheet defines as Dodging Danger + Prudent Positioning + Ignited Spirit WIT; shorthand learned from card notes) and what each card is brought for (its note's words as that card's own skills, e.g. Daiichi Ruby "LS" → Lightning Surge; "Gold" → the card's gold)
+    - `parents`: umas whose unique the advice names ("King (Cheer)", "Pasa"), with the inherited skill
+    - The sheet itself warns its skill advice past CM 21 is a placeholder, and later events use JP cards (no Global ID). It's community opinion: label it so.
+- uma.guide lists a few cards before they reach Global, dated 2038-01-19. `CardInfo::released` filters them out of picks.
+- Use this data before scraping pages. It covers:
+  - **Umas:** aptitudes, growth, base stats, unique, innate and potential skills, evolved skills with their conditions, event skills, career objectives, and events with outcomes.
+  - **Cards:** effect tables, unique effect, hints, event skills, and events with outcomes.
+  - **Skills:** effects, raw conditions, and uma.guide's plain-English trigger summary.
+- Card effects between the listed levels are linear interpolations, rounded down, which is how uma.guide shows them. `cargo test` checks a few values against uma.guide.
+- The data has no odds for events with several possible outcomes. Say so, rather than guessing a percentage.
+
+## Desktop app (`app/`)
+
+- **Tabs** (top bar: Home, Collection, Career, Ask, Notes; then 🔄 Reload and the ⚙ settings menu on the right). `Tab::info()` holds each tab's icon, label and one-line purpose, which the top bar's hovers and the Help window share.
+  - **⚙ Settings** (`App::settings_menu`): ❓ Help, Dark/Light mode, the colour theme and the background toggle. It stays open while you click through themes (`PopupCloseBehavior::CloseOnClickOutside`). Mode, theme and background are saved in settings.json (`theme`, `look`, `mascot`). Its Profile section: 📤 Save my data, 📥 Load a profile, 📝 Set up my collection, ⚠ Start over.
+  - **Setup (`onboarding.rs`):** opens by itself when the roster is empty, and replaces the page until finished, skipped or a tab is clicked. Welcome offers two ways:
+    - **Load a profile:** lists `.umalord.json` files in `profiles/`, `profiles/backups/` and the user's Downloads folder, takes a pasted path, or a file dropped on the window (from any page). It shows the profile's name and counts, warns that the current account is replaced (after a backup), and loads it.
+    - **Set up from scratch:** asks whose account it is (`- Profile:` in umas.md), then a grid of every released uma and one of every released card. Faded tiles aren't owned; a click adds one (umas at 3★ P1, cards at LB0), and a click on an owned one opens its editor (stars and potential, or LB with the level set to that LB's cap; Remove). Every click writes `account/` at once (`data::upsert_uma`, `upsert_card`, `remove_row`). Collection → Umas has "＋ Add umas", which opens the same grid.
+  - **Profiles (`profile.rs`):** a profile is JSON (`format: umalord-profile`) with the account's files as text: `account/umas.md`, `support_cards.md`, `parents.md`, `insights.md`, `results/*.md` and `plans/*.md` (not `_template.md`). Importing replaces them: the current account is backed up to `profiles/backups/`, the account is reset to `app/templates/`, then the profile's files are written. Only those paths are accepted (`allowed()`), so a profile can't write anywhere else. Start over is the same backup and reset without a profile.
+  - **Home (`tab_overview.rs`):** shortcut tiles for common jobs, the next Champions Meeting with "📋 Plan for it" (`plan_for_cm`: a new plan with the preset applied), equal-width stat tiles, cards by type, MLB SSRs, and umas by stars and potential.
+  - **Collection (`tab_collection.rs`):** one page with three sub-tabs, `CollectionTab::{Umas, Cards, Skills}`, chosen in a segmented bar that also holds the Pictures/Table toggle and "＋ Add cards". Each sub-tab has the same 240px filter panel (`tab_umas::FILTER_W`), a "Showing N of M" line, and a detail panel on the right.
+    - **Umas, Support cards:** the roster, plus knowledge panels with aptitudes, skills, potential locks, effects at the owned level, hints and events. Umas can be filtered by aptitude. Picture grids use `ui_util::tile_grid`, which stretches the gaps so both edges of every row line up.
+    - **＋ Add cards** (Support cards): pick any Global card, set LB and level, and it's added to `account/support_cards.md` in type → LB → level order, or an owned card's LB and level are updated. It also stamps "Last updated", recounts the totals line and summary table (`data::upsert_card`, `refresh_card_summary`), and downloads missing art from uma.guide with `curl.exe`.
+    - **Skills:** every skill and where this account can get it (green in the last column). `App::skill_available` reads a cached set, rebuilt by `App::reload_roster` after the roster changes.
+  - **❓ Help** (in ⚙): what each tab is for, the planning steps, and a glossary of game terms (`GLOSSARY` in `main.rs`). Keep the glossary to general terms; numbers belong in the data.
+  - **Career (`tab_career.rs`):** one page with three sub-tabs in the order a career goes, `CareerTab::{Plan, Race, Results}`, in a segmented bar like Collection's. `App::go_career` opens one; a running race shows ⏳ on its sub-tab. The pose of the mascot follows the sub-tab.
+  - **Career → Race sim (`tab_sim.rs`, engine in `sim/`):** Moomoolator's simulator in Rust, no browser. Modes: Compare (two builds, gap histogram, full-spurt/HP-survival/rushed rates, skill activations, speed/HP chart of the median run), Skill chart (lengths per skill, two rounds of 25 and 175 runs like the site), Stamina (HP left at the finish) and HP calc (the site's closed-form estimate). CM preset chips, a searchable course list, conditions, and every site option (sync RNG, wit check, rushed, lane movement, spot struggle, dueling rates). The page header holds ▶ Run and "Load from Planner"; Compare results open with a one-sentence verdict (who wins, by how much, how often). "Save to plan" writes the Compare results into the plan's `## Simulation` section with a umalator.app link to reproduce them.
+  - **Career → Plan (`tab_planner.rs`):** writes `plans/*.md`, simulates the plan natively (▶ Simulate opens the Race sim with the trainee without and with her skills to buy), and still opens or copies builds for umalator.app.
+    - **Scenario:** chips for the Global scenarios in `knowledge/scenarios.json`. Empty means the scenario of the next CM (`cm_schedule.json`); a CM chip sets its own. It drives the career simulation and the card picks.
+    - **📈 Meta** (under Step 1, `meta_panel`): what the PvP meta sheet says for the plan's CM and style (`App::plan_meta`: the linked CM, else the CM preset on the plan's course nearest today). Style ranking, recommended stats with "Use these" (fills Step 3), the recommended trainees (owned ones are buttons), and, collapsed, its decks by tier (green = owned, ↔ = borrow), honorable mentions, skill advice and parents to look for.
+    - **Skills to buy:** "🏁 Simulate skills" runs the skill chart in the background for every skill the trainee, any owned card or the friend card can teach (plus the scenario's link golds) on the plan's course, conditions, style and target stats, and +50 Speed to price a length. "✨ Auto-pick" (`auto_pick_skills` → `recommend_skills`) solves a knapsack within the SP budget: each skill's value is its lengths plus 2 L per unit of meta weight (`plan_meta_skills`: the sheet's advice 2, a recommended card's note 1, a recommended gold's ○/white a quarter), so it buys the sheet's skills first (★ in the list, which sorts them first) unless one can't trigger on the course. It always picks at once, from simulated gains or estimates; if the skills weren't simulated for this goal it starts the simulation and picks again when it finishes. If the simulation can't run (no course or target stats), the line under Step 5 says why. Costs include expected hint discounts (10/20/30/35/40% per level, uma.guide) and the ○/white a ◎/gold needs.
+    - **SP budget:** the mean end-of-career SP of 400 simulated careers with this deck (`career.rs`), shown with its 10–90% range and sources; it can be set by hand (`sp_budget`).
+    - **Upcoming CM:** with the Champions Meeting goal, chips list the next four CM presets from `knowledge/data/umalator.json`, each marked ✔ confirmed or ? not announced. One click fills the conditions chips (ground, weather, season), the distance and surface from the preset's Umalator course, and the race on that course: races.json's own entry for that cup, else the course's main G1. If no race matches, the status line says so.
+    - The plan JSON keeps the preset's date (`cm_date`) and Umalator course id (`umalator_course`), plus `scenario` and `sp_budget`. Clicking the selected chip again, or picking or clearing a course by hand, unlinks the CM. Older plans without these fields still load.
+    - `plan_race_setup()` maps the plan to a simulator course and condition codes; Open Umalator, the Race sim and the skill simulation all use it.
+    - **Layout:** the sections are titled Step 1 · Goal through Step 5 · Skills to buy. The Goal card puts each field in a fixed label column (`field_row` in `tab_planner.rs`). At 900px or wider, the trainee sits beside her target stats, parents and notes, and `ui_util::equal_columns` with `card_titled_to` stretches the shorter column's last card so both end level. At 1000px or wider, the deck totals sit beside the six slots. The skill hints and "Why these cards" start collapsed, and the skills list scrolls inside its card.
+    - **Speed:** card rankings (`rank_slot`, about 40 ms a slot) run on a background thread for all six slots (`RankCache` in `recommend.rs`), and only when something asks: a deck card's hover, "Why these cards", or the picker. They show a spinner until ready. `slot_candidates` (tests) ranks on the spot. `plan_key` is memoized on the plan fields it hashes. Before this the planner re-ranked every slot each frame (about 180 ms a frame); now a frame takes about 1 ms. `cargo test --release frame_times -- --ignored --nocapture` prints frame times for every tab.
+  - **Career → Results** adds rows to `results/*.md`, newest first. **Notes** renders the markdown files.
+  - **Long dropdowns** (trainee, saved parents, course, outfit, skills, result suggestions, OpenCode models) use `ui_util::search_combo`: a dropdown with a search box that filters as you type. Its items come from a closure that runs only while the dropdown is open. The popup keeps the height of the whole list while you filter (egui doesn't grow a shrunk popup back, so clearing a search used to leave the list hidden); `search_combo_list_returns_after_clearing` tests it.
+  - **Ask:** two backends, chosen in the tab and saved in settings.json.
+    - **OpenCode (default, free):** runs `tools/opencode/opencode.exe run --format json` in this folder with a free `opencode/*-free` model. No account or key is needed. The default is `deepseek-v4.1-flash-free`, which keeps nothing.
+    - **Claude API:** Claude with the app's own tools; needs the user's `ANTHROPIC_API_KEY` or a key entered in the tab.
+- **What the app reads:** `account/*.md` at runtime, finding columns by header name, so keep the existing headers. It also reads `knowledge/data/*.json`, `plans/` and `results/`. The Reload button re-reads all of them.
+- **Plan files:** each one ends with an `<!-- umalord-plan {json} -->` block, which the app loads. When the app saves over a plan, it keeps everything from `## Simulation` up to that block. Write simulation results and the recommendation there, and never edit the JSON block by hand. The Race sim's "Save to plan" and `--simulate` replace only the `## Simulation` section (up to the next `## ` heading).
+- **Umalator builds:** the simulator is Moomoolator at https://umalator.app/. `sources.md` describes it, including its link format.
+  - **"Open Umalator":** opens a share link with the build as both Uma 1 and Uma 2, and copies the link too.
+    - When the plan came from a CM preset, it uses that preset's exact course id, layout included, as long as the plan's race, distance and surface still match it. It notes when the preset isn't confirmed.
+    - Otherwise it maps the plan's course to an Umalator course. Where inner and outer layouts both exist, it prefers one an event uses and says to check the layout.
+    - Conditions come from the plan's chips. Any the plan leaves open, and the time of day, come from the plan's CM, else the nearest event on that course.
+  - **"Copy for Umalator":** copies the paste JSON instead.
+  - **Skills:** both leave out skills missing from `knowledge/data/umalator.json`, which are mostly scenario skills. Evolved skills load.
+- **Art:** card art and uma icons live in `app/assets/cards/<id>.webp` and `app/assets/umas/<id>.webp`, copied from uma.guide (every Global card and uma as of 2026-10-15). When the roster gains something released later, download its image too. Card images are `/img/card/composite/tex_support_card_<id>_thumb.webp`; uma icons are the `src` on each `/characters/` entry.
+- **Building and testing:** build from `app/` with `cargo build --release`; the exe is `app/target/release/umalord.exe`. Run `cargo test` after editing account files or rebuilding knowledge. It parses the real files, runs every Ask tool against them, and round-trips a plan and a profile. Tests use the fixture roster in `app/tests/fixtures/` (`App::for_tests`, `Roster::sample`), not `account/`, which is empty after Start over.
+- **Profiles from the command line:** `umalord.exe --export-profile [name]` writes `profiles/<name>-<date>.umalord.json`; `umalord.exe --start-over [name]` backs the account up to `profiles/backups/` and empties it. Both exit without a window (run with `Start-Process -Wait`).
+- **Sharing:** `powershell -ExecutionPolicy Bypass -File tools\package.ps1 -Build` writes `dist\umaLord-<date>.zip`. The zip holds the exe at its root plus the roster, knowledge data, notes, tools, app source and art. It leaves out `app\target`, `app\.cargo`, `tools\opencode` (downloaded on demand), the generated `knowledge\digest` and `profiles\`; `-IncludeProfile profiles\<file>` adds one profile, which the recipient's first-run setup lists. The exe finds its data from its own folder, so the zip runs from anywhere. `README.txt` is the guide for whoever receives it.
+- **Toolchain:** this machine has only the rustup `windows-gnu` toolchain, which needs workarounds that `app/.cargo/config.toml` explains. After `rustup update`, run `app/setup-toolchain.ps1`. The Ask tab sends requests through Windows' `curl.exe`, because Rust has no official Anthropic SDK.
+- **Checking the UI unattended:** set `UMALORD_SCREENSHOT=<file>.png`. The app saves a screenshot after about 2.5 seconds, then exits.
+  - `UMALORD_TAB` picks the tab: `home`, `umas`, `cards` or `skills` (Collection sub-tabs), `planner`, `sim` or `results` (Career sub-tabs, `career` for Plan), `notes` or `ask`.
+  - `UMALORD_HELP=1` opens the Help window.
+  - `UMALORD_VIEW=table` switches to table view.
+  - `UMALORD_SELECT=<id>` selects an item. On the planner tab it fills a demo plan for that trainee, and `UMALORD_PICKER=<0-5>` also opens the card picker for that deck slot. On the sim tab it builds that demo plan for the next CM and loads it.
+  - `UMALORD_RUN=1` starts the sim tab's run, or the planner's skill simulation (the demo plan then takes the next CM), and holds the screenshot until it finishes.
+  - `UMALORD_ADD=<card id>` opens the Cards tab's Add cards dialog with that card picked.
+  - `UMALORD_WINDOW=1400x1080` sets the window size, for taller screenshots. The screen height caps it.
+  - `UMALORD_SCROLL=<px>` holds the planner or sim tab scrolled that far down, to capture the parts below the first screen.
+  - The release exe is a GUI app: run it with `Start-Process -Wait` so the shell waits for the screenshot.
+  - `UMALORD_ASK=<question>` asks that question on start, and holds the screenshot until it's answered.
+  - `UMALORD_INSTALL=1` installs OpenCode on start if it's missing. This runs before `UMALORD_ASK`.
+  - `UMALORD_THEME=light` forces light mode. Otherwise the app uses the mode saved in `%APPDATA%\umaLord\settings.json`, which defaults to dark.
+  - `UMALORD_LOOK=sky|sakura|sunset|night` forces a colour theme; `UMALORD_SETTINGS=1` opens the ⚙ menu.
+  - `UMALORD_SETUP=welcome|import|umas|cards|done` opens setup at that step; any other value (e.g. `off`) keeps it closed on an empty roster.
+  - `UMALORD_PROFILE=<file.umalord.json>` shows that profile's roster in memory without importing it. With `account/` empty, use it with the friend's profile for screenshots of pages that need a roster (demo plans, the Race sim).
+- **OpenCode backend (`app/src/ask_opencode.rs`):**
+  - **Read-only:** every run sets `OPENCODE_PERMISSION` to deny edit, bash, webfetch, websearch and outside directories. `opencode.json` in the project root sets the same rules for interactive use. OpenCode then has only read, glob and grep.
+  - **Instructions:** OpenCode reads `AGENTS.md`, not this file, so keep its answering rules in sync with "Rules for answering" below.
+  - **Roster digest:** the app writes `knowledge/digest/owned.md` on start and on Reload. It has "at a glance" tables (one row per owned uma and per card), then detail sections with names resolved and effects at the owned level. Smaller models skim, so the tables are what make list questions complete.
+  - **Conversations:** follow-up questions reuse OpenCode's session id.
+  - **Installing:** OpenCode isn't shipped in the zip. When `tools/opencode/opencode.exe` is missing, the Ask tab shows a Download button. It fetches the pinned release with `curl.exe`, checks the exact size and SHA-256, and only then extracts `opencode.exe`.
+  - **Updating OpenCode:** change `RELEASE`, `ZIP_URL`, `ZIP_SIZE` and `ZIP_SHA256` in `ask_opencode.rs`. Take the values from the new release's `opencode-windows-x64.zip` asset at api.github.com/repos/anomalyco/opencode/releases. Then run `cargo test install_downloads -- --ignored`, which downloads it, verifies it and runs it.
+  - **Models:** free models change, so the tab lists them live with `opencode models`. Data-use notes per model are in `model_note()`.
+- **Race simulator (`app/src/sim/`):** a Rust port of Moomoolator's engine v2 (TheCing/uma-tools: `uma-skill-tools/`, `umalator/compare.ts`, `hpcalc.ts`, `hp-calculator/calculations.ts`), GPL-3.0-or-later.
+  - **Files:** `rng` (Prando xorshift, same streams as the site), `conditions` (the condition parser, ~95 conditions, sample policies, dynamic checks), `solver` (the per-frame race), `hp`, `builder` (skill data → triggers), `run` (Compare, chart, Stamina), `hpcalc` (closed form).
+  - **Checked against umalator.app** on 2026-10-17 (seed 12345, 1000 runs, Nakayama 2500 inner): mean +1.21 L, median +1.04 L, full spurt 88/97%, rushed 13.9%, on both. `cargo test --release sim::` reruns that check (`matches_moomoolator`) and the others. After an engine update upstream, rerun the same setup on the site and compare.
+  - **Speed:** about 1 ms per Compare run; the chart runs skills in parallel threads.
+  - **Headless:** `umalord.exe --simulate plans\<plan>.md` races a saved plan (1000 runs, seed 12345: the trainee without vs with her skills to buy) and writes its `## Simulation` section, then exits. The outcome is also written to `<plan>.simulate.log`.
+- **Career simulation (`app/src/career.rs`):** a Monte Carlo of the planned career for the SP budget and card values. It deals cards to facilities (weights 100 each, 50 absent, specialty added), trains greedily toward the target stats' shape, applies umareference's gain formula with friendship at bond 80, rests below a set energy, races objectives and assumed optional races, and draws card and trainee events (SP and stats parsed from the outcome text). Scenario numbers come from `knowledge/scenarios.json`, where each is marked sourced or assumed. Calibrate it when real careers come in: compare the logged final SP and stats with the estimate, adjust the assumptions there, and note it in `insights.md`.
+- **Recommendations (`app/src/recommend.rs`):** model output, not game data. Always describe them to the user as suggestions.
+  - **Card ranking:** for each candidate, two career simulations (the rest of the deck with and without it; shared random numbers) give the card's added stats and SP. Stats count fully up to the deck's share of each target stat and 0.3× past it; SP is priced from the simulated skills' lengths per SP. Then the skills it teaches that the trainee and the rest of the deck don't already offer: simulated lengths on the target course (or an estimate from tags plus whether its conditions can trigger there), weighted for the chance of getting them, with diminishing weight after the best. Linked cards add their scenario bonus, and in Grand Concert the value of their lyrics-event gold. A length is priced in stat points from +50 Speed's simulated gain. Scores are stat-point equivalents.
+  - **Meta sheet first (`meta.rs`):** for a plan whose CM is in `pvp_meta.json`, each card gets a weight from the sheet's decks for that CM and style: Whale 3, Standard 2, Beginner 1 per deck it's in (the borrow card counts fully for the friend slot and half for your own; deck cards the reverse), honorable mentions 0.5, "any Wit card" slots 0.3× the tier for every card of that type. An owned card below a Beginner deck's LB minimum doesn't count for it, and an owned card's weight is scaled by its LB (LB4 100% … LB0 40%). `meta_rank` buckets it (★★★ ≥ 4, ★★ ≥ 2, ★ > 0), and rankings sort by that bucket, then by the simulation's score. Trainee best fits put the sheet's owned trainees first (★).
+  - **What uses it:** the deck fill buttons, the picker's "Recommended for this slot" row, card hover reasons and "Why these cards". The pink-spark hint still uses aptitude grades.
+  - **Tuning:** the fit factors (0.3, 0.55/0.8 skill chances, decay) are hand-set. When real results or simulations disagree, tune them in `recommend.rs` or `knowledge/scenarios.json`, and record why in `insights.md`. `cargo test --release explain_ranking -- --ignored --nocapture` prints a full slot ranking with reasons and the deck's simulated final stats.
+- **Look and feel:** colours, fonts and spacing live in `app/src/theme.rs`, which has one palette for dark and one for light, tinted by the colour theme (`theme::Look`: Seiun Sky, Sakura, Sunset, Starry night; `tint()` gives each its accent, text on the accent, a stronger accent for light-mode outlines, link colour and sky colour). `theme::look()` is global, so `pal(ui)` follows it; `set_look` restyles the running app. No theme is green, because green means good news. Shared pieces live in `ui_util.rs`: `card`, `card_titled` and `card_explained` (a title plus a plain line on what the card shows), `page_header` (every page's title, actions and one-line purpose), `section_label` (filter headings with an ⓘ hover), `segmented`, `stat_row` (equal-width stat tiles), `tile_grid`, `primary_button` (a page's main action), badges and grade tiles. The accent (highlights, selections, main buttons) is the colour of the theme's background, with `on_accent` for text on it; green (`GOOD`) is kept for good news only: gains, success messages, skills you can get. Skill chips come from `App::skill_link`. Read colours from `theme::pal(ui)` rather than hard-coding them, so both themes stay readable.
+  - **Alignment:** every central panel uses `page_frame()` and every side panel `side_frame()` (both in `main.rs`), so page titles and panel tops sit on the same line on every tab.
+  - **Words:** write labels and hovers for someone new to the game: say "Maxed (MLB)" rather than just "MLB", and explain a term in its hover.
+  - **Background:** panels are see-through (`panel_fill` is transparent). `App::paint_background` paints the page colour, then, while the background toggle in ⚙ is on (`mascot` in settings.json), a gradient toward the theme's sky colour, the theme's decorations (Sky: clouds; Sakura: clouds and petals; Sunset: a low sun; Starry night: stars and a moon, at fixed scatter positions so nothing moves), and a chibi Seiun Sky in the bottom-right corner, with a different pose per tab. The six poses are `app/assets/chibi/seiun_<outfit>_<pose>.png` (256×256, GameTora's `media.gametora.com/umamusume/characters/chibi/<outfit>_<pose>.png`, downloaded 2026-10-17), embedded with `include_image!`. The top-bar logo crops the same art.
+
+## Rules for answering
+
+- **Check the account files first.** Recommend owned umas and cards by default. If the best option is something the user doesn't own, say so separately, and include the borrowed friend-slot card when it matters.
+- **Respect LB and level.** A card's support effects depend on its limit break and level. Read the effect values at the user's actual LB, not at MLB.
+- **Server matters.** Content differs between servers: Global trails JP in scenarios, umas and cards. The user's server is recorded in `account/umas.md`. Never assume a card, uma, scenario or mechanic exists on their server without checking a source for that server.
+- **Don't answer game data from memory.** Pull aptitudes, growth rates, skill values, event outcomes and card effects from `knowledge/data/`, or from a source in `sources.md`. When you write a knowledge file, record the source and the date. If no source is available, say the figure is unverified.
+- **Keep the kinds of claim apart:** sourced data, simulator output, community meta (`pvp_meta.json`), and opinion. Label each one in plans and answers.
+- **Decks and skills for a CM:** start from the meta sheet's decks for that CM and style, check which of those cards the user owns and at what LB, then use the simulator to settle the rest or to test the sheet where it seems off for this account.
+- **Champions Meeting schedule:** `knowledge/data/umalator.json` → `presets` gives each CM's date, course and conditions. If `confirmed` is false, say the course and conditions aren't announced yet.
+
+## Simulation workflow
+
+1. Start from the plan file. The user usually saves one from the Career tab's Plan page. Write the candidate builds into it: stats, aptitudes, skills, strategy, the target course and conditions.
+2. Run each build in the app's simulator, which is Moomoolator's engine:
+   - **The saved plan itself:** `app\target\release\umalord.exe --simulate plans\<plan>.md` (run with `Start-Process -Wait`) fills its `## Simulation` section: the trainee without vs with her skills to buy, 1000 runs, seed 12345, on the plan's course and conditions.
+   - **Other comparisons** (two different builds, a skill chart, stamina): the user can run them on the Career tab's Race sim page and press "Save to plan". You can also run Moomoolator itself (https://umalator.app/) in the built-in browser (`mcp__Claude_Browser__*`, not WebFetch), loading each pair with a share link built in the page (snippet in `sources.md`).
+   - **Conditions:** for a Champions Meeting, take the course and conditions from the event's preset in `knowledge/data/umalator.json`, and say whether it's confirmed.
+   - **Fairness:** use the same course, ground, weather, season and seed for every build. Leave Sync RNG and Wit Check on, and use at least 1000 runs.
+   - **Stamina:** check it with the Race sim's Stamina or HP calc modes (or the site's HP Calculator and Mechanics Explorer). Use alpha123's Umalator only to cross-check.
+3. Record in the plan file:
+   - the inputs
+   - the run count
+   - the results: mean and median gap, full-spurt rate, HP survival and rushed rate
+   - the setup's Copy Link URL
+4. Recommend one build, and say what result would change that recommendation.
+
+## When the user reports a real result
+
+1. Append it to the right file in `results/`, filling in every field the user gave. Ask for anything that matters and is missing, such as the deck used or the course conditions.
+2. Update `account/` if the result changed anything (a new parent, a raised LB, a new uma).
+3. Compare the result against the plan or simulation that predicted it. Update `insights.md` if it confirms, weakens or overturns an opinion. Keep a short history; don't silently overwrite.
+4. For careers, ask for the final SP and stats, and compare them with the plan's career simulation (its SP budget line). When they disagree consistently, tune the assumptions in `knowledge/scenarios.json`.
+
+## Environment notes
+
+- Windows, PowerShell 5.1. Not a git repo.
+- The user may send screenshots of rosters, results or sparks. Read them and transcribe the details into the matching file.
+- Roster screenshots show card art and uma icons, not names. To identify them, download uma.guide thumbnails and build labeled contact sheets with the scripts in `tools/`; they use WPF, so run them with `powershell -STA`:
+  - `sheet.ps1`: card sheets per type and rarity. Thumbnails are `/img/card/composite/tex_support_card_<id>_thumb.webp`.
+  - `iconsheet.ps1`: uma icon sheets. Icons are the `src` on each `/characters/` entry.
+  - `crop.ps1`: zooms into a screenshot region, for reading LB diamonds, levels, stars and potential.
+  - In-game lists sort by character ID within each rarity or star group. Use that order to check matches.

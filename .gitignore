@@ -1,0 +1,21 @@
+# Your account: the app writes blank ones from app/templates on first run.
+# Never commit these; ⚙ → Save my data makes a profile file to keep or share instead.
+/account/
+/insights.md
+/plans/*
+!/plans/_template.md
+/results/
+/profiles/
+
+# Build output, and the per-machine toolchain setup that app/setup-toolchain.ps1 writes
+/app/target/
+/app/.cargo/
+
+# Downloaded on demand by the Ask tab
+/tools/opencode/
+
+# Generated
+/dist/
+/knowledge/digest/
+*.simulate.log
+__pycache__/

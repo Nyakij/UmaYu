@@ -1,0 +1,161 @@
+umaLord - Uma Musume: Pretty Derby (Global) account helper
+==========================================================
+
+A Windows app that holds your roster and the full Global game data from uma.guide. It
+also has a career planner, a built-in race simulator, a results log, and an "Ask" tab
+where Claude answers questions about your account.
+
+
+Run it
+------
+1. Unzip the whole folder anywhere. Keep the other folders next to umalord.exe.
+2. Double-click umalord.exe.
+   The app isn't signed, so Windows may say "Windows protected your PC". Click
+   "More info", then "Run anyway".
+
+Needs Windows 10 or 11, 64-bit.
+
+
+First run
+---------
+The app starts empty and opens Setup, which offers two ways in:
+- Load a profile: if someone saved your account for you, you'll have a file ending in
+  .umalord.json. Put it in the profiles folder next to umalord.exe, leave it in Downloads,
+  or drag it onto the app's window, then click Choose and Load this profile.
+- Set up from scratch: click every uma and support card you own (they light up), then click
+  one again to set its stars and potential, or a card's limit break.
+Settings (the cog, top right) > Profile can save your data to one file (Save my data), load
+another profile, reopen Setup, or empty the app (Start over). Loading a profile or starting
+over saves what was there to profiles\backups first, so nothing is lost.
+
+
+Tabs
+----
+New to the app? Open the settings cog (top right) and press "Help": it explains every tab,
+the steps to plan a career, and the game words the app uses.
+
+- Home: shortcuts to common jobs, the next Champions Meeting ("Plan for it" starts a plan
+  with its course filled in), and your roster at a glance.
+- Collection: everything you own, in three sub-tabs.
+  - Umas show aptitudes, stats and growth, skills (with what is locked at your potential),
+    evolutions, career objectives and events.
+  - Support cards show support effects at your level next to MLB, the unique effect,
+    hints and events.
+  - "+ Add cards" (Support cards) adds cards you just got, or raises the LB and level
+    of ones you have. It saves account\support_cards.md and downloads the card's picture.
+  - Skills: every Global skill, what it does, and where you can get it.
+- Career: plan a career, race it, and log what happened, in three sub-tabs.
+- Career > Plan: five steps down the page. Pick a goal, the training scenario and a
+  trainee, and build a deck by clicking a slot and choosing from the card art.
+  - The scenario (URA Finale, Unity Cup, Trackblazer, Grand Concert) is picked for you
+    from the next Champions Meeting. It decides training values, skill-point sources and
+    which cards are scenario-linked.
+  - The ✨ buttons fill things in for you: the best-fitting trainees, a whole deck or just
+    the empty slots, and the skills to buy.
+  - Meta: for a Champions Meeting, the "Meta" card shows what the community PvP sheet
+    (Lightning, Daptrius and Henry's "PvP Deck & Uma Recommendation" Google Sheet)
+    recommends: the styles that do best, target stats, trainees, decks for beginners,
+    regular players and whales, and skills. The ✨ buttons pick its cards, trainees and
+    skills first (marked ★), and the simulations choose the rest. A card you have at a low
+    limit break counts for less.
+  - Cards are scored by simulating careers in the plan's scenario with the rest of the
+    deck (stats toward your target stats, skill points, scenario link) plus the skills
+    they teach, valued on the target course for the trainee's style. Hover a card to see
+    why. They are suggestions from a model; knowledge\scenarios.json lists its
+    assumptions.
+  - Skills to buy: "Auto-pick" chooses skills within the skill points the career simulation
+    expects you to end with (or a budget you set): the meta sheet's skills first, then the
+    ones that gain the most lengths on the course. It picks at once, then simulates every
+    skill on the course ("Simulate skills" does just that part) and picks again with the
+    measured gains. Without a course or target stats it picks from estimates and says so.
+  - "Simulate" races the plan on the Race sim page: the trainee with her skills against
+    the same build without them. "Save to plan" there writes the results into the plan.
+  - "Open Umalator" and "Copy for Umalator" still send the build to https://umalator.app/
+    if you want the website.
+  - "Save plan" writes it to the plans folder.
+- Career > Race sim: the Moomoolator race simulator (umalator.app), built into the app.
+  No browser needed.
+  - Compare: two builds over many runs, with the gap in lengths, full-spurt and HP
+    survival rates, rushing, skill activations and a speed/HP chart.
+  - Skill chart: how many lengths each skill adds on the course.
+  - Stamina: how much HP the build has left at the finish.
+  - HP calc: a quick estimate of the Stamina needed, for every running style.
+  - Pick a Champions Meeting to load its course and conditions, or any course yourself.
+    "Load from Planner" loads the plan's build.
+- Career > Results: log careers, Team Trials, Champions Meeting, League of Heroes and
+  sparks.
+- Notes: read the notes, plans and logs.
+- Long dropdowns (trainees, courses, skills, models) have a search box: type to filter,
+  and delete the text to see the whole list again.
+- Ask: ask questions about your account in plain English. There are two ways to answer:
+  - OpenCode, the default, is free, with no key and no account needed.
+    - It uses OpenCode (opencode.ai), which runs one of OpenCode's free AI models to read
+      your roster and the game data.
+    - The first time you open Ask, click "Download OpenCode" (about 59 MB). The app fetches
+      the official release, checks it against its published checksum, and installs it in
+      tools\opencode.
+    - It is read-only: it can read your files but can't change anything.
+    - Free models are only offered for a limited time and are weaker than Claude. Pick one
+      in the tab. The note under the model says whether your questions are kept.
+  - Claude API gives better answers but needs your own Anthropic API key from
+    https://console.anthropic.com, and use is billed to that key. Paste the key into the
+    tab, or set the ANTHROPIC_API_KEY environment variable.
+
+
+The settings cog at the top right holds Help, dark or light mode, four colour themes
+(Seiun Sky, Sakura, Sunset and Starry night, each with its own button colour and
+background), and a switch for the background art and chibi Seiun Sky. The app remembers
+your choices.
+
+
+Your roster
+-----------
+account\umas.md and account\support_cards.md hold the roster. Setup and the "+ Add umas" /
+"+ Add cards" buttons in Collection edit them for you. You can also edit them in any text
+editor: keep the table columns as they are, and press Reload in the app.
+Each row's ID is the uma.guide ID of that uma or card.
+
+
+Updating the game data
+----------------------
+knowledge\data was built from uma.guide on 2026-10-16, and knowledge\data\sim (the race
+simulator's skills and courses) from umalator.app on 2026-10-17. To refresh them, install
+Python 3, then run this from the umaLord folder:
+
+    python -I -X utf8 tools\update_knowledge.py
+
+To refresh only the community meta sheet (it changes most often), add "--only meta".
+
+New umas also need their pictures in app\assets (cards added with "+ Add cards" get
+theirs automatically). Without one, the app shows a coloured box instead.
+
+
+Using it with Claude Code (optional)
+------------------------------------
+Open this folder in Claude Code. CLAUDE.md tells Claude how to:
+- keep the roster up to date from screenshots,
+- run simulations for saved plans,
+- log results, and keep its opinions in insights.md.
+
+
+Rebuilding the app (optional)
+-----------------------------
+The source is in the app folder. You need Rust (rustup) with the
+stable-x86_64-pc-windows-gnu toolchain and its llvm-tools component.
+Run app\setup-toolchain.ps1 once, then run "cargo build --release" in the app folder.
+
+
+License
+-------
+The race simulator is a port of Moomoolator (https://github.com/TheCing/uma-tools, by
+TheCing, building on alpha123's Umalator and kachi-dev's VFalator), which is licensed
+GPL-3.0-or-later. So this app, as shared, is under GPL-3.0-or-later too: see
+LICENSE-GPL-3.0.txt. The source is in the app folder.
+
+
+Troubleshooting
+---------------
+- The window is blank or closes at once: the app draws with OpenGL, so update the
+  graphics driver.
+- The status bar says "Knowledge missing": the knowledge\data folder is gone. Unzip the
+  whole folder again.

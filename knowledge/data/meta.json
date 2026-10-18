@@ -1,0 +1,22 @@
+{
+ "source": "https://uma.guide",
+ "server": "Global",
+ "built": "2026-10-16T17:48:51+00:00",
+ "chunks": {
+  "uma-data": "uma-data.C8tYgKDX.js",
+  "event-rewards-data": "event-rewards-data.Darsngho.js",
+  "jp-support-events": "jp-support-events.MJ4CLnW-.js",
+  "jp-dict-data": "jp-dict-data.Quyg9G6y.js"
+ },
+ "counts": {
+  "umas": 109,
+  "cards": 262,
+  "skills": 954,
+  "races": 1254,
+  "glossary": 190
+ },
+ "notes": [
+  "Support effect values between listed levels are linear interpolations rounded down, as uma.guide shows them.",
+  "Event options with several outcomes pick one at random; the source data has no odds."
+ ]
+}
