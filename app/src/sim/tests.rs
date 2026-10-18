@@ -143,7 +143,7 @@ fn chart_ranks_skills() {
         .collect();
     let p = Progress::default();
     let t = Instant::now();
-    let rows = run_chart(&d, &course, &race, &base, &candidates, 7.0, &p);
+    let rows = run_chart(&d, &course, &race, &base, &candidates, 7.0, false, &p);
     eprintln!("chart of {} skills in {:?}", candidates.len(), t.elapsed());
     for r in rows.iter().take(8) {
         eprintln!("{:>6.2} L  {}", r.mean, d.skill_name(r.id));

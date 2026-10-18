@@ -453,7 +453,15 @@ pub fn chart_options(seed: f64, samples: usize) -> SimOptions {
     }
 }
 
-fn with_skill(data: &SimData, base: &UmaBuild, id: u32) -> UmaBuild {
+/// Options for valuing skills as they'd do in a real race: wit checks and rushing on, both umas on
+/// the same random numbers so the difference is the skill's. Lane movement and spot struggle stay
+/// off (noise the comparison doesn't need).
+pub fn realistic_options(seed: f64, samples: usize) -> SimOptions {
+    SimOptions { wit_check: true, rushed: true, sync_rng: true, ..chart_options(seed, samples) }
+}
+
+/// `base` with `id` added, replacing a skill of its group.
+pub fn with_skill(data: &SimData, base: &UmaBuild, id: u32) -> UmaBuild {
     let mut u = base.clone();
     let g = data.group_of(id);
     if !data.is_debuff(id) {
@@ -463,8 +471,9 @@ fn with_skill(data: &SimData, base: &UmaBuild, id: u32) -> UmaBuild {
     u
 }
 
-fn chart_round(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, skills: &[u32], seed: f64, samples: usize, progress: &Progress) -> Vec<ChartRow> {
-    let opts = chart_options(seed, samples);
+#[allow(clippy::too_many_arguments)]
+fn chart_round(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, skills: &[u32], seed: f64, samples: usize, realistic: bool, progress: &Progress) -> Vec<ChartRow> {
+    let opts = if realistic { realistic_options(seed, samples) } else { chart_options(seed, samples) };
     skills
         .iter()
         .map(|&id| {
@@ -480,7 +489,9 @@ fn chart_round(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &Um
 
 /// Lengths each skill gains when added to `uma` (replacing a skill of its group), on this course.
 /// Two rounds like Moomoolator: 25 runs each, then 175 more for skills that showed a gain.
-pub fn run_chart(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, skills: &[u32], seed: f64, progress: &Progress) -> Vec<ChartRow> {
+/// `realistic` turns wit checks and rushing on (`realistic_options`); off matches the site's chart.
+#[allow(clippy::too_many_arguments)]
+pub fn run_chart(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, skills: &[u32], seed: f64, realistic: bool, progress: &Progress) -> Vec<ChartRow> {
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
     let parallel = |list: &[u32], samples: usize| -> Vec<ChartRow> {
         if list.is_empty() {
@@ -488,7 +499,7 @@ pub fn run_chart(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &
         }
         let chunk = list.len().div_ceil(threads);
         std::thread::scope(|scope| {
-            let handles: Vec<_> = list.chunks(chunk).map(|c| scope.spawn(move || chart_round(data, course, race, uma, c, seed, samples, progress))).collect();
+            let handles: Vec<_> = list.chunks(chunk).map(|c| scope.spawn(move || chart_round(data, course, race, uma, c, seed, samples, realistic, progress))).collect();
             handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
         })
     };

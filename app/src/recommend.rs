@@ -448,12 +448,18 @@ impl App {
     /// A skill's cost after the hints this deck is expected to give, including the lower version
     /// a gold or ◎ skill needs if the plan doesn't already have it.
     pub(crate) fn skill_cost(&self, id: u32, career: Option<&CareerResult>) -> f64 {
-        let own = |sid: u32| {
-            let sp = self.kb.skills.get(&sid).map_or(0.0, |s| f64::from(s.sp));
-            let lv = career.and_then(|c| c.hint_levels.get(&sid)).copied().unwrap_or(0.0);
-            sp * (1.0 - hint_discount(lv))
-        };
-        own(id) + self.lower_version(id).map_or(0.0, own)
+        self.own_price(id, career) + self.lower_version(id).map_or(0.0, |l| self.own_price(l, career))
+    }
+
+    /// One skill's price, without the lower version: base SP less the hint discount (the shop's
+    /// hint level in skill shop mode, else the level this deck is expected to give), less 10% of
+    /// the base with Fast Learner (uma.guide glossary: "10% of its base cost").
+    pub(crate) fn own_price(&self, id: u32, career: Option<&CareerResult>) -> f64 {
+        let p = &self.planner.plan;
+        let sp = self.kb.skills.get(&id).map_or(0.0, |s| f64::from(s.sp));
+        let lv = if p.shop.on { p.shop.offered.get(&id).map_or(0.0, |l| f64::from(*l)) } else { career.and_then(|c| c.hint_levels.get(&id)).copied().unwrap_or(0.0) };
+        let fast = if p.fast_learner { 0.1 } else { 0.0 };
+        sp * (1.0 - hint_discount(lv) - fast).max(0.0)
     }
 
     /// The ○/white skill a ◎/gold skill upgrades (same group, the id ending in 2 for one ending in 1).
@@ -470,13 +476,22 @@ impl App {
     /// style first, then the set that gains the most lengths on the target, all within the SP
     /// budget (simulated gains if the skill chart ran for this goal, estimates otherwise).
     pub(crate) fn recommend_skills(&self, candidates: &[u32]) -> Vec<u32> {
+        self.recommend_skills_with(candidates, self.planner.plan.meta_influence.lengths())
+    }
+
+    /// The quick pick at a given weight for the meta sheet's advice (lengths per unit of backing):
+    /// a knapsack over each skill's single gain, which treats gains as if they added up. Pinned
+    /// skills are always in; banned ones, those the plan's CM turns off, and those auto-pick
+    /// leaves to you (`pick_excluded`) never.
+    pub(crate) fn recommend_skills_with(&self, candidates: &[u32], meta_lengths: f64) -> Vec<u32> {
         let career = self.plan_career();
-        let budget = self.sp_budget().unwrap_or(1200.0);
+        let budget = self.pick_budget().unwrap_or(1200.0);
         let meta = self.plan_meta_skills();
+        let pinned = &self.planner.plan.pinned_skills;
+        let ctx = self.pick_context();
         let items: Vec<(u32, f64, f64)> = candidates
             .iter()
-            // Never buy a skill the plan's Champions Meeting turns off.
-            .filter(|id| !self.plan_disabled(**id))
+            .filter(|id| pinned.contains(id) || self.pick_excluded_in(&ctx, **id).is_none())
             .filter_map(|id| {
                 let s = self.kb.skills.get(id)?;
                 if s.sp == 0 || s.category == "Unique" {
@@ -484,6 +499,32 @@ impl App {
                 }
                 let (gain, _) = self.skill_lengths(*id);
                 // A recommended skill that can't trigger on this course isn't worth buying.
+                let boost = match meta.get(id) {
+                    Some((w, _)) if self.can_activate_on_plan(*id) != Some(false) => f64::from(*w) * meta_lengths,
+                    _ => 0.0,
+                };
+                let pin = if pinned.contains(id) { 1000.0 } else { 0.0 };
+                (gain + boost + pin > 0.0).then(|| (*id, gain + boost + pin, self.skill_cost(*id, career.as_ref())))
+            })
+            .collect();
+        knapsack(&items, budget, |id| id / 10)
+    }
+
+    /// The old auto-pick, kept to compare against: the meta sheet's skills first (2 L per unit).
+    #[cfg(test)]
+    pub(crate) fn recommend_skills_v1(&self, candidates: &[u32]) -> Vec<u32> {
+        let career = self.plan_career();
+        let budget = self.sp_budget().unwrap_or(1200.0);
+        let meta = self.plan_meta_skills();
+        let items: Vec<(u32, f64, f64)> = candidates
+            .iter()
+            .filter(|id| !self.plan_disabled(**id))
+            .filter_map(|id| {
+                let s = self.kb.skills.get(id)?;
+                if s.sp == 0 || s.category == "Unique" {
+                    return None;
+                }
+                let (gain, _) = self.skill_lengths(*id);
                 let boost = match meta.get(id) {
                     Some((w, _)) if self.can_activate_on_plan(*id) != Some(false) => f64::from(*w) * crate::meta::META_SKILL_LENGTHS,
                     _ => 0.0,

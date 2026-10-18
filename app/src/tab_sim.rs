@@ -495,7 +495,7 @@ impl App {
                 label = format!("{} skills", skills.len());
                 let seed = opts.seed;
                 std::thread::spawn(move || {
-                    let rows = run_chart(&data, &course, &race, &u1, &skills, seed, &p2);
+                    let rows = run_chart(&data, &course, &race, &u1, &skills, seed, false, &p2);
                     let _ = tx.send(JobResult::Chart(rows));
                     repaint.request_repaint();
                 });
@@ -974,12 +974,17 @@ impl App {
 
     /// The planner's trainee as a simulator build; `with_skills` adds the skills chosen to buy.
     pub(crate) fn plan_sim_build(&self, with_skills: bool) -> Result<UmaBuild, String> {
+        self.plan_sim_build_for(with_skills, self.planner.plan.target)
+    }
+
+    /// The plan's trainee with these stats (the targets, or the skill shop's real ones).
+    pub(crate) fn plan_sim_build_for(&self, with_skills: bool, target: [u32; 5]) -> Result<UmaBuild, String> {
         let data = self.sim_data.as_ref().ok_or("No simulator data; run tools/update_knowledge.py --only umalator.")?;
         let p = &self.planner.plan;
         let id = p.trainee.ok_or("Pick a trainee first.")?;
         let owned = self.owned_uma(id).ok_or("The trainee isn't in your roster.")?;
         let info = self.kb.umas.get(&id).ok_or("No knowledge data for this trainee.")?;
-        if p.target.iter().all(|v| *v == 0) {
+        if target.iter().all(|v| *v == 0) {
             return Err("Enter target stats first.".into());
         }
         let a = &info.aptitude;
@@ -993,11 +998,11 @@ impl App {
             stars,
             unique_level: u32::from(stars % 3 + stars / 3).max(1),
             desc: HorseDesc {
-                speed: f64::from(p.target[0]),
-                stamina: f64::from(p.target[1]),
-                power: f64::from(p.target[2]),
-                guts: f64::from(p.target[3]),
-                wisdom: f64::from(p.target[4]),
+                speed: f64::from(target[0]),
+                stamina: f64::from(target[1]),
+                power: f64::from(target[2]),
+                guts: f64::from(target[3]),
+                wisdom: f64::from(target[4]),
                 strategy: strategy_of(p.style),
                 distance_apt: parse_aptitude(a.distance(p.distance)),
                 surface_apt: parse_aptitude(a.surface(p.surface)),

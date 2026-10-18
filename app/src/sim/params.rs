@@ -101,6 +101,11 @@ const GROUND_SPEED: [[f64; 5]; 2] = [[0.0, 0.0, 0.0, 0.0, -50.0], [0.0, 0.0, 0.0
 const GROUND_POWER: [[f64; 5]; 2] = [[0.0, 0.0, -50.0, -50.0, -50.0], [0.0, -100.0, -50.0, -100.0, -100.0]];
 const STRATEGY_PROFICIENCY: [f64; 8] = [1.1, 1.0, 0.85, 0.75, 0.6, 0.4, 0.2, 0.1];
 
+/// The Wit multiplier for a style aptitude (index 0 = S … 7 = G).
+pub fn strategy_proficiency(apt: usize) -> f64 {
+    STRATEGY_PROFICIENCY[apt.min(7)]
+}
+
 /// Course stat bonus, ground penalties and the style-aptitude wit multiplier.
 pub fn adjusted_stats(b: &Horse, course: &Course, ground: i32) -> Horse {
     let surface = (course.surface.clamp(1, 2) - 1) as usize;

@@ -93,10 +93,21 @@ the steps to plan a career, and the game words the app uses.
     why. They are suggestions from a model; knowledge\scenarios.json lists its
     assumptions.
   - Skills to buy: "Auto-pick" chooses skills within the skill points the career simulation
-    expects you to end with (or a budget you set): the meta sheet's skills first, then the
-    ones that gain the most lengths on the course. It picks at once, then simulates every
-    skill on the course ("Simulate skills" does just that part) and picks again with the
-    measured gains. Without a course or target stats it picks from estimates and says so.
+    expects you to end with (or a budget you set). It picks at once, then races the skills
+    to find the set that gains the most together (about 10-20 seconds): each step adds the
+    skill whose measured gain on top of those already chosen is best for its cost, then it
+    tries swaps and checks the set in 1000 races. The table shows each skill's gain alone,
+    its gain in the set, how often it triggered, and why it was or wasn't bought;
+    "Explain" lists every step. Gains don't add up: skills overlap.
+  - Pin a skill (the dot left of its name: pin, then ban) to always or never buy it.
+    Debuffs and skills that depend on where other umas are can't be valued by the
+    simulator, so they're listed under "Not simulated": pin the ones you want.
+  - "Meta sheet" sets how much the community meta sheet counts: Off, Tie-break (the
+    default) or Strong (its skills first). "Fast Learner" takes 10% off every skill.
+  - At the end of a real career, tick "I'm at the skill shop now": enter your final stats
+    and SP, tick the skills on offer with their hint levels (or paste the list), and
+    Auto-pick works on exactly those.
+  - Step 2 warns when the trainee's grade for the goal is below B, and what it costs her.
   - "Simulate" races the plan on the Race sim page: the trainee with her skills against
     the same build without them. "Save to plan" there writes the results into the plan.
   - "Open Umalator" and "Copy for Umalator" still send the build to https://umalator.app/

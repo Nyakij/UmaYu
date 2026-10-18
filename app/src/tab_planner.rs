@@ -104,6 +104,36 @@ pub(crate) struct Plan {
     /// Skill points to spend, set by hand; `None` uses the career simulation's estimate.
     #[serde(default)]
     pub sp_budget: Option<u32>,
+    /// Skills auto-pick must buy, and skills it must never buy.
+    #[serde(default)]
+    pub pinned_skills: Vec<u32>,
+    #[serde(default)]
+    pub banned_skills: Vec<u32>,
+    /// The Fast Learner condition: skills cost 10% of their base price less (uma.guide glossary).
+    #[serde(default)]
+    pub fast_learner: bool,
+    /// How much the meta sheet's skill advice counts in auto-pick.
+    #[serde(default)]
+    pub meta_influence: crate::skill_opt::MetaInfluence,
+    /// What auto-pick aims for.
+    #[serde(default)]
+    pub pick_objective: crate::skill_opt::PickObjective,
+    /// At the skill shop at the end of a real career.
+    #[serde(default)]
+    pub shop: SkillShop,
+}
+
+/// "I'm at the skill shop now": the career's real final stats and SP, and the skills on offer with
+/// their hint levels. Auto-pick then works on exactly these.
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(default)]
+pub(crate) struct SkillShop {
+    pub on: bool,
+    /// Speed, Stamina, Power, Guts, Wit.
+    pub stats: [u32; 5],
+    pub sp: u32,
+    /// Skill → hint level (0–5).
+    pub offered: BTreeMap<u32, u8>,
 }
 
 impl Plan {
@@ -230,6 +260,12 @@ impl Default for Plan {
             notes: String::new(),
             scenario: String::new(),
             sp_budget: None,
+            pinned_skills: Vec::new(),
+            banned_skills: Vec::new(),
+            fast_learner: false,
+            meta_influence: Default::default(),
+            pick_objective: Default::default(),
+            shop: SkillShop::default(),
         }
     }
 }
@@ -264,7 +300,7 @@ pub(crate) struct PlannerState {
     /// What Auto-pick or the skill simulation last did, shown under Step 5 (true = a warning).
     pub(crate) skill_status: Option<(String, bool)>,
     course_search: String,
-    only_fitting: bool,
+    pub(crate) only_fitting: bool,
     /// Deck slot whose card picker is open: 0..=4 own cards, 5 the friend card.
     pub(crate) picker: Option<usize>,
     picker_search: String,
@@ -277,6 +313,15 @@ pub(crate) struct PlannerState {
     pub activation_cache: RefCell<(u64, HashMap<u32, Option<bool>>)>,
     /// `plan_key` for the last plan fields it saw.
     pub(crate) key_memo: std::cell::Cell<Option<(u64, u64)>>,
+    /// The auto-pick optimiser running in the background, and its last result (for a `pick_key`).
+    pub pick_job: Option<crate::skill_pick::PickJob>,
+    pub pick: Option<(u64, crate::skill_opt::Outcome)>,
+    /// Step 5's table order.
+    pub pick_sort: crate::ui_util::TableSort,
+    /// "Paste the list" in skill shop mode: the text being typed, while open.
+    pub shop_paste: Option<String>,
+    /// The plan's parents' white-spark skills, for the parents they were read for (Reload clears it).
+    pub parent_sparks: RefCell<Option<([String; 2], BTreeMap<u32, String>)>>,
 }
 
 /// How a skill's restrictions relate to the plan's target.
@@ -324,6 +369,11 @@ impl PlannerState {
             career_cache: RefCell::new(None),
             activation_cache: RefCell::new((0, HashMap::new())),
             key_memo: std::cell::Cell::new(None),
+            pick_job: None,
+            pick: None,
+            pick_sort: crate::ui_util::TableSort { key: "pick", desc: true },
+            shop_paste: None,
+            parent_sparks: RefCell::new(None),
         };
         s.refresh_files(root);
         s
@@ -740,7 +790,7 @@ impl App {
             });
             ui.label(
                 RichText::new(format!(
-                    "What the community's PvP sheet recommends for this CM. ✨ Recommend whole deck (Step 4) and ✨ Auto-pick (Step 5) put its picks (★) first. Opinion, not game data{}.",
+                    "What the community's PvP sheet recommends for this CM. ✨ Recommend whole deck (Step 4) puts its picks (★) first; in Step 5, \"Meta sheet\" sets how much they count for skills. Opinion, not game data{}.",
                     if ev.number > 21 { "; the sheet says its advice past CM 21 still needs checking" } else { "" }
                 ))
                 .size(12.0)
@@ -1174,8 +1224,9 @@ impl App {
         .map(|(l, g)| format!("{l} {g}"))
         .collect();
         if !weak_apts.is_empty() {
-            ui.label(RichText::new(format!("⚠ Below A: {}. Needs pink sparks from parents, or a different trainee.", weak_apts.join(", "))).color(pal(ui).warn));
+            ui.label(RichText::new(format!("Below A: {}. Pink sparks from parents raise aptitudes.", weak_apts.join(", "))).size(12.5).color(weak));
         }
+        self.aptitude_warning(ui);
         if let Some(u) = info.unique_skill {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Unique").color(weak));
@@ -1644,217 +1695,8 @@ impl App {
         cands
     }
 
-    fn skill_picker(&mut self, ui: &mut egui::Ui) {
-        let p = pal(ui);
-        let cands = self.plan_skill_candidates();
-        let title = semibold("Step 5 · Skills to buy", 15.5);
-        if cands.is_empty() {
-            ui.horizontal(|ui| {
-                ui.label(title);
-                ui.label(RichText::new("pick a trainee and cards to see the skills on offer").size(12.5).color(p.weak));
-            });
-            return;
-        }
-        let career = self.plan_career();
-        let budget = self.sp_budget();
-        let key = self.plan_key();
-        let simulated = self.planner.current_skill_values(key).map(|v| v.label.clone());
-        // An empty float sum is -0.0, which would print as "-0".
-        let spent = self.chosen_cost(&self.planner.plan.skills, career.as_ref()).abs();
-        let ctx = ui.ctx().clone();
-        let mut start_sim: Option<bool> = None;
-        let mut auto_pick = false;
-        let meta = self.plan_meta_skills();
-        ui.horizontal(|ui| {
-            ui.label(title);
-            ui.add_space(4.0);
-            badge(ui, format!("{} chosen", self.planner.plan.skills.len()), p.accent);
-            let over = budget.is_some_and(|b| spent > b + 0.5);
-            let text = match budget {
-                Some(b) => format!("{spent:.0} / {b:.0} SP"),
-                None => format!("{spent:.0} SP"),
-            };
-            badge(ui, text, if over { pal(ui).warn } else { p.gold }).on_hover_text("Cost after the hints this deck is expected to give (career simulation), against the SP budget");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.checkbox(&mut self.planner.only_fitting, "Hide skills that don't fit");
-                if ui.button("✖ Clear").clicked() {
-                    self.planner.plan.skills.clear();
-                    self.planner.skill_status = None;
-                }
-                let auto = crate::ui_util::primary_button(ui, "✨ Auto-pick", 13.5);
-                let hover = "Pick skills within the SP budget: first the ones the meta sheet recommends for this CM and style (★), \
-                             then the ones that gain the most lengths on the target course. Picks at once; if the skills haven't been \
-                             simulated on the course yet, it simulates them and picks again with the measured gains.";
-                if ui.add(auto).on_hover_text(hover).clicked() {
-                    auto_pick = true;
-                }
-                match &self.planner.skill_job {
-                    Some(job) => {
-                        if ui.small_button("✖").on_hover_text("Stop simulating").clicked() {
-                            job.cancel();
-                        }
-                        ui.add(egui::ProgressBar::new(job.fraction()).desired_width(150.0).text(format!("{} skills", job.count)));
-                    }
-                    None => {
-                        let label = if simulated.is_some() { "🏁 Re-simulate" } else { "🏁 Simulate skills" };
-                        if ui.button(label).on_hover_text("Run Moomoolator's skill chart for the plan's trainee, stats, style, course and conditions").clicked() {
-                            start_sim = Some(false);
-                        }
-                    }
-                }
-            });
-        });
-        if let Some(then_pick) = start_sim
-            && let Err(e) = self.start_skill_values(&ctx, then_pick)
-        {
-            self.planner.skill_status = Some((e, true));
-        }
-        if auto_pick {
-            // Pick now from what's known, so the button always does something; then refine it
-            // with simulated gains when the skill simulation can run.
-            let mut msg = self.auto_pick_skills();
-            let mut warn = false;
-            if simulated.is_none() {
-                match &mut self.planner.skill_job {
-                    Some(job) => {
-                        job.then_pick = true;
-                        msg += " It picks again when the skill simulation finishes.";
-                    }
-                    None => match self.start_skill_values(&ctx, true) {
-                        Ok(()) => msg += " Now simulating the skills on the course; it picks again with the measured gains.",
-                        Err(e) => {
-                            msg += &format!(" Gains are estimates: {e}");
-                            warn = true;
-                        }
-                    },
-                }
-            }
-            self.planner.skill_status = Some((msg, warn));
-        }
-        if let Some((msg, warn)) = &self.planner.skill_status {
-            ui.label(RichText::new(msg).size(12.5).color(if *warn { pal(ui).warn } else { pal(ui).good }));
-        }
-        // Where the budget and gains come from.
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            match (&career, self.planner.plan.sp_budget) {
-                (_, Some(_)) => {
-                    ui.label(RichText::new("SP budget set by hand:").size(12.5).color(p.weak));
-                }
-                (Some(c), None) => {
-                    let sources: Vec<String> = c.sp_sources.iter().filter(|(_, v)| *v >= 1.0).map(|(k, v)| format!("{k} {v:.0}")).collect();
-                    ui.label(RichText::new(format!(
-                        "SP budget ≈ {:.0}: the mean of {} simulated {} careers with this deck (10–90%: {:.0}–{:.0}; {}).",
-                        c.sp_mean,
-                        c.runs,
-                        self.plan_scenario_name(),
-                        c.sp_p10,
-                        c.sp_p90,
-                        sources.join(", ")
-                    ))
-                    .size(12.5)
-                    .color(p.weak))
-                    .on_hover_text(self.career_explainer(c));
-                }
-                (None, None) => {
-                    ui.label(RichText::new("No career simulation (knowledge/scenarios.json missing); set a budget by hand:").size(12.5).color(pal(ui).warn));
-                }
-            }
-            let mut manual = self.planner.plan.sp_budget.is_some();
-            if ui.checkbox(&mut manual, "set by hand").changed() {
-                self.planner.plan.sp_budget = manual.then(|| budget.unwrap_or(1500.0).round() as u32);
-            }
-            if let Some(b) = &mut self.planner.plan.sp_budget {
-                ui.add(egui::DragValue::new(b).range(0..=6000).speed(10).suffix(" SP"));
-            }
-        });
-        let gains_note = match &simulated {
-            Some(label) => format!("Gains: simulated on {label}, against the trainee with only her unique (skill chart, upper bound)."),
-            None => "Gains are estimates from how each skill's conditions fit; 🏁 Simulate skills measures them on the course.".to_string(),
-        };
-        ui.label(RichText::new(gains_note).size(12.0).color(p.weak));
-        ui.add_space(4.0);
-        let mut rows: Vec<(u32, Vec<String>, Fit, f64, f64)> = cands
-            .into_iter()
-            .map(|(s, src)| {
-                let fit = self.skill_fit(s);
-                let (gain, _) = self.skill_lengths(s);
-                (s, src, fit, gain, self.skill_cost(s, career.as_ref()))
-            })
-            .collect();
-        let meta_w = |s: &u32| meta.get(s).map_or(0.0, |(w, _)| *w);
-        rows.retain(|r| !self.planner.only_fitting || r.2 != Fit::Other || r.3 > 0.05 || meta_w(&r.0) >= 1.0);
-        // The meta sheet's picks first, then by gain.
-        rows.sort_by(|a, b| meta_w(&b.0).total_cmp(&meta_w(&a.0)).then(b.3.total_cmp(&a.3)).then(a.2.cmp(&b.2)).then(a.0.cmp(&b.0)));
-        let mut chosen = self.planner.plan.skills.clone();
-        // The skills the plan's CM turns off, and its name, looked up once for every row.
-        let (disabled, cup) = self.plan_cm().map(|e| (e.disabled_skills.clone(), e.name.clone())).unwrap_or_default();
-        // A long list scrolls inside the card rather than stretching the page.
-        // The min height matters: below the first screenful, a nested area's available height is ~0.
-        let height = (rows.len() as f32 * 28.0 + 24.0).min(360.0);
-        egui::ScrollArea::vertical().id_salt("skill_pick_scroll").min_scrolled_height(height).max_height(height).auto_shrink([false, true]).show(ui, |ui| {
-            egui::Grid::new("skill_pick").num_columns(7).striped(true).spacing([12.0, 3.0]).show(ui, |ui| {
-                for (h, hover) in [
-                    ("", ""),
-                    ("Skill", ""),
-                    ("Gain", "Lengths gained on the target course"),
-                    ("Cost", "SP after expected hint discounts, including the ○/white version a ◎/gold needs"),
-                    ("L / 100 SP", ""),
-                    ("Effect", ""),
-                    ("From", ""),
-                ] {
-                    let r = ui.label(RichText::new(h).size(12.0).color(p.weak));
-                    if !hover.is_empty() {
-                        r.on_hover_text(hover);
-                    }
-                }
-                ui.end_row();
-                for (s, src, fit, gain, cost) in &rows {
-                    let mut on = chosen.contains(s);
-                    if ui.checkbox(&mut on, "").changed() {
-                        if on {
-                            chosen.push(*s);
-                        } else {
-                            chosen.retain(|x| x != s);
-                        }
-                    }
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        if let Some((w, why)) = meta.get(s).filter(|(w, _)| *w > 0.0) {
-                            let strength = if *w >= 2.0 { "the skill advice" } else if *w >= 1.0 { "a recommended card's note" } else { "a recommended gold's ○/white" };
-                            ui.label(RichText::new("★").color(p.gold)).on_hover_text(format!(
-                                "Recommended by the meta sheet ({strength}): {why}.\nAuto-pick buys these first."
-                            ));
-                        }
-                        if disabled.contains(s) {
-                            ui.label(RichText::new("⊘").color(pal(ui).bad)).on_hover_text(format!(
-                                "Won't activate in the {cup}: the official announcement turns it off. Auto-pick never buys it."
-                            ));
-                            ui.label(RichText::new(self.kb.skill_name(*s)).size(13.0).strikethrough().color(p.weak));
-                        } else {
-                            self.skill_link(ui, *s, *fit == Fit::Other && *gain <= 0.05 && !meta.contains_key(s));
-                        }
-                    });
-                    let gain_text = if simulated.is_some() && self.planner.current_skill_values(key).is_some_and(|v| v.rows.contains_key(s)) {
-                        RichText::new(format!("{gain:+.2} L")).color(if *gain > 0.05 { pal(ui).good } else { p.weak })
-                    } else {
-                        RichText::new(format!("~{gain:.2} L")).color(p.weak)
-                    };
-                    ui.label(gain_text);
-                    ui.label(format!("{cost:.0}"));
-                    ui.label(if *cost > 0.0 { format!("{:.2}", gain / cost * 100.0) } else { "—".into() });
-                    let k = self.kb.skills.get(s);
-                    ui.label(RichText::new(k.map_or(String::new(), |k| k.effect_text())).size(12.5));
-                    ui.label(RichText::new(src.join(", ")).size(12.0).color(p.weak));
-                    ui.end_row();
-                }
-            });
-        });
-        self.planner.plan.skills = chosen;
-    }
-
     /// What the career simulation did and assumed, for hover text.
-    fn career_explainer(&self, c: &CareerResult) -> String {
+    pub(crate) fn career_explainer(&self, c: &CareerResult) -> String {
         let mut lines = vec![format!(
             "Per career on average: {:.0} trainings ({:.0} with a friendship/rainbow card), {:.0} races.",
             c.trainings_mean, c.rainbows_mean, c.races_mean
@@ -1898,9 +1740,10 @@ impl App {
         }
     }
 
-    /// Auto-pick: choose the skills to buy (`recommend_skills`) and say what it chose.
+    /// The quick pick: choose the skills to buy from what's known now (`recommend_skills`: chart
+    /// gains or estimates, no re-simulation) and say what it chose. The optimiser refines it.
     pub(crate) fn auto_pick_skills(&mut self) -> String {
-        let ids: Vec<u32> = self.plan_skill_candidates().into_keys().collect();
+        let ids: Vec<u32> = self.pick_rows().into_keys().collect();
         self.planner.plan.skills = self.recommend_skills(&ids);
         let meta = self.plan_meta_skills();
         let n = self.planner.plan.skills.len();
@@ -2187,7 +2030,8 @@ impl App {
 
         let career = self.plan_career();
         let simulated = self.planner.current_skill_values(self.plan_key()).map(|v| v.label.clone());
-        let _ = writeln!(md, "## Skills to buy\n\n| Skill | SP | After hints | Gain | Effect | Fits target |\n|---|---|---|---|---|---|");
+        let pick = self.current_pick();
+        let _ = writeln!(md, "## Skills to buy\n\n| Skill | SP | After hints | Gain alone | In this set | Effect | Fits target |\n|---|---|---|---|---|---|---|");
         for s in &p.skills {
             if let Some(k) = self.kb.skills.get(s) {
                 let fit = match self.skill_fit(*s) {
@@ -2195,14 +2039,33 @@ impl App {
                     Fit::General => "anywhere",
                     Fit::Other => "no",
                 };
-                let (gain, sim) = self.skill_lengths(*s);
+                let (gain, sim) = match pick.and_then(|o| o.singles.get(s)) {
+                    Some(g) => (*g, true),
+                    None => self.skill_lengths(*s),
+                };
                 let gain = if sim { format!("{gain:+.2} L") } else { format!("~{gain:.2} L (est.)") };
-                let _ = writeln!(md, "| {} | {} | {:.0} | {gain} | {} | {fit} |", k.name, k.sp, self.skill_cost(*s, career.as_ref()), k.effect_text());
+                let in_set = pick.and_then(|o| o.marginal.get(s)).map_or("—".to_string(), |g| format!("{g:+.2} L"));
+                let pin = if p.pinned_skills.contains(s) { " (pinned)" } else { "" };
+                let _ = writeln!(md, "| {}{pin} | {} | {:.0} | {gain} | {in_set} | {} | {fit} |", k.name, k.sp, self.skill_cost(*s, career.as_ref()), k.effect_text());
             }
         }
         let _ = writeln!(md);
+        if let Some(v) = pick.and_then(|o| o.verify.as_ref()) {
+            let _ = writeln!(
+                md,
+                "Auto-pick (simulator output, realistic races with wit checks and rushing on): the set gains {:+.2} L in {} races against the trainee with only her unique (95%: {:+.2} to {:+.2}); its skills' single gains add up to {:.2} L. Aim: {}; meta sheet: {}{}.\n",
+                v.mean,
+                v.runs,
+                v.lo,
+                v.hi,
+                v.singles_sum,
+                p.pick_objective.label(),
+                p.meta_influence.label(),
+                if p.fast_learner { "; Fast Learner" } else { "" }
+            );
+        }
         if let Some(label) = &simulated {
-            let _ = writeln!(md, "Gains: simulator output (skill chart on {label}, against the trainee with only her unique; an upper bound).");
+            let _ = writeln!(md, "Gain alone: simulator output (each skill alone on {label}, in realistic races, against the trainee with only her unique; gains don't add up, see In this set).");
         } else {
             let _ = writeln!(md, "Gains: estimates from how each skill's conditions fit the target (opinion, not simulated).");
         }

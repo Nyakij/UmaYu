@@ -231,7 +231,7 @@ impl App {
     fn card_results_header(&mut self, ui: &mut egui::Ui, list: &[usize]) {
         let cols = self.card_cols();
         let narrow = ui.available_width() < if self.view == View::Grid { 720.0 } else { 800.0 };
-        let mut tools = |app: &mut App, ui: &mut egui::Ui| {
+        let tools = |app: &mut App, ui: &mut egui::Ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 app.view_switch(ui);
                 match app.view {

@@ -24,6 +24,8 @@ mod profile;
 mod recommend;
 mod settings;
 mod settings_page;
+mod skill_opt;
+mod skill_pick;
 mod sim;
 mod tab_career;
 mod tab_cards;
@@ -184,6 +186,21 @@ mod tests {
         assert!(!warn && msg.contains("Picked"), "{msg}");
         assert!(!a.planner.plan.skills.is_empty(), "{msg}");
         assert!(a.chosen_cost(&a.planner.plan.skills, a.plan_career().as_ref()) <= a.sp_budget().unwrap() + 5.0);
+        // ✨ Auto-pick: a quick pick at once, then the optimiser in the background.
+        a.auto_pick(&ctx);
+        assert!(a.planner.pick_job.is_some(), "{:?}", a.planner.skill_status);
+        let start = std::time::Instant::now();
+        while a.planner.pick_job.is_some() {
+            assert!(start.elapsed().as_secs() < 120, "auto-pick never finished");
+            a.pick_poll(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let (msg, warn) = a.planner.skill_status.clone().expect("a status line under Step 5");
+        assert!(!warn && msg.contains("Picked"), "{msg}");
+        let out = a.current_pick().expect("the result is for this plan").clone();
+        assert_eq!(a.planner.plan.skills, out.chosen);
+        assert!(out.verify.is_some() && !out.marginal.is_empty());
+        assert!(a.chosen_cost(&a.planner.plan.skills, a.plan_career().as_ref()) <= a.pick_budget().unwrap() + 5.0);
     }
 
     /// For CM 21 the meta sheet's cards and skills come first.
@@ -215,15 +232,21 @@ mod tests {
         let skills = a.plan_meta_skills();
         let ids: Vec<u32> = a.plan_skill_candidates().into_keys().collect();
         let offered: Vec<u32> = ids.iter().copied().filter(|s| skills.get(s).is_some_and(|(w, _)| *w >= 1.0)).collect();
+        // ★ skills come first only with the meta influence at Strong (the default is a tie-break).
+        a.planner.plan.meta_influence = skill_opt::MetaInfluence::Strong;
         let chosen = a.recommend_skills(&ids);
         eprintln!("meta skills on offer: {:?}", offered.iter().map(|s| a.kb.skill_name(*s)).collect::<Vec<_>>());
         eprintln!("chosen: {:?}", chosen.iter().map(|s| a.kb.skill_name(*s)).collect::<Vec<_>>());
         for s in &offered {
-            if a.can_activate_on_plan(*s) != Some(false) {
+            // Skills the simulator can't value (debuffs, position skills) are left to the user.
+            if a.can_activate_on_plan(*s) != Some(false) && a.skill_unsimulated(*s).is_none() {
                 let gold_or_white = chosen.iter().any(|c| c / 10 == s / 10);
                 assert!(gold_or_white, "{} is recommended and on offer but wasn't picked", a.kb.skill_name(*s));
             }
         }
+        // Off: the sheet doesn't count at all.
+        a.planner.plan.meta_influence = skill_opt::MetaInfluence::Off;
+        assert_eq!(a.recommend_skills(&ids), a.recommend_skills_with(&ids, 0.0));
     }
 
     #[test]
@@ -904,6 +927,16 @@ impl App {
                 }
             }
         }
+        // UMALORD_SHOP=1: the planner's skill shop mode, with the demo plan's stats, 1800 SP and its
+        // first dozen skills on offer at hint levels 0–3.
+        if env("UMALORD_SHOP").as_deref() == Some("1") {
+            let offered: Vec<u32> = app.pick_rows().into_keys().take(12).collect();
+            let p = &mut app.planner.plan;
+            p.shop.on = true;
+            p.shop.stats = p.target;
+            p.shop.sp = 1800;
+            p.shop.offered = offered.into_iter().enumerate().map(|(i, id)| (id, (i % 4) as u8)).collect();
+        }
         app
     }
 
@@ -928,6 +961,7 @@ impl App {
         self.uma_art = scan_art(self.root.as_deref(), "umas");
         self.planner.refresh_files(self.root.as_deref());
         self.planner.key_memo.set(None);
+        self.planner.parent_sparks.replace(None);
         self.home_dirty();
         self.planner.rank_cache.borrow_mut().clear();
         self.notes.loaded = None;
@@ -1483,15 +1517,12 @@ impl App {
             self.debug_run = false;
             match (self.tab, self.career_tab) {
                 (Tab::Career, CareerTab::Race) => self.sim_start(ctx),
-                (Tab::Career, CareerTab::Plan) => {
-                    if let Err(e) = self.start_skill_values(ctx, true) {
-                        eprintln!("{e}");
-                    }
-                }
+                // The planner: ✨ Auto-pick, as if pressed (the optimiser, held until it finishes).
+                (Tab::Career, CareerTab::Plan) => self.auto_pick(ctx),
                 _ => {}
             }
         }
-        let simulating = self.sim.job.is_some() || self.planner.skill_job.is_some();
+        let simulating = self.sim.job.is_some() || self.planner.skill_job.is_some() || self.planner.pick_job.is_some();
         let installing = self.ask.oc.install_rx.is_some() || simulating;
         // UMALORD_ASK=<question>: ask it on start, and hold the screenshot until it's answered.
         if !installing && let Some(q) = self.debug_question.take() {
@@ -1573,6 +1604,7 @@ impl App {
             self.sim_poll(&ctx);
         }
         self.planner_poll(&ctx);
+        self.pick_poll(&ctx);
         self.ask_poll(&ctx);
         self.show_toasts(&ctx);
         self.debug_screenshot(&ctx);

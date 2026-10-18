@@ -949,11 +949,18 @@ pub struct DataTable<'a> {
     row_height: f32,
     selected: Option<usize>,
     scroll_to: Option<usize>,
+    max_height: Option<f32>,
 }
 
 impl<'a> DataTable<'a> {
     pub fn new(id: &'a str, cols: &'a [TableCol]) -> Self {
-        Self { id, cols, sort: None, row_height: 34.0, selected: None, scroll_to: None }
+        Self { id, cols, sort: None, row_height: 34.0, selected: None, scroll_to: None, max_height: None }
+    }
+
+    /// Scroll inside this height (for a table in a card) rather than taking the rest of the page.
+    pub fn max_height(mut self, h: f32) -> Self {
+        self.max_height = Some(h);
+        self
     }
 
     /// Scroll so this row is in view (centred), this frame.
@@ -997,6 +1004,9 @@ impl<'a> DataTable<'a> {
         }
         if let Some(r) = self.scroll_to {
             builder = builder.scroll_to_row(r, Some(egui::Align::Center));
+        }
+        if let Some(h) = self.max_height {
+            builder = builder.max_scroll_height(h).min_scrolled_height(h).auto_shrink([false, true]);
         }
         let selected = self.selected;
         let row_height = self.row_height;

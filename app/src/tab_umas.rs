@@ -251,7 +251,7 @@ impl App {
         let shown = list.len();
         // Too narrow for one line: the view tools go on a second.
         let narrow = ui.available_width() < if self.view == View::Grid { 640.0 } else { 730.0 };
-        let mut tools = |app: &mut App, ui: &mut egui::Ui| {
+        let tools = |app: &mut App, ui: &mut egui::Ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 app.view_switch(ui);
                 match app.view {

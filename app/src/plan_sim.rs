@@ -104,7 +104,7 @@ impl App {
         let count = skills.len();
         let label = format!("{} · {}", data.course_name(course_id), conditions_text(g, w, s, t));
         std::thread::spawn(move || {
-            let rows = run_chart(&data, &course, &race, &base, &skills, 1234.0, &p2);
+            let rows = run_chart(&data, &course, &race, &base, &skills, 1234.0, true, &p2);
             let mut faster = base.clone();
             faster.desc.speed += 50.0;
             let r = run_comparison(&data, &course, &race, &base, &faster, &chart_options(1234.0, 300), false, false, None);

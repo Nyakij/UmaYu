@@ -162,6 +162,28 @@ fn last_spurt_speed(h: &Horse, c: &Course) -> f64 {
     v + (450.0 * h.guts).powf(0.597) * 0.0001
 }
 
+/// How an aptitude grade (index 0 = S … 7 = G) holds a build back, by the simulator's
+/// coefficients: the share of last-spurt speed lost to a distance grade below A on a race of
+/// `distance` metres, the share of acceleration lost to a surface grade, and the share of Wit a
+/// style grade takes away. Each is 0 at A.
+pub fn aptitude_losses(desc: &super::params::HorseDesc, distance: f64, distance_apt: usize, surface_apt: usize, style_apt: usize) -> [f64; 3] {
+    let spurt = |apt: usize| {
+        let mut d = desc.clone();
+        d.distance_apt = apt;
+        let h = super::params::base_stats(&d);
+        // As last_spurt_speed: the speed term is in the phase's target speed and added again.
+        let from_speed = (500.0 * h.speed).sqrt() * DISTANCE_SPEED[apt.min(7)] * 0.002;
+        let v = (base_speed(distance) * STRATEGY_PHASE_SPEED[h.strategy.clamp(1, 5) as usize][2] + from_speed + 0.01 * base_speed(distance)) * 1.05;
+        v + from_speed + (450.0 * h.guts).powf(0.597) * 0.0001
+    };
+    let a = 1usize;
+    [
+        (1.0 - spurt(distance_apt) / spurt(a)).max(0.0),
+        (1.0 - SURFACE_ACCEL[surface_apt.min(7)] / SURFACE_ACCEL[a]).max(0.0),
+        (1.0 - super::params::strategy_proficiency(style_apt) / super::params::strategy_proficiency(a)).max(0.0),
+    ]
+}
+
 fn base_accel(base: f64, h: &Horse, phase: usize) -> f64 {
     base * (500.0 * h.power).sqrt()
         * STRATEGY_PHASE_ACCEL[h.strategy.clamp(1, 5) as usize][phase]
