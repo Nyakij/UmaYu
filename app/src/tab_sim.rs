@@ -18,7 +18,7 @@ use crate::sim::run::{ChartRow, CompareResult, HpCalcResult, Progress, SimOption
 use crate::sim::solver::Perspective;
 use crate::tab_umas::filter_heading;
 use crate::theme::pal;
-use crate::ui_util::{GOOD, WARN, card, card_titled, page_header, search_combo, section_label, semibold, stat_row, tier_color};
+use crate::ui_util::{card, card_titled, page_header, search_combo, section_label, semibold, stat_row, tier_color};
 
 pub const GROUNDS: [&str; 4] = ["Firm", "Good", "Soft", "Heavy"];
 pub const WEATHERS: [&str; 4] = ["Sunny", "Cloudy", "Rainy", "Snowy"];
@@ -77,7 +77,6 @@ pub(crate) struct SimState {
     pub stamina: Option<HpCalcResult>,
     /// The setup came from the planner, so results can be saved back to the plan.
     pub from_plan: bool,
-    pub status: Option<(String, bool)>,
     /// The run's inputs, frozen when it started, for saving and labels.
     pub ran: Option<RunInfo>,
 }
@@ -144,7 +143,6 @@ impl Default for SimState {
             chart_per_sp: false,
             stamina: None,
             from_plan: false,
-            status: None,
             ran: None,
         }
     }
@@ -260,7 +258,7 @@ impl App {
                 match result {
                     JobResult::Compare(r) => {
                         if !r.warnings.is_empty() {
-                            self.sim.status = Some((format!("Left out: {}", r.warnings.join("; ")), true));
+                            self.toast(format!("Left out: {}", r.warnings.join("; ")), crate::ui_util::ToastKind::Warn);
                         }
                         self.sim.compare = Some(r);
                     }
@@ -271,7 +269,7 @@ impl App {
             }
             Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
             Err(mpsc::TryRecvError::Disconnected) => {
-                self.sim.status = Some(("The simulation stopped unexpectedly.".into(), true));
+                self.toast("The simulation stopped unexpectedly.", crate::ui_util::ToastKind::Error);
                 self.sim.job = None;
             }
         }
@@ -282,7 +280,7 @@ impl App {
         ui.label(semibold("The race", 17.0));
         ui.label(RichText::new("Where and how the umas race. Pick a Champions Meeting to fill it all in.").size(12.5).color(p.weak));
         let Some(data) = self.sim_data.clone() else {
-            ui.label(RichText::new(self.sim_error.clone().unwrap_or_default()).color(WARN));
+            ui.label(RichText::new(self.sim_error.clone().unwrap_or_default()).color(pal(ui).warn));
             ui.label(RichText::new("Run: python -I -X utf8 tools/update_knowledge.py --only umalator").size(12.0).color(p.weak));
             return;
         };
@@ -440,7 +438,7 @@ impl App {
     pub(crate) fn sim_start(&mut self, ctx: &egui::Context) {
         let Some(data) = self.sim_data.clone() else { return };
         let Some(course) = data.courses.get(&self.sim.course).cloned() else {
-            self.sim.status = Some(("Pick a course first.".into(), true));
+            self.toast("Pick a course first.", crate::ui_util::ToastKind::Warn);
             return;
         };
         if self.sim.auto_seed {
@@ -486,7 +484,7 @@ impl App {
                 let race = race_params(s.ground, s.weather, s.season, s.time, Some(u1.desc.strategy));
                 let skills = self.chart_candidates(&data, &course, &u1, &race);
                 if skills.is_empty() {
-                    self.sim.status = Some(("No skills to test for this uma on this course.".into(), true));
+                    self.toast("No skills to test for this uma on this course.", crate::ui_util::ToastKind::Warn);
                     return;
                 }
                 label = format!("{} skills", skills.len());
@@ -500,7 +498,6 @@ impl App {
             }
             Mode::HpCalc => return,
         }
-        self.sim.status = None;
         self.sim.job = Some(Job { progress, rx, label });
     }
 
@@ -553,18 +550,14 @@ impl App {
             }
             if ui.add(egui::Button::new("📋 Load from Planner").min_size(vec2(0.0, 30.0))).on_hover_text("Fill in the Planner's trainee, target stats, skills, course and conditions").clicked() {
                 match self.load_plan_into_sim() {
-                    Ok(note) => self.sim.status = Some((note, false)),
-                    Err(e) => self.sim.status = Some((e, true)),
+                    Ok(note) => self.toast(note, crate::ui_util::ToastKind::Success),
+                    Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
                 }
             }
         });
         if run {
             let ctx = ui.ctx().clone();
             self.sim_start(&ctx);
-        }
-        if let Some((msg, err)) = &self.sim.status {
-            ui.label(RichText::new(msg).size(12.5).color(if *err { WARN } else { GOOD }));
-            ui.add_space(4.0);
         }
         let two = self.sim.mode == Mode::Compare;
         if two && ui.available_width() >= 900.0 {
@@ -841,8 +834,8 @@ impl App {
             ui.horizontal(|ui| {
                 if ui.button("💾 Save to plan").on_hover_text("Writes these results into the plan's ## Simulation section").clicked() {
                     match self.save_sim_to_plan() {
-                        Ok(msg) => self.sim.status = Some((msg, false)),
-                        Err(e) => self.sim.status = Some((e, true)),
+                        Ok(msg) => self.toast(msg, crate::ui_util::ToastKind::Success),
+                        Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
                     }
                 }
                 ui.label(RichText::new("Uma 1 is the plan's trainee without her bought skills; Uma 2 has them.").size(12.0).color(p.weak));
@@ -887,7 +880,7 @@ impl App {
                         add = Some(r.id);
                     }
                     self.skill_link(ui, r.id, !self.skill_available(r.id));
-                    ui.label(semibold(format!("{:+.2} L", r.mean), 13.5).color(if r.mean > 0.05 { GOOD } else { p.weak }));
+                    ui.label(semibold(format!("{:+.2} L", r.mean), 13.5).color(if r.mean > 0.05 { pal(ui).good } else { p.weak }));
                     ui.label(format!("{:+.2}", r.median));
                     ui.label(RichText::new(format!("{:+.2} … {:+.2}", r.min, r.max)).size(12.0).color(p.weak));
                     let sp = cost(r.id);
@@ -920,7 +913,7 @@ impl App {
             ui,
             &[
                 ("♥", "Max HP", format!("{:.0}", r.max_hp), "from Stamina".into(), p.accent),
-                ("◎", "HP left", format!("{:.0}", med(&r.remaining)), "median; below 0 means she ran dry".into(), if med(&r.remaining) >= 0.0 { GOOD } else { WARN }),
+                ("◎", "HP left", format!("{:.0}", med(&r.remaining)), "median; below 0 means she ran dry".into(), if med(&r.remaining) >= 0.0 { pal(ui).good } else { pal(ui).warn }),
                 ("⚡", "Full spurt", format!("{:.0}%", r.full_spurt_runs as f64 / r.runs.max(1) as f64 * 100.0), "of runs at top speed to the end".into(), p.gold),
                 ("🏁", "HP survival", format!("{survived:.0}%"), "of runs finished with HP left".into(), p.link),
                 ("↘", "Downhill saving", format!("{:.0}", med(&r.downhill_save)), "median HP saved on slopes".into(), p.weak),
@@ -952,10 +945,10 @@ impl App {
                     ui.label(if mine { semibold(*name, 13.5) } else { RichText::new(*name) });
                     ui.label(format!("{:.0}", e.max_hp));
                     ui.label(format!("{:.0}", e.total_needed)).on_hover_text(format!("Opening and middle legs {:.0} + final leg and spurt {:.0}", e.phase01_hp, e.phase2_hp));
-                    ui.label(RichText::new(format!("{:+.0}", e.surplus)).color(if e.surplus >= 0.0 { GOOD } else { WARN }));
+                    ui.label(RichText::new(format!("{:+.0}", e.surplus)).color(if e.surplus >= 0.0 { pal(ui).good } else { pal(ui).warn }));
                     ui.label(if e.full_spurt { "yes".to_string() } else { format!("no (+{:.1}% heal)", e.heal_needed) });
                     ui.label(e.min_stamina.to_string());
-                    ui.label(RichText::new(format!("{:+.0}", e.adjusted_surplus)).color(if e.adjusted_full_spurt { GOOD } else { WARN }))
+                    ui.label(RichText::new(format!("{:+.0}", e.adjusted_surplus)).color(if e.adjusted_full_spurt { pal(ui).good } else { pal(ui).warn }))
                         .on_hover_text(format!("Downhill mode saves about {:.0} HP, so {:.0} is needed", e.downhill_savings, e.adjusted_needed));
                     ui.label(e.adjusted_min_stamina.to_string());
                     ui.end_row();
@@ -1052,8 +1045,8 @@ impl App {
         self.sim.mode = Mode::Compare;
         self.go_career(crate::CareerTab::Race);
         self.sim_start(ctx);
-        if self.sim.status.is_none() {
-            self.sim.status = Some((msg, false));
+        if self.sim.job.is_some() {
+            self.toast(msg, crate::ui_util::ToastKind::Success);
         }
         Ok(())
     }
@@ -1111,7 +1104,7 @@ fn trace_chart(ui: &mut egui::Ui, course: &Course, traces: &[(&Trace, Color32)],
         painter.text(pos2(x(s) + 3.0, plot.bottom() + 2.0), Align2::LEFT_TOP, label, FontId::proportional(10.5), p.weak);
     }
     for s in &course.slopes {
-        let c = if s.slope > 0.0 { WARN } else { p.link };
+        let c = if s.slope > 0.0 { pal(ui).warn } else { p.link };
         let r = Rect::from_min_max(pos2(x(s.start as f32), plot.bottom() - 4.0), pos2(x((s.start + s.length) as f32), plot.bottom()));
         painter.rect_filled(r, CornerRadius::ZERO, c.gamma_multiply(0.5));
     }

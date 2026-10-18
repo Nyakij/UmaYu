@@ -8,7 +8,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::knowledge::{Distance, SkillSource, Style, Surface, effects_text};
 use crate::tab_umas::{FILTER_W, count_line};
 use crate::theme::pal;
-use crate::ui_util::{GOOD, WARN, badge, card, card_titled, empty_state, section_label, semibold, tier_color, toggle};
+use crate::ui_util::{badge, card, card_titled, empty_state, section_label, semibold, tier_color, toggle};
 use crate::{App, Jump};
 
 pub const TIERS: [&str; 5] = ["White", "Gold", "Unique", "Inherited unique", "Evolved"];
@@ -64,7 +64,10 @@ impl App {
 
     fn skill_filters(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.skills;
-        ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search name or effect").desired_width(f32::INFINITY));
+        let search = ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search name or effect").desired_width(f32::INFINITY));
+        if self.focus_search.take() {
+            search.request_focus();
+        }
         ui.add_space(4.0);
         ui.checkbox(&mut s.available_only, "Only skills I can get")
             .on_hover_text("From an uma you own (with her potential unlocked far enough) or a hint or event on a card you own");
@@ -231,7 +234,7 @@ impl App {
                         ui.label(RichText::new(self.kb.tag_line(&k.tags())).color(weak));
                     });
                     row.col(|ui| {
-                        ui.label(RichText::new(self.owned_source_names(id).join(", ")).color(GOOD));
+                        ui.label(RichText::new(self.owned_source_names(id).join(", ")).color(pal(ui).good));
                     });
                     if row.response().clicked() {
                         clicked = Some(id);
@@ -324,7 +327,7 @@ impl App {
             }
             if !locked.is_empty() {
                 ui.add_space(6.0);
-                ui.label(RichText::new("🔒 LOCKED BEHIND POTENTIAL").size(11.0).color(WARN));
+                ui.label(RichText::new("🔒 LOCKED BEHIND POTENTIAL").size(11.0).color(pal(ui).warn));
                 for s in &locked {
                     self.source_row(ui, *s, false);
                 }
@@ -365,7 +368,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new(what).color(weak));
             let text = RichText::new(format!("{name}{extra}"));
-            let text = if owned { text.color(GOOD) } else { text };
+            let text = if owned { text.color(pal(ui).good) } else { text };
             let clickable = match target {
                 Jump::Uma(u) => self.owned_uma(u).is_some(),
                 Jump::Card(c) => self.owned_card(c).is_some(),

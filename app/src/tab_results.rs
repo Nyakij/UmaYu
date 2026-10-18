@@ -9,7 +9,7 @@ use crate::App;
 use crate::data::{is_separator, tables};
 use crate::tab_umas::filter_heading;
 use crate::theme::pal;
-use crate::ui_util::{GOOD, WARN, card_titled, empty_state, open_url, page_header, search_combo, semibold, today};
+use crate::ui_util::{card_titled, empty_state, open_url, page_header, search_combo, semibold, today};
 
 const LOG_ICONS: [&str; 5] = ["🐴", "👥", "🏆", "⭐", "✨"];
 
@@ -112,7 +112,7 @@ impl App {
             |_| {},
         );
         if self.results.headers.is_empty() {
-            ui.label(RichText::new("No table found in this file.").color(WARN));
+            ui.label(RichText::new("No table found in this file.").color(pal(ui).warn));
             return;
         }
 
@@ -155,7 +155,7 @@ impl App {
                 }
             });
             if let Some((msg, err)) = &self.results.status {
-                ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
+                ui.label(RichText::new(msg).color(if *err { pal(ui).warn } else { pal(ui).good }));
             }
         });
 

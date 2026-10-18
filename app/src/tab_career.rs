@@ -37,6 +37,7 @@ impl App {
                 .collect();
             segmented(ui, &mut self.career_tab, &options);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                crate::ui_util::header_chibi(ui);
                 ui.label(RichText::new("Plan it → race it → log what happened").size(13.0).color(weak));
             });
         });

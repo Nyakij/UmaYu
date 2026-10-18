@@ -33,11 +33,11 @@ impl App {
             ];
             segmented(ui, &mut self.collection_tab, &options);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                crate::ui_util::header_chibi(ui);
                 if self.collection_tab == CollectionTab::Cards {
                     let add = crate::ui_util::primary_button(ui, "＋ Add cards", 14.0).min_size(egui::vec2(0.0, 30.0));
                     if ui.add(add).on_hover_text("Add cards you just pulled, or raise the limit break and level of cards you have").clicked() {
                         self.cards.add.open = true;
-                        self.cards.add.status = None;
                     }
                 }
                 if self.collection_tab == CollectionTab::Umas {

@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use data::{Roster, Source, SupportCard, Uma};
 use eframe::egui::{self, CornerRadius, Margin, RichText, Stroke, vec2};
 use knowledge::{Knowledge, SkillSource};
-use ui_util::{GOOD, WARN, semibold, tier_color};
+use ui_util::{semibold, tier_color};
 
 /// Window icon: Special Week's portrait, embedded so the exe has it anywhere.
 fn window_icon() -> Option<egui::IconData> {
@@ -105,8 +105,15 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
             let app = App::new(root);
-            app.write_digest();
-            theme::install(&cc.egui_ctx, app.dark);
+            // A profile shown with UMALORD_PROFILE isn't the account: keep the digest of the real one.
+            if std::env::var_os("UMALORD_PROFILE").is_none() {
+                app.write_digest();
+            }
+            theme::install(&cc.egui_ctx, app.mode);
+            theme::set_compact(&cc.egui_ctx, app.compact);
+            if (app.ui_scale - 1.0).abs() > 0.001 {
+                cc.egui_ctx.set_zoom_factor(app.ui_scale);
+            }
             Ok(Box::new(app))
         }),
     )
@@ -291,7 +298,7 @@ mod tests {
         let mut a = app();
         eprintln!("App::new {:>7.1} ms", t0.elapsed().as_secs_f64() * 1e3);
         let ctx = egui::Context::default();
-        theme::install(&ctx, true);
+        theme::install(&ctx, theme::Mode::Dark);
         a.planner.demo(&a.roster, &a.kb, 101601);
         a.recommend_deck(true);
         let input = || egui::RawInput {
@@ -340,7 +347,7 @@ mod tests {
     fn clearing_a_search_restores_the_list() {
         let mut a = app();
         let ctx = egui::Context::default();
-        theme::install(&ctx, true);
+        theme::install(&ctx, theme::Mode::Dark);
         a.tab = Tab::Collection;
         let input = || egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
@@ -515,6 +522,16 @@ const GLOSSARY: &[(&str, &str)] = &[
     ("Conditions", "The ground (Firm to Heavy), weather and season of a race. Some skills only work in some conditions."),
 ];
 
+/// Keyboard shortcuts, as Help lists them (`App::shortcuts` handles them).
+const SHORTCUTS: &[(&str, &str)] = &[
+    ("Ctrl+1 … Ctrl+4", "Switch tabs: Home, Collection, Career, Ask"),
+    ("Ctrl+F", "Jump to the page's search box"),
+    ("Ctrl+S", "Save the plan (on Career → Plan)"),
+    ("F5", "Reload your roster, game data and plans from disk"),
+    ("Esc", "Close Help, a dialog, or the details panel"),
+    ("?", "Open this Help"),
+];
+
 /// The top bar's tabs, left to right.
 const TABS: [Tab; 5] = [Tab::Home, Tab::Collection, Tab::Career, Tab::Ask, Tab::Notes];
 
@@ -556,8 +573,19 @@ pub(crate) struct App {
     pub available_skills: std::cell::RefCell<Option<HashSet<u32>>>,
     /// The Help window is open.
     pub help_open: bool,
-    /// Seiun Sky in the background; saved in settings.json.
+    /// The sky gradient and the theme's decorations behind the pages; `mascot` in settings.json
+    /// (the name it had when it also drew Seiun Sky). Where she shows is `theme::chibi()`.
     pub mascot: bool,
+    /// Dark, light or System; saved as `theme` in settings.json. `dark` is what it resolves to.
+    pub mode: theme::Mode,
+    /// Zoom for the whole window (0.9–1.25); `ui_scale` in settings.json.
+    pub ui_scale: f32,
+    /// Compact spacing; `density` in settings.json.
+    pub compact: bool,
+    /// Toasts asked for this frame, shown by `App::frame` (code without a `Context` can ask too).
+    pub pending_toasts: std::cell::RefCell<Vec<(String, ui_util::ToastKind, Option<(String, ui_util::ToastAction)>)>>,
+    /// Ctrl+F was pressed: the page's search box takes focus when it's drawn.
+    pub focus_search: Cell<bool>,
     pub umas: tab_umas::UmasState,
     pub cards: tab_cards::CardsState,
     pub skills: tab_skills::SkillsState,
@@ -628,6 +656,18 @@ impl App {
         let (roster, source) = Roster::load(root.as_deref());
         let env = |key: &str| std::env::var(key).ok();
         let (sim_data, sim_error) = load_sim(root.as_deref());
+        let saved = |key: &str| settings::get(key).and_then(|v| v.as_str().map(String::from));
+        let mascot = env("UMALORD_MASCOT").map(|v| v == "1").or_else(|| settings::get("mascot").and_then(|v| v.as_bool())).unwrap_or(true);
+        let mode = theme::Mode::from_key(&env("UMALORD_THEME").or_else(|| saved("theme")).unwrap_or_default());
+        // Before `chibi` existed, `mascot: false` hid her too; keep her hidden for those users.
+        let chibi_default = if settings::get("mascot").and_then(|v| v.as_bool()) == Some(false) { theme::Chibi::Off } else { theme::Chibi::Home };
+        theme::use_chibi(env("UMALORD_CHIBI").or_else(|| saved("chibi")).and_then(|k| theme::Chibi::from_key(&k)).unwrap_or(chibi_default));
+        let ui_scale = env("UMALORD_SCALE")
+            .and_then(|s| s.parse::<f32>().ok())
+            .or_else(|| settings::get("ui_scale").and_then(|v| v.as_f64()).map(|v| v as f32))
+            .unwrap_or(1.0)
+            .clamp(*theme::UI_SCALE.start(), *theme::UI_SCALE.end());
+        let compact = env("UMALORD_DENSITY").or_else(|| saved("density")).as_deref() == Some("compact");
         let mut app = Self {
             sim: Default::default(),
             sim_data,
@@ -648,13 +688,19 @@ impl App {
             jump: Cell::new(None),
             available_skills: std::cell::RefCell::new(None),
             help_open: false,
-            mascot: env("UMALORD_MASCOT").map(|v| v == "1").or_else(|| settings::get("mascot").and_then(|v| v.as_bool())).unwrap_or(true),
+            mascot,
+            mode,
+            ui_scale,
+            compact,
+            pending_toasts: Default::default(),
+            focus_search: Cell::new(false),
             umas: Default::default(),
             cards: Default::default(),
             skills: Default::default(),
             results: Default::default(),
             md_cache: Default::default(),
-            dark: env("UMALORD_THEME").or_else(|| settings::get("theme").and_then(|v| v.as_str().map(String::from))).as_deref() != Some("light"),
+            // System resolves once the window knows Windows' theme (`App::frame`).
+            dark: mode != theme::Mode::Light,
             look: theme::Look::from_key(&env("UMALORD_LOOK").or_else(|| settings::get("look").and_then(|v| v.as_str().map(String::from))).unwrap_or_default()),
             debug_settings: env("UMALORD_SETTINGS").is_some_and(|v| v == "1"),
             onboarding: Default::default(),
@@ -942,12 +988,14 @@ impl App {
         ui.separator();
         ui.label(RichText::new("MODE").size(11.5).color(p.weak));
         ui.horizontal(|ui| {
-            for (dark, label) in [(true, "🌙 Dark"), (false, "☀ Light")] {
-                let b = egui::Button::selectable(self.dark == dark, RichText::new(label).size(14.0)).min_size(vec2(140.0, 28.0));
-                if ui.add(b).clicked() && self.dark != dark {
-                    self.dark = dark;
-                    theme::set_dark(ui.ctx(), dark);
-                    settings::set("theme", serde_json::json!(if dark { "dark" } else { "light" }));
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for mode in theme::Mode::ALL {
+                let b = egui::Button::selectable(self.mode == mode, RichText::new(mode.label()).size(14.0)).min_size(vec2(96.0, 28.0));
+                let hover = if mode == theme::Mode::System { "Follow Windows: dark when Windows is dark" } else { "" };
+                let r = ui.add(b);
+                let r = if hover.is_empty() { r } else { r.on_hover_text(hover) };
+                if r.clicked() && self.mode != mode {
+                    self.set_mode(ui.ctx(), mode);
                 }
             }
         });
@@ -980,18 +1028,33 @@ impl App {
         }
         ui.add_space(4.0);
         ui.label(RichText::new("BACKGROUND").size(11.5).color(p.weak));
-        if ui.checkbox(&mut self.mascot, "Background art and chibi Seiun Sky").changed() {
+        if ui.checkbox(&mut self.mascot, "Sky and decorations behind the pages").changed() {
             settings::set("mascot", serde_json::json!(self.mascot));
         }
+        ui.add_space(4.0);
+        ui.label(RichText::new("CHIBI SEIUN SKY").size(11.5).color(p.weak)).on_hover_text("She's only drawn where nothing else is, so she never covers your data.");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for c in theme::Chibi::ALL {
+                let hover = match c {
+                    theme::Chibi::Everywhere => "On Home, on empty pages, and small beside every page title",
+                    theme::Chibi::Home => "On Home and on empty pages only",
+                    theme::Chibi::Off => "Nowhere",
+                };
+                if ui.add(egui::Button::selectable(theme::chibi() == c, RichText::new(c.label()).size(13.0))).on_hover_text(hover).clicked() {
+                    theme::use_chibi(c);
+                    settings::set("chibi", serde_json::json!(c.key()));
+                }
+            }
+        });
         ui.separator();
         ui.label(RichText::new(format!("PROFILE · {}", self.profile_name().to_uppercase())).size(11.5).color(p.weak));
         let row = |ui: &mut egui::Ui, text: &str, hint: &str| ui.add(egui::Button::new(RichText::new(text).size(14.0)).right_text(RichText::new(hint).size(11.5).color(p.weak)));
         if row(ui, "📤 Save my data", "to one file").on_hover_text("Write your umas, cards, parents, plans and results to profiles/<name>-<date>.umalord.json, to keep or share").clicked() {
-            self.onboarding.status = Some(match self.export_profile() {
-                Ok(path) => (format!("Saved {}.", path.display()), false),
-                Err(e) => (e, true),
-            });
-            self.planner.status = self.onboarding.status.clone();
+            match self.export_profile() {
+                Ok(path) => self.toast_action(format!("Saved {}.", path.display()), ui_util::ToastKind::Success, "Show", ui_util::ToastAction::Open(path)),
+                Err(e) => self.toast(e, ui_util::ToastKind::Error),
+            }
             ui.close();
         }
         if row(ui, "📥 Load a profile", "switch accounts").on_hover_text("Replace what's here with a saved .umalord.json profile (what's here is backed up first)").clicked() {
@@ -1006,10 +1069,130 @@ impl App {
             self.onboarding.confirm_start_over = true;
             ui.close();
         }
-        if let Some((msg, err)) = &self.onboarding.status
-            && !self.onboarding.open
-        {
-            ui.label(RichText::new(msg).size(12.0).color(if *err { WARN } else { GOOD }));
+    }
+
+    /// Switch dark, light or System, and save it.
+    fn set_mode(&mut self, ctx: &egui::Context, mode: theme::Mode) {
+        self.mode = mode;
+        theme::set_mode(ctx, mode);
+        self.dark = theme::is_dark(ctx);
+        settings::set("theme", serde_json::json!(mode.key()));
+    }
+
+    /// Show a short message at the bottom of the window (from code without a `Context`).
+    pub fn toast(&self, text: impl Into<String>, kind: ui_util::ToastKind) {
+        self.pending_toasts.borrow_mut().push((text.into(), kind, None));
+    }
+
+    /// A toast with a button, e.g. "Show" for a saved file.
+    pub fn toast_action(&self, text: impl Into<String>, kind: ui_util::ToastKind, label: &str, action: ui_util::ToastAction) {
+        self.pending_toasts.borrow_mut().push((text.into(), kind, Some((label.into(), action))));
+    }
+
+    /// A message with a flag for "this is a warning" (the old status-line pair), as a toast.
+    pub fn toast_flag(&self, (text, warn): (String, bool)) {
+        self.toast(text, if warn { ui_util::ToastKind::Warn } else { ui_util::ToastKind::Success });
+    }
+
+    /// A success or an error, as a toast.
+    pub fn toast_result(&self, result: Result<String, String>) {
+        match result {
+            Ok(m) => self.toast(m, ui_util::ToastKind::Success),
+            Err(e) => self.toast(e, ui_util::ToastKind::Error),
+        }
+    }
+
+    /// Hand this frame's toasts to egui, draw them, and carry out a clicked button.
+    fn show_toasts(&mut self, ctx: &egui::Context) {
+        for (text, kind, action) in self.pending_toasts.borrow_mut().drain(..) {
+            match action {
+                Some((label, a)) => ui_util::toast_action(ctx, text, kind, &label, a),
+                None => ui_util::toast(ctx, text, kind),
+            }
+        }
+        match ui_util::show_toasts(ctx) {
+            // Show the file selected in Explorer (or open a folder).
+            Some(ui_util::ToastAction::Open(path)) => {
+                let result = if path.is_dir() {
+                    std::process::Command::new("explorer").arg(&path).spawn()
+                } else {
+                    std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn()
+                };
+                if let Err(e) = result {
+                    self.toast(format!("Couldn't open {}: {e}", path.display()), ui_util::ToastKind::Error);
+                }
+            }
+            Some(ui_util::ToastAction::Undo) | None => {}
+        }
+    }
+
+    /// Keyboard shortcuts: Ctrl+1…4 tabs, Ctrl+F search, Ctrl+S save the plan, F5 reload,
+    /// Esc close, ? help. Listed in Help (`SHORTCUTS`).
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        let typing = ctx.egui_wants_keyboard_input();
+        for (i, tab) in TABS.iter().enumerate() {
+            let key = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5][i];
+            if ctx.input_mut(|inp| inp.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key))) {
+                self.tab = *tab;
+                self.onboarding.open = false;
+            }
+        }
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
+            self.focus_search.set(true);
+        }
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::S))) {
+            if (self.tab, self.career_tab) == (Tab::Career, CareerTab::Plan) && !self.onboarding.open {
+                self.save_plan();
+            } else {
+                self.toast("Ctrl+S saves the plan on Career → Plan.", ui_util::ToastKind::Info);
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F5)) {
+            self.reload();
+            self.toast("Reloaded your roster, game data and plans.", ui_util::ToastKind::Success);
+        }
+        // `?` opens Help, unless a text box is taking the keys.
+        if !typing && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "?"))) {
+            self.help_open = true;
+        }
+        // Esc closes the topmost thing: a dropdown or text box handles its own, then Help, a
+        // dialog, then the detail panel.
+        if !typing && !egui::Popup::is_any_open(ctx) && ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.close_topmost();
+        }
+    }
+
+    /// Esc: close Help, an open dialog, or the selection's detail panel, in that order.
+    fn close_topmost(&mut self) {
+        if self.help_open {
+            self.help_open = false;
+        } else if self.onboarding.confirm_start_over {
+            self.onboarding.confirm_start_over = false;
+        } else if self.cards.add.open {
+            self.cards.add.open = false;
+        } else if self.planner.picker.is_some() {
+            self.planner.picker = None;
+        } else if self.tab == Tab::Collection {
+            match self.collection_tab {
+                CollectionTab::Umas => self.umas.selected = None,
+                CollectionTab::Cards => self.cards.selected = None,
+                CollectionTab::Skills => self.skills.selected = None,
+            }
+        }
+    }
+
+    /// The chibi pose for the page that's open (see `ui_util::chibi_image`).
+    fn pose(&self) -> u8 {
+        match self.tab {
+            Tab::Home => 0,
+            Tab::Collection => 1,
+            Tab::Career => match self.career_tab {
+                CareerTab::Plan => 2,
+                CareerTab::Race => 3,
+                CareerTab::Results => 4,
+            },
+            Tab::Ask | Tab::Notes => 5,
         }
     }
 
@@ -1028,7 +1211,7 @@ impl App {
             }
             match &self.source {
                 Source::Folder(p) => ui.label("📁 Your data folder").on_hover_text(p.display().to_string()),
-                Source::Embedded => ui.label(RichText::new("⚠ Using a built-in snapshot: the umaLord folder wasn't found").color(WARN)),
+                Source::Embedded => ui.label(RichText::new("⚠ Using a built-in snapshot: the umaLord folder wasn't found").color(theme::pal(ui).warn)),
             };
             if let Some(d) = &self.roster.cards_updated {
                 ui.separator();
@@ -1037,7 +1220,7 @@ impl App {
             ui.separator();
             match (&self.kb.error, &self.kb.built) {
                 (Some(e), _) => {
-                    ui.label(RichText::new("⚠ Game data missing: run tools/update_knowledge.py").color(WARN)).on_hover_text(e);
+                    ui.label(RichText::new("⚠ Game data missing: run tools/update_knowledge.py").color(theme::pal(ui).warn)).on_hover_text(e);
                 }
                 (None, built) => {
                     ui.label(format!("Game data from uma.guide{}", built.as_ref().map(|b| format!(", {}", &b[..10.min(b.len())])).unwrap_or_default()))
@@ -1051,14 +1234,15 @@ impl App {
             }
             if !self.roster.warnings.is_empty() {
                 ui.separator();
-                ui.label(RichText::new(format!("⚠ {} lines in your roster files couldn't be read", self.roster.warnings.len())).color(WARN))
+                ui.label(RichText::new(format!("⚠ {} lines in your roster files couldn't be read", self.roster.warnings.len())).color(theme::pal(ui).warn))
                     .on_hover_text(self.roster.warnings.join("\n"));
             }
         });
     }
 
-    /// A soft sky behind the pages, with chibi Seiun Sky in the bottom-right corner. Each tab
-    /// has its own pose. Painted before the pages, whose panels are see-through.
+    /// A soft sky behind the pages, with the theme's decorations toward the bottom right. Painted
+    /// before the pages, whose panels are see-through. Chibi Seiun Sky isn't painted here: she's
+    /// laid out where nothing else is (`ui_util::chibi`), so she never covers content.
     fn paint_background(&self, ui: &egui::Ui, rect: egui::Rect) {
         let p = theme::palette(self.dark);
         let painter = ui.painter_at(rect);
@@ -1093,8 +1277,8 @@ impl App {
         };
         match theme::look() {
             theme::Look::Sky | theme::Look::Sakura => {
-                // Soft clouds around her.
-                let cloud = egui::Color32::from_white_alpha(if self.dark { 10 } else { 120 });
+                // Soft clouds in the corner.
+                let cloud = egui::Color32::from_white_alpha(if self.dark { 10 } else { 70 });
                 for (dx, dy, r) in [(-0.95, -0.12, 0.30), (-0.62, -0.22, 0.38), (-0.25, -0.12, 0.30), (-1.6, -0.75, 0.16), (-1.36, -0.82, 0.20), (-1.12, -0.74, 0.15)] {
                     painter.circle_filled(base + vec2(dx * size, dy * size), r * size, cloud);
                 }
@@ -1107,7 +1291,7 @@ impl App {
                     painter.circle_filled(sun, size * r, glow.gamma_multiply(a));
                 }
                 painter.circle_filled(sun, size * 0.34, glow.gamma_multiply(if self.dark { 0.35 } else { 0.6 }));
-                let cloud = egui::Color32::from_white_alpha(if self.dark { 8 } else { 90 });
+                let cloud = egui::Color32::from_white_alpha(if self.dark { 8 } else { 60 });
                 for (dx, dy, r) in [(-0.4, -0.08, 0.26), (-0.08, -0.14, 0.32), (-1.7, -0.5, 0.14), (-1.5, -0.56, 0.18)] {
                     painter.circle_filled(base + vec2(dx * size, dy * size), r * size, cloud);
                 }
@@ -1134,19 +1318,6 @@ impl App {
                 painter.add(egui::Shape::ellipse_filled(pos, vec2(r, r * 0.6), petal.gamma_multiply(if self.dark { 0.16 + b * 0.18 } else { 0.18 + b * 0.22 })));
             }
         }
-        let source = match self.tab {
-            Tab::Home => egui::include_image!("../assets/chibi/seiun_102001_0011.png"),
-            Tab::Collection => egui::include_image!("../assets/chibi/seiun_102001_0010.png"),
-            Tab::Career => match self.career_tab {
-                CareerTab::Plan => egui::include_image!("../assets/chibi/seiun_102002_0010.png"),
-                CareerTab::Race => egui::include_image!("../assets/chibi/seiun_102003_0011.png"),
-                CareerTab::Results => egui::include_image!("../assets/chibi/seiun_102002_0011.png"),
-            },
-            Tab::Ask | Tab::Notes => egui::include_image!("../assets/chibi/seiun_102003_0010.png"),
-        };
-        let img = egui::Rect::from_min_size(rect.right_bottom() - vec2(size + 6.0, size - 4.0), vec2(size, size));
-        let alpha = if self.dark { 120 } else { 150 };
-        egui::Image::new(source).tint(egui::Color32::from_white_alpha(alpha)).paint_at(ui, img);
     }
 
     /// What each tab is for, how to get started, and the game words the app uses.
@@ -1214,6 +1385,12 @@ impl App {
                             ui.label(semibold(format!("{}.", n + 1), 14.0).color(p.accent));
                             ui.add(egui::Label::new(*step).wrap());
                         });
+                    }
+                    ui.add_space(10.0);
+                    ui.label(semibold("Keyboard shortcuts", 16.0));
+                    ui.add_space(4.0);
+                    for (keys, what) in SHORTCUTS {
+                        row(ui, &mut |ui| _ = ui.label(RichText::new(*keys).monospace().size(13.0)), RichText::new(*what));
                     }
                     ui.add_space(10.0);
                     ui.label(semibold("Words you'll see", 16.0));
@@ -1300,6 +1477,11 @@ impl eframe::App for App {
 impl App {
     /// One frame of the whole window; separate from eframe so tests can time it headless.
     fn frame(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        // System mode follows Windows, so what "dark" means can change while the app runs.
+        self.dark = theme::is_dark(&ctx);
+        ui_util::set_pose(self.pose());
+        self.shortcuts(&ctx);
         let p = theme::palette(self.dark);
         egui::Panel::top("top_bar")
             .frame(egui::Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 9)))
@@ -1309,7 +1491,6 @@ impl App {
             .show(ui, |ui| self.status_bar(ui));
         // The pages' panels are see-through (theme.rs), so this shows behind all of them.
         self.paint_background(ui, ui.available_rect_before_wrap());
-        let ctx = ui.ctx().clone();
         self.take_dropped_profile(&ctx);
         if self.onboarding.open {
             self.onboarding_page(ui);
@@ -1335,6 +1516,7 @@ impl App {
         }
         self.planner_poll(&ctx);
         self.ask_poll(&ctx);
+        self.show_toasts(&ctx);
         self.debug_screenshot(&ctx);
     }
 }

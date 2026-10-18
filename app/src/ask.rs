@@ -14,7 +14,7 @@ use crate::App;
 use crate::knowledge::{Distance, Style, Surface, grade_rank};
 use crate::tab_umas::filter_heading;
 use crate::theme::pal;
-use crate::ui_util::{GOOD, WARN, badge, semibold, truncate};
+use crate::ui_util::{badge, semibold, truncate};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const MAX_TOOL_ROUNDS: u32 = 12;
@@ -667,7 +667,7 @@ impl App {
             }
         }
         if let Some(err) = &self.ask.oc.install_error {
-            ui.label(RichText::new(err).color(WARN));
+            ui.label(RichText::new(err).color(pal(ui).warn));
         }
         ui.add_space(4.0);
         ui.label(
@@ -957,7 +957,7 @@ impl App {
                 }
                 if let Some((msg, err)) = &self.ask.status {
                     ui.add_space(8.0);
-                    ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
+                    ui.label(RichText::new(msg).color(if *err { pal(ui).warn } else { pal(ui).good }));
                 }
                 ui.add_space(8.0);
             });
@@ -1054,7 +1054,7 @@ impl App {
         }
         let note = crate::ask_opencode::model_note(&s.oc.model);
         let safe = note.starts_with("keeps nothing");
-        badge(ui, format!("{} {note}", if safe { "🔒" } else { "ℹ" }), if safe { p.accent } else { WARN });
+        badge(ui, format!("{} {note}", if safe { "🔒" } else { "ℹ" }), if safe { p.accent } else { pal(ui).warn });
         ui.add_space(4.0);
         if ui.small_button("🔄 Refresh models").clicked() && s.oc.models_rx.is_none() {
             s.oc.models.clear();
@@ -1087,7 +1087,7 @@ impl App {
 
         filter_heading(ui, "API key");
         let has_key = !s.auth_label().starts_with("none");
-        badge(ui, format!("{} {}", if has_key { "✔" } else { "✖" }, s.auth_label()), if has_key { p.accent } else { WARN });
+        badge(ui, format!("{} {}", if has_key { "✔" } else { "✖" }, s.auth_label()), if has_key { p.accent } else { pal(ui).warn });
         ui.add_space(4.0);
         ui.add(egui::TextEdit::singleline(&mut s.key_input).password(true).hint_text("sk-ant-…").desired_width(f32::INFINITY));
         ui.checkbox(&mut s.remember, "Remember on this PC");

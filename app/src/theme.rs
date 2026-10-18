@@ -3,10 +3,157 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke, TextStyle, Theme, Visuals};
+use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke, TextStyle, Theme, ThemePreference, Visuals};
 
 /// Name of the semibold font family used for headings and titles.
 pub const SEMIBOLD: &str = "semibold";
+
+/// The type scale. Use these rather than literal sizes.
+pub mod size {
+    /// Captions, section labels, badges in tight spots.
+    pub const XS: f32 = 11.5;
+    /// Secondary lines: explanations under titles, hints.
+    pub const SM: f32 = 12.5;
+    /// Body text and buttons.
+    pub const BODY: f32 = 14.0;
+    /// Card titles.
+    pub const MD: f32 = 15.5;
+    /// Section titles.
+    pub const LG: f32 = 17.0;
+    /// Page titles.
+    pub const XL: f32 = 22.0;
+    /// Headline numbers in stat tiles.
+    pub const XXL: f32 = 28.0;
+    /// Hero numbers: one per page at most.
+    pub const DISPLAY: f32 = 40.0;
+}
+
+/// Gaps between things, before the density setting scales them (see `space`).
+pub mod gap {
+    pub const XS: f32 = 4.0;
+    pub const SM: f32 = 8.0;
+    pub const MD: f32 = 12.0;
+    pub const LG: f32 = 16.0;
+    pub const XL: f32 = 24.0;
+}
+
+/// Corner radius of cards, panels and dialogs.
+pub const RADIUS: u8 = 12;
+
+/// Dark, light, or whatever Windows uses; saved as `theme` in settings.json.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    System,
+    Light,
+    Dark,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 3] = [Mode::System, Mode::Light, Mode::Dark];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Mode::System => "system",
+            Mode::Light => "light",
+            Mode::Dark => "dark",
+        }
+    }
+
+    /// Unknown or missing keys mean dark, the default before System existed.
+    pub fn from_key(key: &str) -> Mode {
+        Mode::ALL.into_iter().find(|m| m.key() == key).unwrap_or(Mode::Dark)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Mode::System => "◐ System",
+            Mode::Light => "☀ Light",
+            Mode::Dark => "🌙 Dark",
+        }
+    }
+
+    pub fn preference(self) -> ThemePreference {
+        match self {
+            Mode::System => ThemePreference::System,
+            Mode::Light => ThemePreference::Light,
+            Mode::Dark => ThemePreference::Dark,
+        }
+    }
+}
+
+/// Where chibi Seiun Sky appears; saved as `chibi` in settings.json. She's only ever drawn
+/// where nothing else is, so she never covers content.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Chibi {
+    /// Home's welcome, empty pages, and small beside every page title.
+    Everywhere,
+    /// Home's welcome and empty pages (the default).
+    Home,
+    Off,
+}
+
+impl Chibi {
+    pub const ALL: [Chibi; 3] = [Chibi::Everywhere, Chibi::Home, Chibi::Off];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Chibi::Everywhere => "everywhere",
+            Chibi::Home => "home",
+            Chibi::Off => "off",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Chibi> {
+        Chibi::ALL.into_iter().find(|c| c.key() == key)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Chibi::Everywhere => "Everywhere",
+            Chibi::Home => "Home and empty pages",
+            Chibi::Off => "Off",
+        }
+    }
+}
+
+static CHIBI: AtomicU8 = AtomicU8::new(1);
+
+/// Where the mascot goes, app-wide (read by widgets that have no `App`).
+pub fn chibi() -> Chibi {
+    Chibi::ALL[usize::from(CHIBI.load(Ordering::Relaxed)).min(Chibi::ALL.len() - 1)]
+}
+
+pub fn use_chibi(c: Chibi) {
+    CHIBI.store(Chibi::ALL.iter().position(|x| *x == c).unwrap_or(1) as u8, Ordering::Relaxed);
+}
+
+/// 0 = comfortable, 1 = compact (spacing × 0.8).
+static DENSITY: AtomicU8 = AtomicU8::new(0);
+
+/// How much spacing is scaled: 1.0 comfortable, 0.8 compact.
+pub fn density() -> f32 {
+    if DENSITY.load(Ordering::Relaxed) == 1 { 0.8 } else { 1.0 }
+}
+
+/// A gap from `gap`, scaled by the density setting.
+pub fn space(g: f32) -> f32 {
+    g * density()
+}
+
+pub fn compact() -> bool {
+    DENSITY.load(Ordering::Relaxed) == 1
+}
+
+/// Switch between comfortable and compact spacing; restyles a running app.
+pub fn set_compact(ctx: &egui::Context, compact: bool) {
+    DENSITY.store(u8::from(compact), Ordering::Relaxed);
+    for theme in [Theme::Dark, Theme::Light] {
+        ctx.style_mut_of(theme, apply_spacing);
+    }
+}
+
+/// The UI scale range offered in Settings (`ui_scale` in settings.json).
+pub const UI_SCALE: std::ops::RangeInclusive<f32> = 0.9..=1.25;
 
 /// A colour theme: the accent (highlights, selections, main buttons), link colour, and the
 /// background's sky and decorations. Each works in dark and light mode. Green stays for good news
@@ -94,8 +241,14 @@ pub struct Palette {
     pub link: Color32,
     pub gold: Color32,
     pub pink: Color32,
-    /// The background's colour toward the bottom right, behind the mascot.
+    /// The background's colour toward the bottom right.
     pub sky: Color32,
+    /// Good news only: gains, success, things you can get. Readable as text in both modes.
+    pub good: Color32,
+    /// Caution: not announced, below target, locked.
+    pub warn: Color32,
+    /// Errors and destructive actions.
+    pub bad: Color32,
 }
 
 /// Accent, text on it, its strong version, link and sky colour: per theme, dark then light.
@@ -107,7 +260,7 @@ fn tint(look: Look, dark: bool) -> [Color32; 5] {
         (Look::Sakura, true) => [c(244, 143, 177), c(40, 10, 22), c(244, 143, 177), c(249, 168, 212), c(70, 34, 54)],
         (Look::Sakura, false) => [c(204, 52, 108), Color32::WHITE, c(160, 32, 82), c(176, 30, 94), c(252, 221, 233)],
         (Look::Sunset, true) => [c(251, 157, 75), c(40, 20, 6), c(251, 157, 75), c(253, 196, 128), c(86, 44, 34)],
-        (Look::Sunset, false) => [c(196, 90, 14), Color32::WHITE, c(150, 66, 8), c(170, 78, 10), c(255, 222, 190)],
+        (Look::Sunset, false) => [c(180, 80, 10), Color32::WHITE, c(150, 66, 8), c(170, 78, 10), c(255, 222, 190)],
         (Look::Night, true) => [c(167, 139, 250), c(22, 14, 46), c(167, 139, 250), c(196, 181, 253), c(40, 32, 84)],
         (Look::Night, false) => [c(109, 58, 214), Color32::WHITE, c(84, 40, 170), c(92, 46, 190), c(226, 218, 252)],
     }
@@ -137,6 +290,9 @@ pub fn palette_for(look: Look, dark: bool) -> Palette {
             gold: Color32::from_rgb(250, 204, 21),
             pink: Color32::from_rgb(244, 114, 182),
             sky,
+            good: Color32::from_rgb(34, 197, 94),
+            warn: Color32::from_rgb(245, 158, 11),
+            bad: Color32::from_rgb(248, 113, 113),
         }
     } else {
         Palette {
@@ -152,11 +308,28 @@ pub fn palette_for(look: Look, dark: bool) -> Palette {
             on_accent,
             accent_strong,
             link,
-            gold: Color32::from_rgb(176, 124, 0),
-            pink: Color32::from_rgb(219, 39, 119),
+            // Darker than the dark-mode colours, so they read as text on white (WCAG AA).
+            gold: Color32::from_rgb(146, 100, 0),
+            pink: Color32::from_rgb(200, 30, 105),
             sky,
+            good: Color32::from_rgb(21, 128, 61),
+            warn: Color32::from_rgb(180, 83, 9),
+            bad: Color32::from_rgb(185, 28, 28),
         }
     }
+}
+
+/// WCAG contrast ratio between two colours (1 to 21; text needs 4.5).
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    fn lum(c: Color32) -> f32 {
+        let ch = |v: u8| {
+            let v = f32::from(v) / 255.0;
+            if v <= 0.039_28 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    }
+    let (la, lb) = (lum(a), lum(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
 /// The palette for the theme `ui` is drawn in.
@@ -175,7 +348,7 @@ fn visuals(dark: bool) -> Visuals {
     v.faint_bg_color = if dark { Color32::from_white_alpha(7) } else { Color32::from_black_alpha(9) };
     v.code_bg_color = p.raised;
     v.window_stroke = Stroke::new(1.0, p.border);
-    v.window_corner_radius = CornerRadius::same(12);
+    v.window_corner_radius = CornerRadius::same(RADIUS);
     v.menu_corner_radius = CornerRadius::same(10);
     v.hyperlink_color = p.link;
     v.selection.bg_fill = p.accent.gamma_multiply(if dark { 0.28 } else { 0.22 });
@@ -238,29 +411,83 @@ fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(defs);
 }
 
-pub fn install(ctx: &egui::Context, dark: bool) {
+/// Spacing for the current density.
+fn apply_spacing(s: &mut egui::Style) {
+    let d = density();
+    s.spacing.item_spacing = egui::vec2(8.0 * d, 6.0 * d);
+    s.spacing.button_padding = egui::vec2(10.0 * d, 5.0 * d);
+    s.spacing.interact_size.y = 24.0;
+    s.spacing.window_margin = Margin::same((12.0 * d) as i8);
+    s.spacing.menu_margin = Margin::same((8.0 * d) as i8);
+}
+
+/// Fonts, colours and spacing, starting in `mode` (System follows Windows).
+pub fn install(ctx: &egui::Context, mode: Mode) {
     install_fonts(ctx);
     for theme in [Theme::Dark, Theme::Light] {
         ctx.set_visuals_of(theme, visuals(theme == Theme::Dark));
         ctx.style_mut_of(theme, |s| {
             s.text_styles = [
-                (TextStyle::Small, FontId::proportional(11.5)),
-                (TextStyle::Body, FontId::proportional(14.0)),
-                (TextStyle::Button, FontId::proportional(14.0)),
-                (TextStyle::Monospace, FontId::monospace(12.5)),
-                (TextStyle::Heading, FontId::new(22.0, FontFamily::Name(SEMIBOLD.into()))),
+                (TextStyle::Small, FontId::proportional(size::XS)),
+                (TextStyle::Body, FontId::proportional(size::BODY)),
+                (TextStyle::Button, FontId::proportional(size::BODY)),
+                (TextStyle::Monospace, FontId::monospace(size::SM)),
+                (TextStyle::Heading, FontId::new(size::XL, FontFamily::Name(SEMIBOLD.into()))),
             ]
             .into();
-            s.spacing.item_spacing = egui::vec2(8.0, 6.0);
-            s.spacing.button_padding = egui::vec2(10.0, 5.0);
-            s.spacing.interact_size.y = 24.0;
-            s.spacing.window_margin = Margin::same(12);
-            s.spacing.menu_margin = Margin::same(8);
+            apply_spacing(s);
         });
     }
-    set_dark(ctx, dark);
+    set_mode(ctx, mode);
 }
 
-pub fn set_dark(ctx: &egui::Context, dark: bool) {
-    ctx.set_theme(if dark { Theme::Dark } else { Theme::Light });
+pub fn set_mode(ctx: &egui::Context, mode: Mode) {
+    ctx.set_theme(mode.preference());
+}
+
+/// Whether the running app is drawn dark (System resolves to what Windows uses).
+pub fn is_dark(ctx: &egui::Context) -> bool {
+    ctx.theme() == Theme::Dark
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Status colours, weak text, gold and links read as text (WCAG AA, 4.5:1) on cards and on
+    /// the page, in both modes and every theme.
+    #[test]
+    fn text_colours_pass_contrast() {
+        for look in Look::ALL {
+            for dark in [true, false] {
+                let p = palette_for(look, dark);
+                for (name, c) in [("good", p.good), ("warn", p.warn), ("bad", p.bad), ("weak", p.weak), ("gold", p.gold), ("link", p.link), ("pink", p.pink)] {
+                    for (on, bg) in [("surface", p.surface), ("page", p.bg)] {
+                        let r = contrast(c, bg);
+                        assert!(r >= 4.5, "{name} on {on}, {look:?} {}: {r:.2}", if dark { "dark" } else { "light" });
+                    }
+                }
+                // Text on the accent (main buttons).
+                let r = contrast(p.on_accent, p.accent);
+                assert!(r >= 4.5, "text on the accent, {look:?} {}: {r:.2}", if dark { "dark" } else { "light" });
+            }
+        }
+    }
+
+    #[test]
+    fn contrast_matches_wcag() {
+        assert!((contrast(Color32::BLACK, Color32::WHITE) - 21.0).abs() < 0.01);
+        assert!((contrast(Color32::WHITE, Color32::WHITE) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn settings_keys_round_trip() {
+        for m in Mode::ALL {
+            assert_eq!(Mode::from_key(m.key()), m);
+        }
+        assert_eq!(Mode::from_key("nonsense"), Mode::Dark, "old settings default to dark");
+        for c in Chibi::ALL {
+            assert_eq!(Chibi::from_key(c.key()), Some(c));
+        }
+    }
 }

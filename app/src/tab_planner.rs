@@ -17,7 +17,7 @@ use crate::data::{Rarity, Roster};
 use crate::knowledge::{Distance, EventPreset, Knowledge, RaceInfo, Style, Surface, UmalatorCourse, effect, grade_rank};
 use crate::theme::pal;
 use crate::ui_util::{
-    GOOD, WARN, badge, card, card_titled, card_titled_to, draw_lb, grade_badge, open_url, search_combo, semibold, stars_widget, tile_ring, today,
+    badge, card, card_titled, card_titled_to, draw_lb, grade_badge, open_url, search_combo, semibold, stars_widget, tile_ring, today,
     truncate, type_color_str, type_icon,
 };
 
@@ -256,13 +256,12 @@ pub(crate) struct PlannerState {
     pub plan: Plan,
     files: Vec<(PathBuf, String)>,
     pub(crate) open_file: Option<PathBuf>,
-    pub(crate) status: Option<(String, bool)>,
     /// What Auto-pick or the skill simulation last did, shown under Step 5 (true = a warning).
     pub(crate) skill_status: Option<(String, bool)>,
     course_search: String,
     only_fitting: bool,
     /// Deck slot whose card picker is open: 0..=4 own cards, 5 the friend card.
-    picker: Option<usize>,
+    pub(crate) picker: Option<usize>,
     picker_search: String,
     picker_type: Option<String>,
     pub skill_values: Option<SkillValues>,
@@ -308,7 +307,6 @@ impl PlannerState {
             plan: Plan::default(),
             files: Vec::new(),
             open_file: None,
-            status: None,
             skill_status: None,
             course_search: String::new(),
             only_fitting: true,
@@ -527,7 +525,6 @@ impl App {
         if ui.add(new).on_hover_text("Start an empty plan. Save the current one first if you want to keep it.").clicked() {
             self.planner.plan = Plan::default();
             self.planner.open_file = None;
-            self.planner.status = None;
             self.planner.skill_status = None;
         }
         crate::ui_util::section_label(ui, "Saved plans", "Plans you saved, newest first. Click one to open it. They live in the plans folder as markdown files.");
@@ -552,10 +549,9 @@ impl App {
                 Some(Ok(plan)) => {
                     self.planner.plan = plan;
                     self.planner.open_file = Some(path);
-                    self.planner.status = None;
                     self.planner.skill_status = None;
                 }
-                _ => self.planner.status = Some(("That plan has no app data block (written by hand?). Open it in Notes.".into(), true)),
+                _ => self.toast("That plan has no app data block (written by hand?). Open it in Notes.", crate::ui_util::ToastKind::Warn),
             }
         }
     }
@@ -587,7 +583,7 @@ impl App {
                 if sim.clicked() {
                     let ctx = ui.ctx().clone();
                     if let Err(e) = self.simulate_plan(&ctx) {
-                        self.planner.status = Some((e, true));
+                        self.toast(e, crate::ui_util::ToastKind::Warn);
                     }
                 }
                 let open = ui
@@ -602,7 +598,7 @@ impl App {
                             if !notes.is_empty() {
                                 msg += &format!(" Note: {}.", notes.join("; "));
                             }
-                            self.planner.status = Some((msg, false));
+                            self.toast(msg, crate::ui_util::ToastKind::Success);
                         }
                         Err(_) => open_url(UMALATOR_URL),
                     }
@@ -619,9 +615,9 @@ impl App {
                             if !dropped.is_empty() {
                                 msg += &format!(" Left out (Umalator doesn't know them): {}.", dropped.join(", "));
                             }
-                            self.planner.status = Some((msg, false));
+                            self.toast(msg, crate::ui_util::ToastKind::Success);
                         }
-                        Err(e) => self.planner.status = Some((e, true)),
+                        Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
                     }
                 }
             });
@@ -631,9 +627,6 @@ impl App {
                 .size(13.0)
                 .color(p.weak),
         );
-        if let Some((msg, err)) = &self.planner.status {
-            ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
-        }
         ui.add_space(10.0);
 
         // --- Goal: the purpose on the title line, then one labelled row per field.
@@ -787,7 +780,7 @@ impl App {
                             let owned = c.id.and_then(|id| self.owned_card(id));
                             let name = if c.any.is_empty() { c.name.clone() } else { format!("any {}", c.any) };
                             let text = if borrow { format!("↔ {name}") } else { name };
-                            let color = if owned.is_some() { GOOD } else { p.weak };
+                            let color = if owned.is_some() { pal(ui).good } else { p.weak };
                             let mut hover = vec![if borrow { "Borrowed from a friend".to_string() } else { "One of your five".to_string() }];
                             if !c.note.is_empty() {
                                 hover.push(format!("Brought for: {}", c.note));
@@ -815,7 +808,7 @@ impl App {
                     field_row(ui, RichText::new("Also good").color(p.weak), |ui| {
                         for c in &st.honorable {
                             let owned = c.id.is_some_and(|id| self.owned_card(id).is_some());
-                            ui.label(RichText::new(&c.name).size(12.5).color(if owned { GOOD } else { p.weak })).on_hover_text(if c.note.is_empty() { "Honorable mention".to_string() } else { format!("Honorable mention: {}", c.note) });
+                            ui.label(RichText::new(&c.name).size(12.5).color(if owned { pal(ui).good } else { p.weak })).on_hover_text(if c.note.is_empty() { "Honorable mention".to_string() } else { format!("Honorable mention: {}", c.note) });
                         }
                     });
                 }
@@ -911,7 +904,7 @@ impl App {
                     let on = self.planner.plan.cm_date.as_deref() == Some(e.date.as_str());
                     let small = egui::FontId::proportional(12.0);
                     let mut job = egui::text::LayoutJob::default();
-                    let (mark, mark_color) = if e.confirmed { ("✔ ", GOOD) } else { ("? ", WARN) };
+                    let (mark, mark_color) = if e.confirmed { ("✔ ", pal(ui).good) } else { ("? ", pal(ui).warn) };
                     job.append(mark, 0.0, egui::TextFormat::simple(egui::FontId::proportional(13.0), mark_color));
                     job.append(&e.name, 0.0, egui::TextFormat::simple(egui::FontId::new(13.5, egui::FontFamily::Name(crate::theme::SEMIBOLD.into())), p.text));
                     job.append(&format!("  {}\n", short_date(&e.date)), 0.0, egui::TextFormat::simple(small.clone(), p.weak));
@@ -930,14 +923,14 @@ impl App {
             Some((e, true)) => {
                 self.planner.plan.cm_date = None;
                 self.planner.plan.umalator_course = None;
-                self.planner.status = Some((format!("Unlinked the {}; the course and conditions stay.", e.name), false));
+                self.toast(format!("Unlinked the {}; the course and conditions stay.", e.name), crate::ui_util::ToastKind::Success);
             }
             Some((e, false)) => {
                 let msg = match self.planner.plan.apply_cm(&self.kb, &e) {
                     Some(note) => (format!("Filled the goal from the {}; {note}.", e.name), true),
                     None => (format!("Filled course, distance, surface and conditions from the {} ({}).", e.name, e.date), false),
                 };
-                self.planner.status = Some(msg);
+                self.toast_flag(msg);
             }
             None => {}
         }
@@ -1129,7 +1122,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label(semibold(&uma.name, 17.0));
                     stars_widget(ui, uma.stars, 6.0);
-                    badge(ui, format!("P{}", uma.potential), if uma.potential >= 5 { pal(ui).accent } else { WARN });
+                    badge(ui, format!("P{}", uma.potential), if uma.potential >= 5 { pal(ui).accent } else { pal(ui).warn });
                 });
                 ui.horizontal(|ui| {
                     grade_badge(ui, pl.distance.label(), info.aptitude.distance(pl.distance));
@@ -1159,14 +1152,14 @@ impl App {
         .map(|(l, g)| format!("{l} {g}"))
         .collect();
         if !weak_apts.is_empty() {
-            ui.label(RichText::new(format!("⚠ Below A: {}. Needs pink sparks from parents, or a different trainee.", weak_apts.join(", "))).color(WARN));
+            ui.label(RichText::new(format!("⚠ Below A: {}. Needs pink sparks from parents, or a different trainee.", weak_apts.join(", "))).color(pal(ui).warn));
         }
         if let Some(u) = info.unique_skill {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Unique").color(weak));
                 self.skill_link(ui, u, false);
                 if self.skill_fit(u) == Fit::Other {
-                    ui.label(RichText::new("doesn't fit this target").color(WARN).size(12.0));
+                    ui.label(RichText::new("doesn't fit this target").color(pal(ui).warn).size(12.0));
                 }
             });
         }
@@ -1221,11 +1214,11 @@ impl App {
                 let how = "The meta sheet's cards for this CM and style come first (★), strongest backing first; simulated careers rank the rest.";
                 if ui.add(recommend).on_hover_text(format!("Replace all six slots with the best fits for this goal and trainee. {how}")).clicked() {
                     let picks = self.recommend_deck(true);
-                    self.planner.status = Some((self.deck_fill_message(&picks, "Recommended"), false));
+                    self.toast(self.deck_fill_message(&picks, "Recommended"), crate::ui_util::ToastKind::Success);
                 }
                 if ui.button("✨ Fill empty slots").on_hover_text(format!("Keep the cards you chose and fill the rest. {how}")).clicked() {
                     let picks = self.recommend_deck(false);
-                    self.planner.status = Some((self.deck_fill_message(&picks, "Filled"), false));
+                    self.toast(self.deck_fill_message(&picks, "Filled"), crate::ui_util::ToastKind::Success);
                 }
             });
         });
@@ -1315,7 +1308,7 @@ impl App {
             }
         }
         for w in warnings {
-            ui.label(RichText::new(w).color(WARN));
+            ui.label(RichText::new(w).color(pal(ui).warn));
         }
 
         let deck = self.deck_cards();
@@ -1407,7 +1400,7 @@ impl App {
                 ui.add(egui::TextEdit::singleline(&mut self.planner.picker_search).hint_text("🔍 Search uma or title").desired_width(260.0));
                 ui.selectable_value(&mut self.planner.picker_type, None, "All");
                 for t in ["Speed", "Stamina", "Power", "Guts", "Wit", "Pal", "Group"] {
-                    let text = RichText::new(format!("{} {t}", type_icon(t))).color(type_color_str(t));
+                    let text = RichText::new(format!("{} {t}", type_icon(t))).color(crate::ui_util::type_text(ui, t));
                     ui.selectable_value(&mut self.planner.picker_type, Some(t.to_string()), text);
                 }
             });
@@ -1581,9 +1574,9 @@ impl App {
             for (fit, title) in [(Fit::Target, "✔ Fits this target"), (Fit::General, "◯ Works anywhere"), (Fit::Other, "✖ Wrong style, distance or surface")] {
                 let Some(list) = by_fit.get(&fit) else { continue };
                 let color = match fit {
-                    Fit::Target => GOOD,
+                    Fit::Target => pal(ui).good,
                     Fit::General => p.text,
-                    Fit::Other => WARN,
+                    Fit::Other => pal(ui).warn,
                 };
                 ui.label(RichText::new(format!("{title} ({})", list.len())).strong().color(color));
                 ui.horizontal_wrapped(|ui| {
@@ -1659,7 +1652,7 @@ impl App {
                 Some(b) => format!("{spent:.0} / {b:.0} SP"),
                 None => format!("{spent:.0} SP"),
             };
-            badge(ui, text, if over { WARN } else { p.gold }).on_hover_text("Cost after the hints this deck is expected to give (career simulation), against the SP budget");
+            badge(ui, text, if over { pal(ui).warn } else { p.gold }).on_hover_text("Cost after the hints this deck is expected to give (career simulation), against the SP budget");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.checkbox(&mut self.planner.only_fitting, "Hide skills that don't fit");
                 if ui.button("✖ Clear").clicked() {
@@ -1717,7 +1710,7 @@ impl App {
             self.planner.skill_status = Some((msg, warn));
         }
         if let Some((msg, warn)) = &self.planner.skill_status {
-            ui.label(RichText::new(msg).size(12.5).color(if *warn { WARN } else { GOOD }));
+            ui.label(RichText::new(msg).size(12.5).color(if *warn { pal(ui).warn } else { pal(ui).good }));
         }
         // Where the budget and gains come from.
         ui.horizontal_wrapped(|ui| {
@@ -1742,7 +1735,7 @@ impl App {
                     .on_hover_text(self.career_explainer(c));
                 }
                 (None, None) => {
-                    ui.label(RichText::new("No career simulation (knowledge/scenarios.json missing); set a budget by hand:").size(12.5).color(WARN));
+                    ui.label(RichText::new("No career simulation (knowledge/scenarios.json missing); set a budget by hand:").size(12.5).color(pal(ui).warn));
                 }
             }
             let mut manual = self.planner.plan.sp_budget.is_some();
@@ -1812,7 +1805,7 @@ impl App {
                         self.skill_link(ui, *s, *fit == Fit::Other && *gain <= 0.05 && !meta.contains_key(s));
                     });
                     let gain_text = if simulated.is_some() && self.planner.current_skill_values(key).is_some_and(|v| v.rows.contains_key(s)) {
-                        RichText::new(format!("{gain:+.2} L")).color(if *gain > 0.05 { GOOD } else { p.weak })
+                        RichText::new(format!("{gain:+.2} L")).color(if *gain > 0.05 { pal(ui).good } else { p.weak })
                     } else {
                         RichText::new(format!("~{gain:.2} L")).color(p.weak)
                     };
@@ -2056,11 +2049,11 @@ impl App {
 
     pub(crate) fn save_plan(&mut self) {
         let Some(root) = self.root.clone() else {
-            self.planner.status = Some(("umaLord folder not found.".into(), true));
+            self.toast("umaLord folder not found.", crate::ui_util::ToastKind::Error);
             return;
         };
         let Some(trainee) = self.planner.plan.trainee.and_then(|t| self.owned_uma(t)).cloned() else {
-            self.planner.status = Some(("Pick a trainee first.".into(), true));
+            self.toast("Pick a trainee first.", crate::ui_util::ToastKind::Warn);
             return;
         };
         if self.planner.plan.title.trim().is_empty() {
@@ -2086,11 +2079,11 @@ impl App {
         let text = self.plan_markdown(kept);
         match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
             Ok(()) => {
-                self.planner.status = Some((format!("Saved {}", path.display()), false));
+                self.toast(format!("Saved {}", path.display()), crate::ui_util::ToastKind::Success);
                 self.planner.open_file = Some(path);
                 self.planner.refresh_files(Some(&root));
             }
-            Err(e) => self.planner.status = Some((format!("Couldn't save: {e}"), true)),
+            Err(e) => self.toast(format!("Couldn't save: {e}"), crate::ui_util::ToastKind::Error),
         }
     }
 

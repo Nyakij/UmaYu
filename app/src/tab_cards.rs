@@ -11,7 +11,7 @@ use crate::knowledge::{CardInfo, effect, effect_at};
 use crate::tab_umas::{FILTER_W, count_line};
 use crate::theme::pal;
 use crate::ui_util::{
-    GOOD, WARN, badge, card_explained, card_titled, draw_lb, empty_state, lb_widget, placeholder, section_label, semibold, tile_grid, tile_ring,
+    badge, card_explained, card_titled, draw_lb, empty_state, lb_widget, placeholder, section_label, semibold, tile_grid, tile_ring,
     toggle, truncate, type_color, type_icon, web_link,
 };
 use crate::{App, Jump, View};
@@ -63,7 +63,6 @@ pub(crate) struct AddCard {
     pub notes: String,
     /// Also list cards uma.guide shows ahead of their Global release.
     pub upcoming: bool,
-    pub status: Option<(String, bool)>,
     /// Card art being downloaded: the card id when it lands, or None if it failed.
     pub art_rx: Option<mpsc::Receiver<Option<u32>>>,
 }
@@ -98,11 +97,6 @@ impl App {
         self.poll_card_art();
         egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
             count_line(ui, list.len(), self.roster.cards.len(), "support cards", "Click one for details");
-            if let Some((msg, err)) = &self.cards.add.status
-                && !self.cards.add.open
-            {
-                ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
-            }
             if list.is_empty() {
                 empty_state(ui, "🔍", "No cards match", "Loosen or clear the filters on the left.");
                 return;
@@ -139,7 +133,7 @@ impl App {
                 ui.add(egui::TextEdit::singleline(&mut a.search).hint_text("🔍 Search uma, title or skill hint").desired_width(260.0));
                 ui.selectable_value(&mut a.kind, None, "All");
                 for t in ["Speed", "Stamina", "Power", "Guts", "Wit", "Pal", "Group"] {
-                    ui.selectable_value(&mut a.kind, Some(t.to_string()), RichText::new(format!("{} {t}", type_icon(t))).color(crate::ui_util::type_color_str(t)));
+                    ui.selectable_value(&mut a.kind, Some(t.to_string()), RichText::new(format!("{} {t}", type_icon(t))).color(crate::ui_util::type_text(ui, t)));
                 }
                 ui.checkbox(&mut a.upcoming, "Not on Global yet").on_hover_text("uma.guide lists some cards ahead of their Global release");
             });
@@ -233,9 +227,6 @@ impl App {
                 if ui.add(crate::ui_util::primary_button(ui, verb, 14.0)).clicked() {
                     save = true;
                 }
-                if let Some((msg, err)) = &a.status {
-                    ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
-                }
             });
             if let Some(id) = picked {
                 a.pick = Some(id);
@@ -257,7 +248,7 @@ impl App {
         if save {
             let ctx = ui.ctx().clone();
             let result = self.save_added_card(&ctx);
-            self.cards.add.status = Some(match result {
+            self.toast_flag(match result {
                 Ok(msg) => (msg, false),
                 Err(e) => (e, true),
             });
@@ -331,7 +322,7 @@ impl App {
                 self.cards.add.art_rx = None;
             }
             Ok(None) => {
-                self.cards.add.status = Some(("Saved, but the card art couldn't be downloaded; it shows as a placeholder.".into(), true));
+                self.toast("Saved, but the card art couldn't be downloaded; it shows as a placeholder.", crate::ui_util::ToastKind::Error);
                 self.cards.add.art_rx = None;
             }
             Err(mpsc::TryRecvError::Disconnected) => self.cards.add.art_rx = None,
@@ -341,7 +332,10 @@ impl App {
 
     fn card_filters(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.cards;
-        ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search card, uma or note").desired_width(f32::INFINITY));
+        let search = ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search card, uma or note").desired_width(f32::INFINITY));
+        if self.focus_search.take() {
+            search.request_focus();
+        }
         ui.add(egui::TextEdit::singleline(&mut s.hint_search).hint_text("💡 Teaches the skill…").desired_width(f32::INFINITY))
             .on_hover_text("Keep only cards that can teach a skill whose name contains this, through a hint or an event");
 
@@ -349,7 +343,7 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             for t in CardType::ALL {
                 let mut on = s.types.contains(&t);
-                let text = RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(type_color(t));
+                let text = RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(crate::ui_util::type_text(ui, t.label()));
                 if ui.toggle_value(&mut on, text).changed() {
                     toggle(&mut s.types, t, on);
                 }
@@ -467,7 +461,7 @@ impl App {
                         ui.add_space(6.0);
                     }
                     ui.horizontal(|ui| {
-                        ui.label(semibold(format!("{} {}", type_icon(t.label()), t.label()), 17.0).color(type_color(*t)));
+                        ui.label(semibold(format!("{} {}", type_icon(t.label()), t.label()), 17.0).color(crate::ui_util::type_text(ui, t.label())));
                         ui.label(RichText::new(format!("{} cards", items.len())).color(weak));
                     });
                     ui.add_space(4.0);
@@ -608,7 +602,7 @@ impl App {
                         ui.label(card.rarity.label());
                     });
                     row.col(|ui| {
-                        ui.label(RichText::new(format!("{} {}", type_icon(card.card_type.label()), card.card_type.label())).color(type_color(card.card_type)));
+                        ui.label(RichText::new(format!("{} {}", type_icon(card.card_type.label()), card.card_type.label())).color(crate::ui_util::type_text(ui, card.card_type.label())));
                     });
                     row.col(|ui| {
                         lb_widget(ui, card.lb, 5.0);
@@ -664,7 +658,7 @@ impl App {
                     ui.horizontal_wrapped(|ui| {
                         badge(ui, card.rarity.label(), p.gold);
                         badge(ui, format!("{} {}", type_icon(card.card_type.label()), card.card_type.label()), tcolor);
-                        badge(ui, if card.is_mlb() { "MLB".to_string() } else { format!("LB{}", card.lb) }, if card.is_mlb() { p.accent } else { WARN });
+                        badge(ui, if card.is_mlb() { "MLB".to_string() } else { format!("LB{}", card.lb) }, if card.is_mlb() { p.accent } else { pal(ui).warn });
                     });
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
@@ -673,7 +667,7 @@ impl App {
                     let cap = card.rarity.max_level(card.lb);
                     ui.label(format!("Level {} / {cap}", card.level));
                     if card.level < cap {
-                        ui.label(RichText::new(format!("{} levels below this LB's cap", cap - card.level)).color(WARN));
+                        ui.label(RichText::new(format!("{} levels below this LB's cap", cap - card.level)).color(pal(ui).warn));
                     }
                     if self.roster.umas.iter().any(|u| u.name == card.uma) {
                         ui.label(RichText::new(format!("Not usable when training {}.", card.uma)).size(12.0).color(p.weak));
@@ -690,7 +684,7 @@ impl App {
         ui.add_space(8.0);
 
         let Some(info) = self.info(card.id).cloned() else {
-            ui.label(RichText::new("No knowledge data for this card yet. Rebuild knowledge/data.").color(WARN));
+            ui.label(RichText::new("No knowledge data for this card yet. Rebuild knowledge/data.").color(pal(ui).warn));
             return;
         };
         let level = u32::from(card.level);
@@ -711,7 +705,7 @@ impl App {
                     ui.label(&e.name);
                     ui.label(semibold(now.map_or("—".to_string(), |v| v.to_string()), 14.0));
                     let max_text = max.map_or("—".to_string(), |v| v.to_string());
-                    ui.label(if max != now { semibold(max_text, 14.0).color(GOOD) } else { RichText::new(max_text).color(p.weak) });
+                    ui.label(if max != now { semibold(max_text, 14.0).color(pal(ui).good) } else { RichText::new(max_text).color(p.weak) });
                     ui.end_row();
                 }
             });
@@ -722,7 +716,7 @@ impl App {
                 if level >= u.level {
                     badge(ui, format!("Active · from Lv {}", u.level), p.accent);
                 } else {
-                    badge(ui, format!("Locked until Lv {}", u.level), WARN);
+                    badge(ui, format!("Locked until Lv {}", u.level), pal(ui).warn);
                 }
                 ui.add_space(4.0);
                 if !u.condition.is_empty() {

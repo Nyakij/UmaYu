@@ -102,10 +102,22 @@ the steps to plan a career, and the game words the app uses.
     tab, or set the ANTHROPIC_API_KEY environment variable.
 
 
-The settings cog at the top right holds Help, dark or light mode, four colour themes
-(Seiun Sky, Sakura, Sunset and Starry night, each with its own button colour and
-background), and a switch for the background art and chibi Seiun Sky. The app remembers
-your choices.
+The settings cog at the top right holds Help, the mode (System follows Windows, or always
+Light or Dark), four colour themes (Seiun Sky, Sakura, Sunset and Starry night, each with
+its own button colour and background), a switch for the sky and decorations behind the
+pages, and where chibi Seiun Sky appears: everywhere (small, beside each page title), on
+Home and empty pages only, or nowhere. She never covers your data. The app remembers your
+choices.
+
+Messages such as "Saved" pop up at the bottom of the window for a few seconds.
+
+Keyboard shortcuts (also listed in Help):
+- Ctrl+1 to Ctrl+4: Home, Collection, Career, Ask
+- Ctrl+F: jump to the page's search box
+- Ctrl+S: save the plan (on Career > Plan)
+- F5: reload your roster, game data and plans
+- Esc: close Help, a dialog, or the details panel
+- ?: open Help
 
 
 Your roster

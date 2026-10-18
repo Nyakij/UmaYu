@@ -9,7 +9,7 @@ use crate::data::Uma;
 use crate::knowledge::{Distance, GRADES, Style, Surface, UmaInfo, grade_rank};
 use crate::theme::pal;
 use crate::ui_util::{
-    GOLD, WARN, badge, card, card_explained, card_titled, draw_stars, empty_state, grade_badge, grade_text, placeholder, potential_badge,
+    badge, card, card_explained, card_titled, draw_stars, empty_state, grade_badge, grade_text, placeholder, potential_badge,
     section_label, semibold, stars_widget, tile_grid, tile_ring, toggle, truncate, web_link,
 };
 use crate::{App, Jump, View};
@@ -120,7 +120,10 @@ impl App {
 
     fn uma_filters(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.umas;
-        ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search name, outfit or note").desired_width(f32::INFINITY));
+        let search = ui.add(egui::TextEdit::singleline(&mut s.search).hint_text("🔍 Search name, outfit or note").desired_width(f32::INFINITY));
+        if self.focus_search.take() {
+            search.request_focus();
+        }
 
         section_label(ui, "Stars", "Star rank, 1–5★. Higher stars make an uma stronger, including her unique skill.");
         ui.horizontal(|ui| {
@@ -129,7 +132,7 @@ impl App {
                     continue;
                 }
                 let mut on = s.stars.contains(&n);
-                if ui.toggle_value(&mut on, RichText::new(format!("{n}★")).color(GOLD)).changed() {
+                if ui.toggle_value(&mut on, RichText::new(format!("{n}★")).color(pal(ui).gold)).changed() {
                     toggle(&mut s.stars, n, on);
                 }
             }
@@ -289,7 +292,7 @@ impl App {
                 ui.visuals().text_color(),
             );
             if !grades.is_empty() {
-                p.text(Pos2::new(img.center().x, img.bottom() + 43.0), Align2::CENTER_CENTER, &grades, FontId::proportional(11.0), GOLD);
+                p.text(Pos2::new(img.center().x, img.bottom() + 43.0), Align2::CENTER_CENTER, &grades, FontId::proportional(11.0), pal(ui).gold);
             }
             tile_ring(ui, img, self.umas.selected == Some(uma.id), resp.hovered(), 12);
         }
@@ -365,12 +368,12 @@ impl App {
                     });
                     row.col(|ui| {
                         let text = RichText::new(format!("P{}", uma.potential));
-                        ui.label(if uma.potential >= 5 { text.color(GOLD) } else { text });
+                        ui.label(if uma.potential >= 5 { text.color(pal(ui).gold) } else { text });
                     });
                     let apt = self.kb.umas.get(&uma.id).map(|i| i.aptitude.clone()).unwrap_or_default();
                     for g in [&apt.turf, &apt.dirt, &apt.sprint, &apt.mile, &apt.medium, &apt.long, &apt.front, &apt.pace, &apt.late, &apt.end] {
                         row.col(|ui| {
-                            ui.label(grade_text(g));
+                            ui.label(grade_text(ui, g));
                         });
                     }
                     row.col(|ui| {
@@ -417,7 +420,7 @@ impl App {
                         if uma.potential >= 5 {
                             badge(ui, "Potential 5 (maxed)", p.accent).on_hover_text("All her potential skills are unlocked");
                         } else {
-                            badge(ui, format!("Potential {} of 5", uma.potential), WARN).on_hover_text("Some of her potential skills are still locked");
+                            badge(ui, format!("Potential {} of 5", uma.potential), pal(ui).warn).on_hover_text("Some of her potential skills are still locked");
                         }
                         if let Some(i) = &info {
                             badge(ui, format!("Released {}", i.release), p.weak);
@@ -445,7 +448,7 @@ impl App {
         ui.add_space(8.0);
 
         let Some(info) = info else {
-            ui.label(RichText::new("No knowledge data for this outfit yet. Rebuild knowledge/data.").color(WARN));
+            ui.label(RichText::new("No knowledge data for this outfit yet. Rebuild knowledge/data.").color(pal(ui).warn));
             return;
         };
 
@@ -504,7 +507,7 @@ impl App {
             for lvl in levels {
                 let locked = lvl > uma.potential;
                 let title = if lvl <= 1 { "INNATE".to_string() } else { format!("POTENTIAL {lvl}{}", if locked { "  🔒 locked" } else { "" }) };
-                ui.label(RichText::new(title).size(11.0).color(if locked { WARN } else { p.weak }));
+                ui.label(RichText::new(title).size(11.0).color(if locked { pal(ui).warn } else { p.weak }));
                 ui.horizontal_wrapped(|ui| {
                     for s in info.skills.iter().filter(|s| s.potential == lvl) {
                         self.skill_link(ui, s.id, locked);

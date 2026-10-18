@@ -11,7 +11,7 @@ use crate::App;
 use crate::data::{CardType, Rarity};
 use crate::profile::{self, Profile};
 use crate::theme::pal;
-use crate::ui_util::{GOOD, WARN, card, draw_lb, draw_stars, placeholder, potential_badge, semibold, tile_grid, tile_ring, today, truncate, type_color_str, type_icon};
+use crate::ui_util::{card, draw_lb, draw_stars, placeholder, potential_badge, semibold, tile_grid, tile_ring, today, truncate, type_color_str, type_icon};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Step {
@@ -41,7 +41,6 @@ pub(crate) struct OnboardingState {
     pub path: String,
     /// A profile picked to import, waiting for the user to confirm.
     pub pending: Option<(PathBuf, Profile)>,
-    pub status: Option<(String, bool)>,
     /// The ⚙ menu's "Start over" confirmation is showing.
     pub confirm_start_over: bool,
     /// Setup went the "Load a profile" way, so its steps read Welcome › Load › Done.
@@ -61,7 +60,6 @@ impl App {
         o.step = Some(step);
         o.search.clear();
         o.selected = None;
-        o.status = None;
         match step {
             Step::Import => {
                 o.found = None;
@@ -77,7 +75,6 @@ impl App {
         self.reload_roster();
         self.planner.plan = Default::default();
         self.planner.open_file = None;
-        self.planner.status = None;
         self.planner.skill_status = None;
         self.planner.refresh_files(self.root.as_deref());
         self.planner.rank_cache.borrow_mut().clear();
@@ -175,7 +172,7 @@ impl App {
         self.open_setup(Step::Import);
         match profile::read(&path) {
             Ok(p) => self.onboarding.pending = Some((path, p)),
-            Err(e) => self.onboarding.status = Some((e, true)),
+            Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
         }
     }
 
@@ -294,7 +291,7 @@ impl App {
                 self.roster.umas.len(),
                 self.roster.cards.len(),
                 self.profile_name()
-            )).size(12.5).color(WARN));
+            )).size(12.5).color(pal(ui).warn));
         }
     }
 
@@ -318,10 +315,6 @@ impl App {
         if self.onboarding.found.is_none() {
             self.onboarding.found = Some(self.root.as_deref().map(profile::find).unwrap_or_default());
         }
-        if let Some((msg, err)) = &self.onboarding.status {
-            ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
-            ui.add_space(4.0);
-        }
         // A file picked: confirm before replacing anything.
         if let Some((path, prof)) = self.onboarding.pending.clone() {
             let mut go = false;
@@ -337,7 +330,7 @@ impl App {
                         self.profile_name(),
                         self.roster.umas.len(),
                         self.roster.cards.len()
-                    )).color(WARN));
+                    )).color(pal(ui).warn));
                 }
                 ui.horizontal(|ui| {
                     if ui.add(crate::ui_util::primary_button(ui, "📥 Load this profile", 15.0).min_size(vec2(0.0, 32.0))).clicked() {
@@ -351,11 +344,11 @@ impl App {
             if go {
                 match self.import_profile(&prof) {
                     Ok(msg) => {
-                        self.onboarding.status = Some((msg, false));
+                        self.toast(msg, crate::ui_util::ToastKind::Success);
                         self.onboarding.pending = None;
                         self.onboarding.step = Some(Step::Done);
                     }
-                    Err(e) => self.onboarding.status = Some((e, true)),
+                    Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
                 }
             }
             if cancel {
@@ -384,7 +377,7 @@ impl App {
                             ui.label(RichText::new(format!("{} in {folder}", profile::file_name(path))).size(12.0).color(p.weak));
                         }
                         Err(e) => {
-                            ui.label(RichText::new(format!("⚠ {e}")).size(12.5).color(WARN));
+                            ui.label(RichText::new(format!("⚠ {e}")).size(12.5).color(pal(ui).warn));
                         }
                     }
                 });
@@ -396,7 +389,7 @@ impl App {
                     let path = PathBuf::from(self.onboarding.path.trim().trim_matches('"'));
                     match profile::read(&path) {
                         Ok(prof) => self.onboarding.pending = Some((path, prof)),
-                        Err(e) => self.onboarding.status = Some((e, true)),
+                        Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
                     }
                 }
                 if ui.button("📂 Open the profiles folder").on_hover_text("Put a .umalord.json file here and it shows up above").clicked()
@@ -465,7 +458,7 @@ impl App {
         if let Some(id) = clicked {
             if self.owned_uma(id).is_none() {
                 if let Err(e) = self.set_uma(id, 3, 1) {
-                    self.onboarding.status = Some((e, true));
+                    self.toast(e, crate::ui_util::ToastKind::Warn);
                 }
                 self.onboarding.selected = Some(id);
             } else {
@@ -519,7 +512,7 @@ impl App {
             _ => Ok(()),
         };
         if let Err(e) = result {
-            self.onboarding.status = Some((e, true));
+            self.toast(e, crate::ui_util::ToastKind::Warn);
         }
     }
 
@@ -538,7 +531,7 @@ impl App {
             if let Some(u) = owned {
                 potential_badge(ui.painter(), img.right_bottom() - vec2(4.0, 4.0), u.potential);
                 draw_stars(ui.painter(), Pos2::new(img.center().x, img.bottom() + 9.0), u.stars, 5.5);
-                ui.painter().circle_filled(img.left_top() + vec2(12.0, 12.0), 9.0, GOOD);
+                ui.painter().circle_filled(img.left_top() + vec2(12.0, 12.0), 9.0, pal(ui).good);
                 ui.painter().text(img.left_top() + vec2(12.0, 12.0), Align2::CENTER_CENTER, "✔", FontId::proportional(11.0), Color32::WHITE);
             }
             let color = if owned.is_some() { p.text } else { p.weak };
@@ -590,7 +583,7 @@ impl App {
             ui.add_space(8.0);
             ui.selectable_value(&mut self.onboarding.kind, None, "All");
             for t in ["Speed", "Stamina", "Power", "Guts", "Wit", "Pal", "Group"] {
-                ui.selectable_value(&mut self.onboarding.kind, Some(t.to_string()), RichText::new(format!("{} {t}", type_icon(t))).color(type_color_str(t)));
+                ui.selectable_value(&mut self.onboarding.kind, Some(t.to_string()), RichText::new(format!("{} {t}", type_icon(t))).color(crate::ui_util::type_text(ui, t)));
             }
             ui.checkbox(&mut self.onboarding.show_r, "R cards").on_hover_text("R cards are rarely worth a deck slot, so they're hidden unless you have them");
         });
@@ -609,7 +602,7 @@ impl App {
         if let Some(id) = clicked {
             if self.owned_card(id).is_none() {
                 if let Err(e) = self.set_card(id, 0) {
-                    self.onboarding.status = Some((e, true));
+                    self.toast(e, crate::ui_util::ToastKind::Warn);
                 }
                 self.onboarding.selected = Some(id);
             } else {
@@ -657,7 +650,7 @@ impl App {
             _ => Ok(()),
         };
         if let Err(e) = result {
-            self.onboarding.status = Some((e, true));
+            self.toast(e, crate::ui_util::ToastKind::Warn);
         }
     }
 
@@ -676,7 +669,7 @@ impl App {
             }
             if let Some(c) = owned {
                 draw_lb(ui.painter(), Pos2::new(rect.left() + 2.0, img.bottom() + 9.0), c.lb, 5.0);
-                ui.painter().circle_filled(img.left_top() + vec2(11.0, 11.0), 8.5, GOOD);
+                ui.painter().circle_filled(img.left_top() + vec2(11.0, 11.0), 8.5, pal(ui).good);
                 ui.painter().text(img.left_top() + vec2(11.0, 11.0), Align2::CENTER_CENTER, "✔", FontId::proportional(10.5), Color32::WHITE);
             }
             let color = if owned.is_some() { p.text } else { p.weak };
@@ -691,9 +684,6 @@ impl App {
         let p = pal(ui);
         card(ui, |ui| {
             ui.label(semibold(format!("You're set up, {}", self.profile_name()), 24.0));
-            if let Some((msg, err)) = &self.onboarding.status {
-                ui.label(RichText::new(msg).color(if *err { WARN } else { GOOD }));
-            }
             ui.label(RichText::new(format!("{} umas and {} support cards are in the app.", self.roster.umas.len(), self.roster.cards.len())).size(15.0));
             ui.add_space(6.0);
             ui.label(RichText::new("Next:").color(p.weak));
@@ -737,7 +727,7 @@ impl App {
             ui.label(RichText::new("They're saved to profiles/backups first, so ⚙ → Load a profile can bring them back.").color(p.weak));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new("⚠ Back up and start over").color(Color32::WHITE)).fill(WARN.gamma_multiply(0.85))).clicked() {
+                if ui.add(egui::Button::new(RichText::new("⚠ Back up and start over").color(Color32::WHITE)).fill(pal(ui).warn.gamma_multiply(0.85))).clicked() {
                     go = true;
                 }
                 if ui.button("Cancel").clicked() {
@@ -750,9 +740,11 @@ impl App {
                 Ok(saved) => {
                     self.onboarding.name.clear();
                     self.open_setup(Step::Welcome);
-                    self.onboarding.status = saved.map(|s| (format!("Saved the old account as profiles/backups/{}.", profile::file_name(&s)), false));
+                    if let Some(s) = saved {
+                        self.toast(format!("Saved the old account as profiles/backups/{}.", profile::file_name(&s)), crate::ui_util::ToastKind::Success);
+                    }
                 }
-                Err(e) => self.onboarding.status = Some((e, true)),
+                Err(e) => self.toast(e, crate::ui_util::ToastKind::Warn),
             }
         }
         if go || cancel || modal.should_close() {

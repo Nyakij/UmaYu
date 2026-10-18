@@ -6,7 +6,7 @@ use crate::data::{CardType, Rarity, SupportCard, Uma};
 use crate::knowledge::EventPreset;
 use crate::tab_planner::{Plan, day_number};
 use crate::theme::pal;
-use crate::ui_util::{GOLD, GOOD, WARN, badge, card, card_explained, page_header, semibold, stat_row, today, type_color, type_icon};
+use crate::ui_util::{GOLD, badge, card, card_explained, page_header, semibold, stat_row, today, type_color, type_icon};
 use crate::{App, CareerTab, CollectionTab, Jump, Tab};
 
 /// Segments of a type's bar: SSR MLB, other SSR, SR MLB, other SR.
@@ -62,7 +62,22 @@ impl App {
             );
             let back = if self.roster.is_empty() { "" } else { " back" };
             let title = format!("🏠 Welcome{back}, {}", self.roster.profile.as_deref().unwrap_or("Trainer"));
-            page_header(ui, &title, &sub, |_| {});
+            if crate::theme::chibi() == crate::theme::Chibi::Off {
+                page_header(ui, &title, &sub, |_| {});
+            } else {
+                // Home's welcome is where Seiun Sky lives: beside the title, never over content.
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.add_space(14.0);
+                        ui.label(semibold(&title, crate::theme::size::XL));
+                        ui.label(RichText::new(&sub).size(13.0).color(p.weak));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        crate::ui_util::chibi(ui, 0, 92.0).on_hover_text("Seiun Sky. ⚙ Settings moves or hides her.");
+                    });
+                });
+                ui.add_space(6.0);
+            }
             if self.roster.is_empty() {
                 crate::ui_util::card(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -136,7 +151,6 @@ impl App {
                 self.tab = Tab::Collection;
                 self.collection_tab = CollectionTab::Cards;
                 self.cards.add.open = true;
-                self.cards.add.status = None;
             }
             Shortcut::Ask => self.tab = Tab::Ask,
         }
@@ -170,9 +184,9 @@ impl App {
                         }
                     });
                     if cm.confirmed {
-                        ui.label(RichText::new("✔ Course and conditions are confirmed.").size(12.5).color(GOOD));
+                        ui.label(RichText::new("✔ Course and conditions are confirmed.").size(12.5).color(pal(ui).good));
                     } else {
-                        ui.label(RichText::new("? Not announced yet: the course and conditions are Umalator's best guess and may change.").size(12.5).color(WARN));
+                        ui.label(RichText::new("? Not announced yet: the course and conditions are Umalator's best guess and may change.").size(12.5).color(pal(ui).warn));
                     }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -197,7 +211,7 @@ impl App {
             Some(note) => (format!("New plan for the {}; {note}.", cm.name), true),
             None => (format!("New plan for the {} ({}): course and conditions filled in. Next, pick a trainee.", cm.name, cm.date), false),
         };
-        self.planner.status = Some(msg);
+        self.toast_flag(msg);
         self.go_career(CareerTab::Plan);
     }
 
@@ -236,7 +250,7 @@ impl App {
             for (t, n) in &rows {
                 ui.horizontal(|ui| {
                     let color = type_color(*t);
-                    ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(color).strong()));
+                    ui.add_sized([90.0, 22.0], egui::Label::new(RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(crate::ui_util::type_text(ui, t.label())).strong()));
                     let width = (ui.available_width() - 80.0).max(120.0);
                     let (rect, resp) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
                     let painter = ui.painter();
@@ -284,7 +298,7 @@ impl App {
                 }
                 let color = type_color(t);
                 ui.horizontal_top(|ui| {
-                    ui.add_sized([90.0, 24.0], egui::Label::new(RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(color).strong()));
+                    ui.add_sized([90.0, 24.0], egui::Label::new(RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(crate::ui_util::type_text(ui, t.label())).strong()));
                     ui.horizontal_wrapped(|ui| {
                         for c in mlb {
                             let b = egui::Button::new(RichText::new(&c.uma).size(13.0))
@@ -340,7 +354,7 @@ impl App {
                 "These umas still have skills locked behind potential. Click one to see which.",
                 |ui| {
                     if below.is_empty() {
-                        ui.label(RichText::new("Every uma is at P5. Nice!").color(GOOD));
+                        ui.label(RichText::new("Every uma is at P5. Nice!").color(pal(ui).good));
                     }
                     ui.horizontal_wrapped(|ui| {
                         for u in below {

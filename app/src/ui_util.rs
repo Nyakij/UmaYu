@@ -9,16 +9,40 @@ use eframe::egui::{
 
 use crate::data::CardType;
 use crate::knowledge::grade_rank;
-use crate::theme::{SEMIBOLD, pal};
+use crate::theme::{SEMIBOLD, pal, size};
 
+/// Star fill. For gold *text*, use `pal(ui).gold`, which is darker in light mode.
 pub const GOLD: Color32 = Color32::from_rgb(250, 204, 21);
 pub const DIM: Color32 = Color32::from_gray(85);
 pub const LB_ON: Color32 = Color32::from_rgb(56, 189, 248);
-pub const WARN: Color32 = Color32::from_rgb(245, 158, 11);
-pub const GOOD: Color32 = Color32::from_rgb(34, 197, 94);
 
+/// A card type's colour, for fills (bars, swatches, placeholders). For text use `type_text`.
 pub fn type_color(t: CardType) -> Color32 {
     type_color_str(t.label())
+}
+
+/// A card type's colour for text: brighter on dark, darker on light, so it reads in both.
+pub fn type_text(ui: &egui::Ui, t: &str) -> Color32 {
+    let c = Color32::from_rgb;
+    if ui.visuals().dark_mode {
+        match t {
+            "Speed" => c(96, 165, 250),
+            "Stamina" => c(248, 113, 113),
+            "Guts" => c(244, 114, 182),
+            _ => type_color_str(t),
+        }
+    } else {
+        match t {
+            "Speed" => c(29, 78, 216),
+            "Stamina" => c(185, 28, 28),
+            "Power" => c(180, 83, 9),
+            "Guts" => c(190, 24, 93),
+            "Wit" => c(21, 128, 61),
+            "Pal" => c(146, 100, 0),
+            "Group" => c(15, 118, 110),
+            _ => c(93, 101, 114),
+        }
+    }
 }
 
 pub fn type_color_str(t: &str) -> Color32 {
@@ -71,13 +95,52 @@ pub fn page_header(ui: &mut egui::Ui, title: &str, subtitle: &str, actions: impl
     let weak = pal(ui).weak;
     ui.horizontal(|ui| {
         ui.set_min_height(30.0);
-        ui.label(semibold(title, 22.0));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
+        ui.label(semibold(title, size::XL));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            header_chibi(ui);
+            actions(ui);
+        });
     });
     if !subtitle.is_empty() {
         ui.label(RichText::new(subtitle).size(13.0).color(weak));
     }
     ui.add_space(10.0);
+}
+
+/// The six chibi Seiun Sky poses, embedded.
+pub fn chibi_image(pose: u8) -> egui::ImageSource<'static> {
+    match pose {
+        0 => egui::include_image!("../assets/chibi/seiun_102001_0011.png"),
+        1 => egui::include_image!("../assets/chibi/seiun_102001_0010.png"),
+        2 => egui::include_image!("../assets/chibi/seiun_102002_0010.png"),
+        3 => egui::include_image!("../assets/chibi/seiun_102003_0011.png"),
+        4 => egui::include_image!("../assets/chibi/seiun_102002_0011.png"),
+        _ => egui::include_image!("../assets/chibi/seiun_102003_0010.png"),
+    }
+}
+
+static POSE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The pose for the page being drawn; `App::frame` sets it per tab.
+pub fn set_pose(pose: u8) {
+    POSE.store(pose, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn pose() -> u8 {
+    POSE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Chibi Seiun Sky laid out at `size` (she takes her own space, so she never covers anything).
+pub fn chibi(ui: &mut egui::Ui, pose: u8, size: f32) -> Response {
+    ui.add(egui::Image::new(chibi_image(pose)).fit_to_exact_size(vec2(size, size)))
+}
+
+/// Small chibi at the right of a page header, when the mascot is set to show everywhere.
+/// Call it first inside the header's right-to-left section.
+pub fn header_chibi(ui: &mut egui::Ui) {
+    if crate::theme::chibi() == crate::theme::Chibi::Everywhere {
+        chibi(ui, pose(), 44.0).on_hover_text("Seiun Sky. ⚙ Settings moves or hides her.");
+    }
 }
 
 /// A row of mutually exclusive choices in one rounded track, like sub-tabs.
@@ -232,8 +295,28 @@ pub fn badge(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) -> Resp
         .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin::symmetric(8, 1))
-        .show(ui, |ui| ui.label(RichText::new(text.into()).color(color).size(12.5)))
+        .show(ui, |ui| {
+            let text_color = readable(ui, color);
+            ui.label(RichText::new(text.into()).color(text_color).size(size::SM))
+        })
         .response
+}
+
+/// `color` as text: unchanged in dark mode; in light mode darkened until it reads on a card
+/// (WCAG AA, 4.5:1), so bright accent colours still work as labels.
+pub fn readable(ui: &egui::Ui, color: Color32) -> Color32 {
+    let p = pal(ui);
+    if ui.visuals().dark_mode {
+        return color;
+    }
+    let mut c = color;
+    for _ in 0..16 {
+        if crate::theme::contrast(c, p.surface) >= 4.5 && crate::theme::contrast(c, p.bg) >= 4.5 {
+            break;
+        }
+        c = Color32::from_rgb((f32::from(c.r()) * 0.88) as u8, (f32::from(c.g()) * 0.88) as u8, (f32::from(c.b()) * 0.88) as u8);
+    }
+    c
 }
 
 /// A small label over a coloured letter tile, like the game's aptitude grades.
@@ -254,9 +337,24 @@ pub fn grade_badge(ui: &mut egui::Ui, label: &str, grade: &str) {
     });
 }
 
-/// Inline grade, e.g. in tables: the letter in its colour.
-pub fn grade_text(grade: &str) -> RichText {
-    semibold(grade, 14.0).color(grade_color(grade))
+/// Inline grade, e.g. in tables: the letter in its colour, darker in light mode so it reads.
+pub fn grade_text(ui: &egui::Ui, grade: &str) -> RichText {
+    let color = if ui.visuals().dark_mode {
+        grade_color(grade)
+    } else {
+        let c = Color32::from_rgb;
+        match grade_rank(grade) {
+            8 => c(146, 100, 0),
+            7 => c(194, 65, 12),
+            6 => c(190, 24, 93),
+            5 => c(21, 128, 61),
+            4 => c(3, 105, 161),
+            3 => c(109, 40, 217),
+            2 => c(71, 85, 105),
+            _ => c(100, 116, 139),
+        }
+    };
+    semibold(grade, size::BODY).color(color)
 }
 
 /// Colour for a skill tier, readable in both themes.
@@ -338,15 +436,51 @@ pub fn stat_tile_w(ui: &mut egui::Ui, width: f32, icon: &str, label: &str, value
         });
 }
 
-/// Empty-state message centred in the available space.
+/// Empty-state message centred in the available space: chibi Seiun Sky (or the icon, with the
+/// mascot off), a title, and what to do next.
 pub fn empty_state(ui: &mut egui::Ui, icon: &str, title: &str, body: &str) {
+    empty_state_action(ui, icon, title, body, None);
+}
+
+/// An empty state with a button for the obvious next step. Returns true when it's clicked.
+pub fn empty_state_action(ui: &mut egui::Ui, icon: &str, title: &str, body: &str, action: Option<&str>) -> bool {
     let weak = pal(ui).weak;
+    let mut clicked = false;
     ui.vertical_centered(|ui| {
-        ui.add_space(60.0);
-        ui.label(RichText::new(icon).size(40.0).color(weak));
-        ui.label(semibold(title, 17.0));
+        ui.add_space(40.0);
+        if crate::theme::chibi() == crate::theme::Chibi::Off {
+            ui.label(RichText::new(icon).size(40.0).color(weak));
+        } else {
+            chibi(ui, 5, 120.0);
+        }
+        ui.label(semibold(title, size::LG));
         ui.label(RichText::new(body).color(weak));
+        if let Some(text) = action {
+            ui.add_space(6.0);
+            clicked = ui.add(primary_button(ui, text, size::BODY)).clicked();
+        }
     });
+    clicked
+}
+
+/// A grey placeholder bar that pulses gently while background work runs.
+pub fn skeleton(ui: &mut egui::Ui, width: f32, height: f32) -> Response {
+    let p = pal(ui);
+    let (rect, resp) = ui.allocate_exact_size(vec2(width.min(ui.available_width()), height), Sense::hover());
+    let t = ui.input(|i| i.time) as f32;
+    let pulse = 0.55 + 0.25 * (t * 2.4).sin();
+    ui.painter().rect_filled(rect, CornerRadius::same(6), p.raised.gamma_multiply(pulse + 0.2));
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    resp
+}
+
+/// A few skeleton lines of decreasing width, like a paragraph loading.
+pub fn skeleton_lines(ui: &mut egui::Ui, lines: usize) {
+    let w = ui.available_width();
+    for i in 0..lines {
+        skeleton(ui, w * [1.0, 0.86, 0.64, 0.78][i % 4], 12.0);
+        ui.add_space(4.0);
+    }
 }
 
 pub fn placeholder(p: &Painter, rect: Rect, color: Color32, text: &str) {
@@ -513,6 +647,789 @@ pub fn search_combo<K: Clone + PartialEq>(
     picked
 }
 
+// ---------------------------------------------------------------------------
+// Filters: chips, sort, collapsible sections and the active-filter bar
+
+/// A pill toggle for filters, with an optional count. The caller flips its state on click.
+pub fn chip(ui: &mut egui::Ui, on: bool, label: &str, count: Option<usize>) -> Response {
+    let p = pal(ui);
+    let text_color = if on { p.text } else { p.weak };
+    let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(13.0), text_color);
+    let count_galley = count.map(|n| ui.painter().layout_no_wrap(n.to_string(), FontId::proportional(size::XS), p.weak));
+    let count_w = count_galley.as_ref().map_or(0.0, |g| g.size().x + 12.0);
+    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + count_w + 22.0, 26.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let radius = CornerRadius::same(13);
+        if on {
+            painter.rect_filled(rect, radius, p.accent.gamma_multiply(if ui.visuals().dark_mode { 0.28 } else { 0.16 }));
+            painter.rect_stroke(rect, radius, Stroke::new(1.0, p.accent_strong), StrokeKind::Inside);
+        } else {
+            painter.rect_filled(rect, radius, if resp.hovered() { p.hover } else { Color32::TRANSPARENT });
+            painter.rect_stroke(rect, radius, Stroke::new(1.0, p.border), StrokeKind::Inside);
+        }
+        painter.galley(egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y / 2.0), galley, text_color);
+        if let Some(g) = count_galley {
+            let x = rect.right() - 11.0 - g.size().x;
+            let pill = Rect::from_min_size(egui::pos2(x - 5.0, rect.center().y - 8.0), vec2(g.size().x + 10.0, 16.0));
+            painter.rect_filled(pill, CornerRadius::same(8), p.raised);
+            painter.galley(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, p.weak);
+        }
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A wrapping row of chips that toggle values in `set`: (value, label, count, hover).
+/// Returns true when the set changed.
+pub fn chip_row<T: std::hash::Hash + Eq + Copy>(ui: &mut egui::Ui, set: &mut HashSet<T>, options: &[(T, String, Option<usize>, &str)]) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for (v, label, count, hover) in options {
+            let on = set.contains(v);
+            let mut r = chip(ui, on, label, *count);
+            if !hover.is_empty() {
+                r = r.on_hover_text(*hover);
+            }
+            if r.clicked() {
+                toggle(set, *v, !on);
+                changed = true;
+            }
+        }
+    });
+    changed
+}
+
+/// A wrapping row of chips where exactly one is on: (value, label, hover). Returns true when it
+/// changed.
+pub fn single_chips<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, String, &str)]) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for (v, label, hover) in options {
+            let mut r = chip(ui, *value == *v, label, None);
+            if !hover.is_empty() {
+                r = r.on_hover_text(*hover);
+            }
+            if r.clicked() && *value != *v {
+                *value = *v;
+                changed = true;
+            }
+        }
+    });
+    changed
+}
+
+/// "Sort [field ▾] [▼]": the field to sort by and which way. Returns true when either changed.
+/// In a right-to-left row, call it with the row reversed in mind (the arrow comes first).
+pub fn sort_control<T: PartialEq + Copy>(ui: &mut egui::Ui, id_salt: &str, field: &mut T, desc: &mut bool, options: &[(T, &str)]) -> bool {
+    let p = pal(ui);
+    fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id_salt: &str, field: &mut T, options: &[(T, &str)]) -> bool {
+        let mut changed = false;
+        let current = options.iter().find(|(v, _)| v == field).map_or("", |(_, l)| *l);
+        egui::ComboBox::from_id_salt(id_salt).selected_text(current).show_ui(ui, |ui| {
+            for (v, label) in options {
+                if ui.selectable_label(*field == *v, *label).clicked() && *field != *v {
+                    *field = *v;
+                    changed = true;
+                }
+            }
+        });
+        changed
+    }
+    fn arrow(ui: &mut egui::Ui, desc: &mut bool) -> bool {
+        let (text, hover) = if *desc {
+            ("▼", "Descending: highest first (Z to A for names). Click for ascending.")
+        } else {
+            ("▲", "Ascending: lowest first (A to Z for names). Click for descending.")
+        };
+        let clicked = ui.add(egui::Button::new(text).min_size(vec2(26.0, 24.0))).on_hover_text(hover).clicked();
+        if clicked {
+            *desc = !*desc;
+        }
+        clicked
+    }
+    if ui.layout().prefer_right_to_left() {
+        let a = arrow(ui, desc);
+        let c = combo(ui, id_salt, field, options);
+        ui.label(RichText::new("Sort").color(p.weak));
+        a || c
+    } else {
+        ui.label(RichText::new("Sort").color(p.weak));
+        let c = combo(ui, id_salt, field, options);
+        arrow(ui, desc) || c
+    }
+}
+
+/// A collapsible group of filters in a sidebar: its title with an ⓘ hover, a badge with how many
+/// of its filters are on, and a Clear link. Remembers whether it's open for the session.
+pub struct FilterSection<'a> {
+    title: &'a str,
+    help: &'a str,
+    active: usize,
+    default_open: bool,
+}
+
+impl<'a> FilterSection<'a> {
+    pub fn new(title: &'a str) -> Self {
+        Self { title, help: "", active: 0, default_open: true }
+    }
+
+    pub fn help(mut self, help: &'a str) -> Self {
+        self.help = help;
+        self
+    }
+
+    /// How many of this section's filters are on.
+    pub fn active(mut self, n: usize) -> Self {
+        self.active = n;
+        self
+    }
+
+    /// Start folded.
+    pub fn closed(mut self) -> Self {
+        self.default_open = false;
+        self
+    }
+
+    /// Draws the section. Returns true when its Clear was clicked.
+    pub fn show(self, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) -> bool {
+        let p = pal(ui);
+        let id = ui.make_persistent_id(("filter_section", self.title));
+        let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(self.default_open);
+        let mut clear = false;
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            let title = format!("{} {}", if open { "▾" } else { "▸" }, self.title.to_uppercase());
+            let r = ui.add(egui::Label::new(semibold(title, size::XS).color(p.weak)).sense(Sense::click()).selectable(false));
+            if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                open = !open;
+            }
+            if !self.help.is_empty() {
+                ui.add(egui::Label::new(RichText::new("ⓘ").size(size::XS).color(p.weak)).selectable(false)).on_hover_text(self.help);
+            }
+            if self.active > 0 {
+                count_badge(ui, self.active);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let b = egui::Button::new(RichText::new("Clear").size(size::XS).color(p.link)).frame(false);
+                    if ui.add(b).on_hover_text("Turn off this section's filters").clicked() {
+                        clear = true;
+                    }
+                });
+            }
+        });
+        ui.data_mut(|d| d.insert_temp(id, open));
+        if open {
+            ui.add_space(2.0);
+            add(ui);
+        }
+        clear
+    }
+}
+
+/// A small round number in the accent colour, e.g. how many filters are on.
+pub fn count_badge(ui: &mut egui::Ui, n: usize) -> Response {
+    let p = pal(ui);
+    let text = n.to_string();
+    let galley = ui.painter().layout_no_wrap(text, FontId::new(size::XS, FontFamily::Name(SEMIBOLD.into())), p.on_accent);
+    let (rect, resp) = ui.allocate_exact_size(vec2((galley.size().x + 10.0).max(18.0), 18.0), Sense::hover());
+    ui.painter().rect_filled(rect, CornerRadius::same(9), p.accent);
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
+    resp
+}
+
+/// What the active-filter bar asks for.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FilterBarAction {
+    /// Turn off the filter at this index of the list passed in.
+    Remove(usize),
+    ResetAll,
+}
+
+/// The filters that are on, as removable chips ("Long ≥ A ✕"), then "Reset all (n)". Draws
+/// nothing when none is on.
+pub fn active_filter_bar(ui: &mut egui::Ui, active: &[String]) -> Option<FilterBarAction> {
+    if active.is_empty() {
+        return None;
+    }
+    let p = pal(ui);
+    let mut out = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for (i, label) in active.iter().enumerate() {
+            if chip(ui, true, &format!("{label}  ✕"), None).on_hover_text("Remove this filter").clicked() {
+                out = Some(FilterBarAction::Remove(i));
+            }
+        }
+        let reset = egui::Button::new(RichText::new(format!("Reset all ({})", active.len())).size(size::SM).color(p.link)).frame(false);
+        if ui.add(reset).on_hover_text("Turn off every filter").clicked() {
+            out = Some(FilterBarAction::ResetAll);
+        }
+    });
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Tables
+
+/// One column of a `DataTable`.
+#[derive(Clone)]
+pub struct TableCol {
+    /// Stable name: for sorting, the Columns menu and settings.json.
+    pub key: &'static str,
+    pub title: String,
+    /// The full name or an explanation, shown when the header is hovered.
+    pub hover: String,
+    pub width: egui_extras::Column,
+    pub align: egui::Align,
+    pub sortable: bool,
+    /// Sort highest first the first time this column is clicked (numbers, grades).
+    pub desc_first: bool,
+    /// Listed in the Columns menu, so it can be hidden.
+    pub optional: bool,
+    /// Hidden until the user turns it on.
+    pub hidden: bool,
+}
+
+impl TableCol {
+    pub fn new(key: &'static str, title: impl Into<String>) -> Self {
+        Self {
+            key,
+            title: title.into(),
+            hover: String::new(),
+            width: egui_extras::Column::auto(),
+            align: egui::Align::Min,
+            sortable: false,
+            desc_first: false,
+            optional: false,
+            hidden: false,
+        }
+    }
+
+    pub fn width(mut self, width: egui_extras::Column) -> Self {
+        self.width = width;
+        self
+    }
+
+    /// Right-aligned, for numbers.
+    pub fn right(mut self) -> Self {
+        self.align = egui::Align::Max;
+        self
+    }
+
+    /// Centred, for grades, stars and badges.
+    pub fn center(mut self) -> Self {
+        self.align = egui::Align::Center;
+        self
+    }
+
+    pub fn hover(mut self, text: impl Into<String>) -> Self {
+        self.hover = text.into();
+        self
+    }
+
+    /// Sortable, lowest first on the first click (names).
+    pub fn sort_asc(mut self) -> Self {
+        self.sortable = true;
+        self.desc_first = false;
+        self
+    }
+
+    /// Sortable, highest first on the first click (numbers, grades).
+    pub fn sort_desc(mut self) -> Self {
+        self.sortable = true;
+        self.desc_first = true;
+        self
+    }
+
+    /// Can be hidden from the Columns menu; `hidden` starts it hidden.
+    pub fn optional(mut self, hidden: bool) -> Self {
+        self.optional = true;
+        self.hidden = hidden;
+        self
+    }
+}
+
+/// Which column a table is sorted by, and which way.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TableSort {
+    pub key: &'static str,
+    pub desc: bool,
+}
+
+impl TableSort {
+    /// A header was clicked: the same column flips direction, another starts its own way.
+    pub fn click(&mut self, col: &TableCol) {
+        if self.key == col.key {
+            self.desc = !self.desc;
+        } else {
+            self.key = col.key;
+            self.desc = col.desc_first;
+        }
+    }
+}
+
+/// What happened in a `DataTable` this frame.
+#[derive(Default, Debug)]
+pub struct TableOut {
+    /// A row was clicked.
+    pub clicked: Option<usize>,
+    /// A header was clicked and the sort changed: re-sort the rows.
+    pub sorted: bool,
+}
+
+/// The app's one table style: semibold headers in the weak colour, sortable headers with ▲/▼,
+/// per-column alignment, rows with every cell vertically centred, a hover highlight, and an
+/// accent bar on the selected row. Optional columns can be hidden with `columns_menu`.
+pub struct DataTable<'a> {
+    id: &'a str,
+    cols: &'a [TableCol],
+    sort: Option<&'a mut TableSort>,
+    row_height: f32,
+    selected: Option<usize>,
+}
+
+impl<'a> DataTable<'a> {
+    pub fn new(id: &'a str, cols: &'a [TableCol]) -> Self {
+        Self { id, cols, sort: None, row_height: 34.0, selected: None }
+    }
+
+    pub fn sort(mut self, sort: &'a mut TableSort) -> Self {
+        self.sort = Some(sort);
+        self
+    }
+
+    pub fn row_height(mut self, h: f32) -> Self {
+        self.row_height = h;
+        self
+    }
+
+    /// The row to mark as selected.
+    pub fn selected(mut self, row: Option<usize>) -> Self {
+        self.selected = row;
+        self
+    }
+
+    /// Draws the table; `cell(ui, row, key)` draws one cell.
+    pub fn show(self, ui: &mut egui::Ui, rows: usize, mut cell: impl FnMut(&mut egui::Ui, usize, &str)) -> TableOut {
+        let p = pal(ui);
+        let hidden = hidden_columns(ui.ctx(), self.id, self.cols);
+        let visible: Vec<&TableCol> = self.cols.iter().filter(|c| !hidden.contains(c.key)).collect();
+        let current = self.sort.as_deref().copied();
+        let mut clicked_col: Option<&TableCol> = None;
+        let mut out = TableOut::default();
+        let mut builder = egui_extras::TableBuilder::new(ui)
+            .id_salt(self.id)
+            .striped(true)
+            .sense(Sense::click())
+            .auto_shrink([false, false])
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+        for c in &visible {
+            builder = builder.column(c.width);
+        }
+        let selected = self.selected;
+        let row_height = self.row_height;
+        builder
+            .header(30.0, |mut header| {
+                for c in &visible {
+                    header.col(|ui| {
+                        with_align(ui, c.align, |ui| {
+                            let on = current.is_some_and(|s| s.key == c.key);
+                            let arrow = match current {
+                                Some(s) if s.key == c.key => {
+                                    if s.desc {
+                                        " ▼"
+                                    } else {
+                                        " ▲"
+                                    }
+                                }
+                                _ => "",
+                            };
+                            let text = semibold(format!("{}{arrow}", c.title), size::SM).color(if on { p.text } else { p.weak });
+                            let label = egui::Label::new(text).selectable(false).truncate();
+                            if c.sortable {
+                                let mut hover = c.hover.clone();
+                                if !hover.is_empty() {
+                                    hover.push_str("\n\n");
+                                }
+                                hover.push_str(&format!("Click to sort by {}.", c.title.to_lowercase()));
+                                let r = ui.add(label.sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(hover);
+                                if r.clicked() {
+                                    clicked_col = Some(*c);
+                                }
+                            } else {
+                                let r = ui.add(label);
+                                if !c.hover.is_empty() {
+                                    r.on_hover_text(&c.hover);
+                                }
+                            }
+                        });
+                    });
+                }
+            })
+            .body(|body| {
+                body.rows(row_height, rows, |mut row| {
+                    let i = row.index();
+                    let is_selected = selected == Some(i);
+                    row.set_selected(is_selected);
+                    for (n, c) in visible.iter().enumerate() {
+                        row.col(|ui| {
+                            if is_selected && n == 0 {
+                                let r = ui.max_rect();
+                                let bar = Rect::from_min_max(egui::pos2(r.left() - 4.0, r.top() + 4.0), egui::pos2(r.left() - 1.0, r.bottom() - 4.0));
+                                ui.painter().rect_filled(bar, CornerRadius::same(2), p.accent);
+                            }
+                            with_align(ui, c.align, |ui| cell(ui, i, c.key));
+                        });
+                    }
+                    if row.response().clicked() {
+                        out.clicked = Some(i);
+                    }
+                });
+            });
+        if let (Some(col), Some(sort)) = (clicked_col, self.sort) {
+            sort.click(col);
+            out.sorted = true;
+        }
+        out
+    }
+}
+
+/// Lay a cell's contents out left, centred or right, always vertically centred.
+fn with_align(ui: &mut egui::Ui, align: egui::Align, add: impl FnOnce(&mut egui::Ui)) {
+    let layout = match align {
+        egui::Align::Min => egui::Layout::left_to_right(egui::Align::Center),
+        egui::Align::Center => egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+        egui::Align::Max => egui::Layout::right_to_left(egui::Align::Center),
+    };
+    ui.with_layout(layout, add);
+}
+
+/// The optional columns a table has hidden: settings.json's `columns.<table>`, read once a
+/// session, else the columns that start hidden.
+pub fn hidden_columns(ctx: &egui::Context, table: &str, cols: &[TableCol]) -> HashSet<String> {
+    let id = egui::Id::unique(("table_hidden", table));
+    if let Some(h) = ctx.data(|d| d.get_temp::<HashSet<String>>(id)) {
+        return h;
+    }
+    let saved = crate::settings::get("columns").and_then(|v| v.get(table).cloned()).and_then(|v| serde_json::from_value::<Vec<String>>(v).ok());
+    let hidden: HashSet<String> = match saved {
+        Some(keys) => keys.into_iter().filter(|k| cols.iter().any(|c| c.optional && c.key == k)).collect(),
+        None => cols.iter().filter(|c| c.optional && c.hidden).map(|c| c.key.to_string()).collect(),
+    };
+    ctx.data_mut(|d| d.insert_temp(id, hidden.clone()));
+    hidden
+}
+
+fn set_hidden_columns(ctx: &egui::Context, table: &str, hidden: HashSet<String>) {
+    let mut keys: Vec<&String> = hidden.iter().collect();
+    keys.sort();
+    let mut all = crate::settings::get("columns").filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+    all[table] = serde_json::json!(keys);
+    crate::settings::set("columns", all);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("table_hidden", table)), hidden));
+}
+
+/// "☰ Columns": tick which optional columns a table shows. Saved in settings.json.
+pub fn columns_menu(ui: &mut egui::Ui, table: &str, cols: &[TableCol]) {
+    let mut hidden = hidden_columns(ui.ctx(), table, cols);
+    let mut changed = false;
+    ui.menu_button("☰ Columns", |ui| {
+        for c in cols.iter().filter(|c| c.optional) {
+            let mut on = !hidden.contains(c.key);
+            let mut r = ui.checkbox(&mut on, &c.title);
+            if !c.hover.is_empty() {
+                r = r.on_hover_text(&c.hover);
+            }
+            if r.changed() {
+                toggle(&mut hidden, c.key.to_string(), !on);
+                changed = true;
+            }
+        }
+    })
+    .response
+    .on_hover_text("Show or hide columns");
+    if changed {
+        set_hidden_columns(ui.ctx(), table, hidden);
+    }
+}
+
+/// Rows as CSV (RFC 4180): a field with a comma, quote or line break is quoted.
+pub fn to_csv(rows: &[Vec<String>]) -> String {
+    let field = |f: &String| {
+        if f.contains([',', '"', '\n', '\r']) { format!("\"{}\"", f.replace('"', "\"\"")) } else { f.clone() }
+    };
+    rows.iter().map(|r| r.iter().map(field).collect::<Vec<_>>().join(",")).map(|l| l + "\r\n").collect()
+}
+
+/// A table's visible columns as CSV, headers first; `text(row, key)` gives a cell's text.
+pub fn table_csv(ctx: &egui::Context, table: &str, cols: &[TableCol], rows: usize, text: impl Fn(usize, &str) -> String) -> String {
+    let hidden = hidden_columns(ctx, table, cols);
+    let visible: Vec<&TableCol> = cols.iter().filter(|c| !hidden.contains(c.key) && !c.title.is_empty()).collect();
+    let mut out = vec![visible.iter().map(|c| c.title.clone()).collect::<Vec<_>>()];
+    out.extend((0..rows).map(|r| visible.iter().map(|c| text(r, c.key)).collect()));
+    to_csv(&out)
+}
+
+/// A value to sort table rows by: numbers numerically, text ignoring case, with runs of digits
+/// compared as numbers ("Lv 9" before "Lv 10").
+#[derive(Clone, Debug)]
+pub enum SortKey {
+    Num(f64),
+    Text(String),
+}
+
+impl SortKey {
+    pub fn cmp(&self, other: &SortKey) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (SortKey::Num(a), SortKey::Num(b)) => a.total_cmp(b),
+            (SortKey::Text(a), SortKey::Text(b)) => natural_cmp(a, b),
+            (SortKey::Num(_), SortKey::Text(_)) => Ordering::Less,
+            (SortKey::Text(_), SortKey::Num(_)) => Ordering::Greater,
+        }
+    }
+}
+
+/// Compare text ignoring case, with digit runs compared by value.
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let take = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut s = String::new();
+                    while let Some(c) = it.peek().copied().filter(char::is_ascii_digit) {
+                        s.push(c);
+                        it.next();
+                    }
+                    s.trim_start_matches('0').to_string()
+                };
+                let (na, nb) = (take(&mut a), take(&mut b));
+                let o = na.len().cmp(&nb.len()).then_with(|| na.cmp(&nb));
+                if o.is_ne() {
+                    return o;
+                }
+            }
+            (Some(x), Some(y)) => {
+                let o = x.to_lowercase().cmp(y.to_lowercase());
+                if o.is_ne() {
+                    return o;
+                }
+                a.next();
+                b.next();
+            }
+        }
+    }
+}
+
+/// Sort rows by a key, highest or lowest first. Stable: rows with equal keys keep their order.
+pub fn sort_rows<T>(rows: &mut [T], desc: bool, key: impl Fn(&T) -> SortKey) {
+    rows.sort_by(|a, b| {
+        let o = key(a).cmp(&key(b));
+        if desc { o.reverse() } else { o }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Toasts: short messages that confirm or warn, stacked at the bottom centre.
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ToastKind {
+    Info,
+    Success,
+    Warn,
+    Error,
+}
+
+/// What a toast's button does; the app carries it out (`App::toast_action`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ToastAction {
+    /// Open a file or folder with Windows.
+    Open(std::path::PathBuf),
+    /// Undo the change the toast reported.
+    Undo,
+}
+
+#[derive(Clone)]
+struct Toast {
+    text: String,
+    kind: ToastKind,
+    action: Option<(String, ToastAction)>,
+    /// Seconds it has been shown (hovering pauses it).
+    shown: f64,
+    last: Option<f64>,
+}
+
+fn toast_id() -> egui::Id {
+    egui::Id::unique("umalord_toasts")
+}
+
+/// Show a short message at the bottom of the window for a few seconds.
+pub fn toast(ctx: &egui::Context, text: impl Into<String>, kind: ToastKind) {
+    push_toast(ctx, Toast { text: text.into(), kind, action: None, shown: 0.0, last: None });
+}
+
+/// A toast with a button, e.g. "Open" or "Undo".
+pub fn toast_action(ctx: &egui::Context, text: impl Into<String>, kind: ToastKind, label: &str, action: ToastAction) {
+    push_toast(ctx, Toast { text: text.into(), kind, action: Some((label.to_string(), action)), shown: 0.0, last: None });
+}
+
+/// A result as a toast: success for `Ok`, an error for `Err`.
+pub fn toast_result(ctx: &egui::Context, result: Result<String, String>) {
+    match result {
+        Ok(m) => toast(ctx, m, ToastKind::Success),
+        Err(e) => toast(ctx, e, ToastKind::Error),
+    }
+}
+
+fn push_toast(ctx: &egui::Context, t: Toast) {
+    ctx.data_mut(|d| {
+        let list = d.get_temp_mut_or_default::<Vec<Toast>>(toast_id());
+        // The same message again just restarts its timer.
+        list.retain(|x| x.text != t.text);
+        list.push(t);
+        let excess = list.len().saturating_sub(4);
+        list.drain(..excess);
+    });
+    ctx.request_repaint();
+}
+
+/// The messages showing now, oldest first (for tests).
+pub fn toasts_now(ctx: &egui::Context) -> Vec<(String, ToastKind)> {
+    ctx.data(|d| d.get_temp::<Vec<Toast>>(toast_id())).unwrap_or_default().into_iter().map(|t| (t.text, t.kind)).collect()
+}
+
+/// Draw the toasts over everything; returns the action of a toast button clicked this frame.
+pub fn show_toasts(ctx: &egui::Context) -> Option<ToastAction> {
+    let mut list: Vec<Toast> = ctx.data(|d| d.get_temp(toast_id())).unwrap_or_default();
+    if list.is_empty() {
+        return None;
+    }
+    let now = ctx.input(|i| i.time);
+    let mut picked = None;
+    let mut closed = Vec::new();
+    let resp = egui::Area::new(egui::Id::unique("toast_area"))
+        .order(egui::Order::Foreground)
+        .anchor(Align2::CENTER_BOTTOM, vec2(0.0, -44.0))
+        .interactable(true)
+        .show(ctx, |ui| {
+            let p = pal(ui);
+            ui.spacing_mut().item_spacing.y = 8.0;
+            for (i, t) in list.iter().enumerate() {
+                let life = toast_life(t);
+                let fade = ((life - t.shown) / 0.35).clamp(0.0, 1.0) as f32;
+                ui.scope(|ui| {
+                    ui.multiply_opacity(fade);
+                    let (color, icon) = match t.kind {
+                        ToastKind::Info => (p.accent_strong, "ℹ"),
+                        ToastKind::Success => (p.good, "✔"),
+                        ToastKind::Warn => (p.warn, "⚠"),
+                        ToastKind::Error => (p.bad, "✖"),
+                    };
+                    egui::Frame::new()
+                        .fill(p.surface)
+                        .stroke(Stroke::new(1.0, color.gamma_multiply(0.7)))
+                        .corner_radius(CornerRadius::same(10))
+                        .inner_margin(Margin::symmetric(14, 9))
+                        .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(60) })
+                        .show(ui, |ui| {
+                            ui.set_max_width(560.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(icon).size(size::MD).color(color));
+                                ui.add(egui::Label::new(RichText::new(&t.text).color(p.text)).wrap());
+                                if let Some((label, action)) = &t.action
+                                    && ui.add(egui::Button::new(semibold(label.as_str(), size::BODY).color(p.link)).frame(false)).clicked()
+                                {
+                                    picked = Some(action.clone());
+                                    closed.push(i);
+                                }
+                                if ui.add(egui::Button::new(RichText::new("✕").color(p.weak)).frame(false)).on_hover_text("Dismiss").clicked() {
+                                    closed.push(i);
+                                }
+                            });
+                        });
+                });
+            }
+        });
+    let paused = resp.response.contains_pointer();
+    for (i, t) in list.iter_mut().enumerate() {
+        if !paused && let Some(last) = t.last {
+            t.shown += (now - last).clamp(0.0, 0.25);
+        }
+        t.last = Some(now);
+        if t.shown >= toast_life(t) {
+            closed.push(i);
+        }
+    }
+    let mut i = 0;
+    list.retain(|_| {
+        i += 1;
+        !closed.contains(&(i - 1))
+    });
+    ctx.data_mut(|d| d.insert_temp(toast_id(), list));
+    ctx.request_repaint_after(std::time::Duration::from_millis(60));
+    picked
+}
+
+/// How long a toast stays: longer for problems and for ones with a button.
+fn toast_life(t: &Toast) -> f64 {
+    match (t.kind, t.action.is_some()) {
+        (_, true) => 8.0,
+        (ToastKind::Warn | ToastKind::Error, _) => 6.0,
+        _ => 4.0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stepper
+
+/// Numbered steps joined by a line; finished steps show ✔. Returns a finished step that was
+/// clicked, to go back to it.
+pub fn stepper(ui: &mut egui::Ui, steps: &[&str], at: usize) -> Option<usize> {
+    let p = pal(ui);
+    let n = steps.len().max(1);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), Sense::hover());
+    let seg = rect.width() / n as f32;
+    let cy = rect.top() + 13.0;
+    let center = |i: usize| egui::pos2(rect.left() + seg * (i as f32 + 0.5), cy);
+    let painter = ui.painter();
+    for i in 0..n.saturating_sub(1) {
+        let color = if i < at { p.accent } else { p.border };
+        painter.line_segment([center(i) + vec2(16.0, 0.0), center(i + 1) - vec2(16.0, 0.0)], Stroke::new(2.0, color));
+    }
+    let mut clicked = None;
+    for (i, label) in steps.iter().enumerate() {
+        let c = center(i);
+        let bold = FontId::new(size::SM, FontFamily::Name(SEMIBOLD.into()));
+        if i < at {
+            painter.circle_filled(c, 12.0, p.accent);
+            painter.text(c, Align2::CENTER_CENTER, "✔", FontId::proportional(size::SM), p.on_accent);
+        } else if i == at {
+            painter.circle(c, 12.0, p.surface, Stroke::new(2.0, p.accent));
+            painter.text(c, Align2::CENTER_CENTER, (i + 1).to_string(), bold.clone(), p.accent_strong);
+        } else {
+            painter.circle(c, 12.0, p.surface, Stroke::new(1.0, p.border));
+            painter.text(c, Align2::CENTER_CENTER, (i + 1).to_string(), bold.clone(), p.weak);
+        }
+        let text_color = if i <= at { p.text } else { p.weak };
+        let font = if i == at { bold } else { FontId::proportional(size::SM) };
+        painter.text(c + vec2(0.0, 26.0), Align2::CENTER_CENTER, *label, font, text_color);
+        if i < at {
+            let hit = Rect::from_center_size(c + vec2(0.0, 12.0), vec2(seg.min(140.0), 44.0));
+            let r = ui.interact(hit, ui.make_persistent_id(("step", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("Back to {label}"));
+            if r.clicked() {
+                clicked = Some(i);
+            }
+        }
+    }
+    clicked
+}
+
 /// Today's date (UTC) as YYYY-MM-DD, without a date crate.
 pub fn today() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -570,6 +1487,99 @@ mod tests {
         assert_eq!(cleared, open, "clearing the search should bring the rows back");
         assert_eq!(none, 0);
         assert_eq!(back, open, "clearing a search with no matches should bring the rows back");
+    }
+
+    #[test]
+    fn csv_quotes_what_needs_it() {
+        let rows = vec![
+            vec!["Card".to_string(), "Note".to_string()],
+            vec!["Kitasan Black".to_string(), "MLB, Lv 50".to_string()],
+            vec!["Say \"hi\"".to_string(), "two\nlines".to_string()],
+        ];
+        assert_eq!(super::to_csv(&rows), "Card,Note\r\nKitasan Black,\"MLB, Lv 50\"\r\n\"Say \"\"hi\"\"\",\"two\nlines\"\r\n");
+    }
+
+    #[test]
+    fn sorting_is_stable_both_ways() {
+        use super::{SortKey, sort_rows};
+        let mut rows = vec![("b", 2.0), ("a", 1.0), ("c", 2.0), ("d", 3.0)];
+        sort_rows(&mut rows, true, |r| SortKey::Num(r.1));
+        assert_eq!(rows.iter().map(|r| r.0).collect::<String>(), "dbca", "ties keep their order");
+        sort_rows(&mut rows, false, |r| SortKey::Num(r.1));
+        assert_eq!(rows.iter().map(|r| r.0).collect::<String>(), "abcd");
+        let mut names = vec!["oguri Cap", "Lv 10", "Agnes", "Lv 9", "lv 9"];
+        sort_rows(&mut names, false, |n| SortKey::Text(n.to_string()));
+        assert_eq!(names, ["Agnes", "Lv 9", "lv 9", "Lv 10", "oguri Cap"], "case-insensitive, numbers by value");
+    }
+
+    #[test]
+    fn table_sort_header_clicks() {
+        let name = super::TableCol::new("name", "Uma").sort_asc();
+        let stars = super::TableCol::new("stars", "Stars").sort_desc();
+        let mut sort = super::TableSort { key: "name", desc: false };
+        sort.click(&name);
+        assert_eq!(sort, super::TableSort { key: "name", desc: true }, "same column flips");
+        sort.click(&stars);
+        assert_eq!(sort, super::TableSort { key: "stars", desc: true }, "a number column starts highest first");
+        sort.click(&name);
+        assert_eq!(sort, super::TableSort { key: "name", desc: false }, "a name column starts A to Z");
+    }
+
+    /// Toasts stack, the same message doesn't repeat, and they go away by themselves.
+    #[test]
+    fn toasts_stack_and_expire() {
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let mut t = 0.0;
+        let mut frame = |dt: f64| {
+            t += dt;
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), ..Default::default() };
+            let _ = ctx.run_ui(input, |ui| {
+                super::show_toasts(ui.ctx());
+            });
+        };
+        super::toast(&ctx, "Saved", super::ToastKind::Success);
+        super::toast(&ctx, "Saved", super::ToastKind::Success);
+        super::toast(&ctx, "Couldn't save", super::ToastKind::Error);
+        frame(0.0);
+        assert_eq!(super::toasts_now(&ctx).len(), 2);
+        for _ in 0..35 {
+            frame(0.2);
+        }
+        // After 6 s the success is gone; the error stays its 6 s, then goes too.
+        assert!(super::toasts_now(&ctx).is_empty(), "{:?}", super::toasts_now(&ctx));
+    }
+
+    /// The new widgets draw without panicking, headless.
+    #[test]
+    fn widgets_draw() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx, crate::theme::Mode::Light);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+        let cols = vec![
+            super::TableCol::new("name", "Uma").sort_asc(),
+            super::TableCol::new("lv", "Level").right().sort_desc(),
+            super::TableCol::new("note", "Notes").optional(true),
+        ];
+        let mut sort = super::TableSort { key: "name", desc: false };
+        let mut set = std::collections::HashSet::from([1]);
+        let mut one = 0;
+        let (mut field, mut desc) = (0, true);
+        for _ in 0..2 {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let _ = ctx.run_ui(input, |ui| {
+                super::chip_row(ui, &mut set, &[(1, "5★".into(), Some(3), "Five stars"), (2, "4★".into(), None, "")]);
+                super::single_chips(ui, &mut one, &[(0, "Any".into(), ""), (1, "P5".into(), "")]);
+                ui.horizontal(|ui| super::sort_control(ui, "s", &mut field, &mut desc, &[(0, "Stars"), (1, "Name")]));
+                super::FilterSection::new("Stars").help("How many").active(1).show(ui, |ui| _ = ui.label("inside"));
+                super::active_filter_bar(ui, &["Long ≥ A".to_string()]);
+                super::stepper(ui, &["Welcome", "You", "Umas", "Cards", "Done"], 2);
+                super::skeleton_lines(ui, 2);
+                super::DataTable::new("t", &cols).sort(&mut sort).selected(Some(1)).show(ui, 3, |ui, r, key| _ = ui.label(format!("{key} {r}")));
+            });
+        }
+        let csv = super::table_csv(&ctx, "t", &cols, 2, |r, k| format!("{k}{r}"));
+        assert!(csv.starts_with("Uma,Level"), "{csv}");
     }
 
     #[test]
