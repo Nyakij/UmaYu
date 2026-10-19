@@ -104,7 +104,9 @@ fn section<'a>(md: &'a str, heading: &str) -> Option<&'a str> {
 
 /// The Glossary table: Term | Meaning | Source.
 pub fn parse_terms(md: &str) -> Vec<Term> {
-    let Some(text) = section(md, "Glossary") else { return Vec::new() };
+    // A Windows checkout (and the release zip built from one) has CRLF line endings.
+    let md = md.replace("\r\n", "\n");
+    let Some(text) = section(&md, "Glossary") else { return Vec::new() };
     let Some(table) = crate::data::tables(text).into_iter().next() else { return Vec::new() };
     let col = |name: &str| table.headers.iter().position(|h| h.eq_ignore_ascii_case(name));
     let (Some(t), Some(m)) = (col("Term"), col("Meaning")) else { return Vec::new() };
@@ -122,7 +124,8 @@ pub fn parse_terms(md: &str) -> Vec<Term> {
 
 /// The "Did you know?" list: "- tip [source]".
 pub fn parse_tips(md: &str) -> Vec<Tip> {
-    let Some(text) = section(md, "Did you know?") else { return Vec::new() };
+    let md = md.replace("\r\n", "\n");
+    let Some(text) = section(&md, "Did you know?") else { return Vec::new() };
     text.lines()
         .filter_map(|l| l.trim().strip_prefix("- "))
         .filter_map(|l| {
@@ -147,6 +150,10 @@ mod tests {
         assert_eq!(terms[1], Term { term: "Rushed".into(), meaning: "Burns HP.".into(), source: "GameTora, Race Mechanics".into() });
         let tips = parse_tips(md);
         assert_eq!(tips, vec![Tip { text: "Past 1200 a stat counts half.".into(), source: "GameTora, Race Mechanics Handbook".into() }, Tip { text: "No source here".into(), source: String::new() }]);
+        // The same file with Windows line endings, as a CRLF checkout has it.
+        let crlf = md.replace('\n', "\r\n");
+        assert_eq!(parse_terms(&crlf), terms);
+        assert_eq!(parse_tips(&crlf), tips);
     }
 
     /// The real files: every glossary term and tip has a source; the tier list covers the
