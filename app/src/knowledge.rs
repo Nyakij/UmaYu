@@ -305,6 +305,10 @@ pub struct SkillInfo {
     pub alt: Option<AltActivation>,
     #[serde(default)]
     pub summary: String,
+    /// Evaluation points: what the skill adds to an uma's rating (uma.guide's data; purple skills
+    /// take points off).
+    #[serde(default)]
+    pub grade: i32,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -672,6 +676,11 @@ pub struct Knowledge {
     pub scenarios: Option<crate::career::Scenarios>,
     /// The community PvP meta sheet (`pvp_meta.json`).
     pub pvp_meta: Option<crate::meta::PvpMeta>,
+    /// The community skill tier list (`skill_tiers.json`).
+    pub skill_tiers: Option<crate::notes::SkillTiers>,
+    /// The sourced glossary and tips from `knowledge/mechanics.md`.
+    pub terms: Vec<crate::notes::Term>,
+    pub tips: Vec<crate::notes::Tip>,
     /// When `umalator.json` (the simulator's skills, courses and CM presets) was built.
     pub umalator_built: Option<String>,
     pub built: Option<String>,
@@ -697,6 +706,9 @@ impl Knowledge {
             },
         };
         k.scenarios = crate::career::Scenarios::load(Some(root));
+        let mechanics = std::fs::read_to_string(root.join("knowledge").join("mechanics.md")).unwrap_or_default();
+        k.terms = crate::notes::parse_terms(&mechanics);
+        k.tips = crate::notes::parse_tips(&mechanics);
         k
     }
 
@@ -715,6 +727,7 @@ impl Knowledge {
         k.umalator_built = Some(umalator.built).filter(|b| !b.is_empty());
         k.cm_schedule = read(dir, "cm_schedule.json").unwrap_or_default();
         k.pvp_meta = read(dir, "pvp_meta.json").ok();
+        k.skill_tiers = crate::notes::SkillTiers::load(&dir.join("skill_tiers.json"));
         Ok(k)
     }
 
@@ -774,6 +787,9 @@ impl Knowledge {
             cm_schedule: Vec::new(),
             scenarios: None,
             pvp_meta: None,
+            skill_tiers: None,
+            terms: Vec::new(),
+            tips: Vec::new(),
             umalator_built: None,
             built,
             error: None,
@@ -881,6 +897,7 @@ mod tests {
             cooldown: 0.0,
             alt: None,
             summary: String::new(),
+            grade: 0,
         };
         let t = s.tags();
         assert_eq!(t.styles, vec![Style::Pace, Style::Late]);

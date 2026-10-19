@@ -1,11 +1,12 @@
 {
-"updated": "2026-10-17",
+"updated": "2026-10-18",
 "about": "Career scenarios on Global, for the planner's career simulation (end-of-run SP) and scenario-aware card picks. Claude keeps this file. Each number is either sourced (see `sources`) or listed under `assumed`, which are estimates to tune when real careers disagree: log careers with their final SP in results/careers.md.",
 "sources": {
   "gametora_ura": "https://gametora.com/umamusume/ura-finals (base training values after the July 2026 Global update, fixed events, link character)",
   "gametora_unity": "https://gametora.com/umamusume/unity-cup (Global base training values, unity training and Spirit Burst SP)",
   "gametora_trackblazer": "https://gametora.com/umamusume/trackblazer (base training values, races-centred objectives, no scenario link)",
   "gametora_grand_concert": "https://gametora.com/umamusume/our-grand-concert (base training values, link characters, lesson and live SP, lyrics-event golds)",
+  "uma_guide_grand_concert": "https://uma.guide/guides/grand-concert (updated 2026-07-20, read 2026-10-18: 25 SP per song and 5 per technique at each concert, songs per concert, the technique unlock schedule, SP songs)",
   "umareference_training": "https://www.umareference.com/guide/support-cards-in-detail/calculating-training-stat-gain (training gain formula: mood 0.1 per step, +5% per support card)",
   "umareference_appearance": "https://www.umareference.com/guide/support-cards-in-detail/stat-stick-passives (weights: 100 per facility, 50 for not appearing, specialty priority added to its own facility; community reverse-engineering)",
   "umamusumedb": "https://umamusumedb.com/tools/training-calculator/ (facility level multipliers 1.0 to 2.0; friendship training at bond 80)",
@@ -137,12 +138,12 @@
     "race_sp": {"G1": 45, "G2": 35, "G3": 35, "OP": 30},
     "finale_races": 0,
     "extra_sp": [
-      {"what": "Song lessons, assumed 22 learned (25 SP each, paid at the next live)", "sp": 550, "sourced": false},
-      {"what": "Live Technique lessons, assumed 44 (5 SP each)", "sp": 220, "sourced": false},
+      {"what": "Song lessons, assumed 20 learned: 4 per concert, 5 concerts (25 SP each, paid at the next concert; uma.guide: 3 per concert for a Great Success, usually up to 4, 18+ for the scenario gold)", "sp": 500, "sourced": false},
+      {"what": "Technique lessons, assumed 50: 10 per concert to unlock 4 songs (5 SP each, paid at the next concert; uma.guide's unlock schedule)", "sp": 250, "sourced": false},
       {"what": "RUN×RUN! song bonus", "sp": 22, "sourced": true}
     ],
     "sp_per_training_from": [[24, 2], [36, 3]],
-    "sp_per_training_note": "Yume wo Kakeru! (after the 1st live) and Grow Up, Shine! (after the 2nd) add +2 and +3 Skill Pts to every later training; assumed both learned.",
+    "sp_per_training_note": "Run for Our Dream! (Yume wo Kakeru!, after the 1st concert) and Grow Up and Shine! (after the 2nd) add +2 and +3 Skill Pts to every later training (uma.guide); assumed both learned, as the guide advises.",
     "link_bonus": {"sp": 30, "stats": 0, "assumed": "more performance tokens per training: about one extra song lesson (25 SP) and a technique lesson over a career"},
     "event_chance_multiplier": 1.2,
     "event_chance_note": "Assumed: the Support Event Chance Up live bonus.",

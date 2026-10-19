@@ -510,6 +510,34 @@ impl App {
         knapsack(&items, budget, |id| id / 10)
     }
 
+    /// Rating / parent: the skills worth the most evaluation points within the budget (a knapsack
+    /// on `grade`). Whether a skill fires on the course doesn't matter for rating, so only bans,
+    /// the shop's offer and parents' sparks (which may never pass on) limit it; pins always go in.
+    /// Returns the skills and their points.
+    pub(crate) fn rating_pick(&self) -> (Vec<u32>, i64) {
+        let p = &self.planner.plan;
+        let career = self.plan_career();
+        let budget = self.pick_budget().unwrap_or(1200.0);
+        let ctx = self.pick_context();
+        let items: Vec<(u32, f64, f64)> = ctx
+            .rows
+            .keys()
+            .filter_map(|id| {
+                let s = self.kb.skills.get(id)?;
+                let pinned = p.pinned_skills.contains(id);
+                let excluded = p.banned_skills.contains(id) || (p.shop.on && !p.shop.offered.contains_key(id)) || (!p.shop.on && ctx.parent_only.contains(id));
+                if !pinned && (excluded || s.grade <= 0) {
+                    return None;
+                }
+                let value = f64::from(s.grade.max(1)) + if pinned { 100_000.0 } else { 0.0 };
+                Some((*id, value, self.skill_cost(*id, career.as_ref())))
+            })
+            .collect();
+        let chosen = knapsack(&items, budget, |id| id / 10);
+        let points = chosen.iter().map(|id| i64::from(self.kb.skills.get(id).map_or(0, |s| s.grade))).sum();
+        (chosen, points)
+    }
+
     /// The old auto-pick, kept to compare against: the meta sheet's skills first (2 L per unit).
     #[cfg(test)]
     pub(crate) fn recommend_skills_v1(&self, candidates: &[u32]) -> Vec<u32> {

@@ -55,7 +55,7 @@ impl Widget {
             Widget::Trainer => "Badges for what you've done here.",
             Widget::Showcase => "Owned cards the community meta sheet backs most for the next CM's top style. Community meta: opinion, not game data.",
             Widget::Wishlist => "Cards in the community meta sheet's decks for the next CM that you don't own yet. Community meta: opinion, not game data.",
-            Widget::Tip => "A game term, explained. A new one each day.",
+            Widget::Tip => "A game fact or term, with where it comes from. A new one each day.",
         }
     }
 }
@@ -906,12 +906,17 @@ impl App {
         let day = crate::tab_planner::day_number(&today()).max(0) as usize;
         let (term, text, source) = &c.tips[(day.wrapping_mul(40_503) + self.home.tip_offset) % c.tips.len()];
         ui.horizontal(|ui| {
-            ui.label(semibold(term, size::MD));
+            // A fact from knowledge/mechanics.md has no term: it reads as the headline itself.
+            if term.is_empty() {
+                ui.label(RichText::new("💡").size(size::MD));
+            } else {
+                ui.label(semibold(term, size::MD));
+            }
             if ui.small_button("↻").on_hover_text("Another one").clicked() {
                 self.home.tip_offset += 1;
             }
         });
-        ui.add(egui::Label::new(RichText::new(text)).wrap());
+        ui.add(egui::Label::new(if term.is_empty() { semibold(text, size::BODY) } else { RichText::new(text) }).wrap());
         ui.label(RichText::new(format!("Source: {source}")).size(size::XS).color(p.weak));
     }
 

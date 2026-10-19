@@ -12,11 +12,13 @@ mod career;
 mod data;
 mod charts;
 mod collection_kit;
+mod course_notes;
 mod digest;
 mod home;
 mod knowledge;
 mod live;
 mod meta;
+mod notes;
 mod onboarding;
 mod onboarding_grid;
 mod paste;
@@ -1463,7 +1465,12 @@ impl App {
                     });
                     ui.add_space(4.0);
                 };
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                // UMALORD_SCROLL scrolls Help too, for screenshots of the word list.
+                if let Some(y) = self.debug_scroll {
+                    area = area.vertical_scroll_offset(y);
+                }
+                area.show(ui, |ui| {
                     ui.label(semibold("What each tab is for", 16.0));
                     ui.add_space(4.0);
                     for tab in TABS {
@@ -1520,10 +1527,16 @@ impl App {
                     }
                     ui.add_space(10.0);
                     ui.label(semibold("Words you'll see", 16.0));
-                    ui.label(RichText::new("General game terms, in short. uma.guide's guides explain them in full.").size(12.5).color(p.weak));
+                    ui.label(RichText::new("General game terms, in short, from knowledge/mechanics.md. Hover a term to see where it comes from.").size(12.5).color(p.weak));
                     ui.add_space(4.0);
-                    for (term, meaning) in GLOSSARY {
-                        row(ui, &mut |ui| _ = ui.label(semibold(*term, 13.5)), RichText::new(*meaning));
+                    if self.kb.terms.is_empty() {
+                        for (term, meaning) in GLOSSARY {
+                            row(ui, &mut |ui| _ = ui.label(semibold(*term, 13.5)), RichText::new(*meaning));
+                        }
+                    }
+                    for t in &self.kb.terms {
+                        let source = if t.source == "general" { "General knowledge of the game".to_string() } else { format!("Source: {}", t.source) };
+                        row(ui, &mut |ui| _ = ui.label(semibold(&t.term, 13.5)).on_hover_text(&source), RichText::new(&t.meaning));
                     }
                 });
             });

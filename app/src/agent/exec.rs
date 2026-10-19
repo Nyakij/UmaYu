@@ -452,6 +452,12 @@ impl App {
                     k.duration,
                     k.cooldown
                 );
+                if k.grade != 0 {
+                    out = out.replacen("\nEffect:", &format!(", {} evaluation points\nEffect:", k.grade), 1);
+                }
+                if let Some((tiers, t)) = self.kb.skill_tiers.as_ref().and_then(|x| Some((x, x.get(id)?))) {
+                    out += &format!("{}\n", tiers.explain(t));
+                }
                 for src in self.kb.sources.get(&id).into_iter().flatten() {
                     let who = src
                         .uma()
@@ -547,7 +553,7 @@ impl App {
             }
             "list_notes" => {
                 let root = self.root.as_ref().ok_or("umaLord folder not found")?;
-                let mut files = vec!["insights.md".to_string(), "sources.md".to_string()];
+                let mut files = vec!["insights.md".to_string(), "sources.md".to_string(), "knowledge/mechanics.md".to_string(), "knowledge/racecourses.md".to_string(), "knowledge/skills.md".to_string()];
                 for dir in ["plans", "results", "account"] {
                     for e in std::fs::read_dir(root.join(dir)).into_iter().flatten().flatten() {
                         let n = e.file_name().to_string_lossy().to_string();
@@ -1471,7 +1477,19 @@ impl App {
             "auto_pick_skills" => {
                 let undo = self.agent_snapshot("auto-picked skills");
                 if let Some(o) = input["objective"].as_str() {
-                    self.planner.plan.pick_objective = if o == "consistency" { crate::skill_opt::PickObjective::Consistency } else { crate::skill_opt::PickObjective::Lengths };
+                    use crate::skill_opt::PickObjective;
+                    self.planner.plan.pick_objective = match o {
+                        "consistency" => PickObjective::Consistency,
+                        "rating" => PickObjective::Rating,
+                        _ => PickObjective::Lengths,
+                    };
+                }
+                if self.planner.plan.pick_objective == crate::skill_opt::PickObjective::Rating {
+                    self.after_draft();
+                    let msg = self.rating_auto_pick();
+                    let chosen = self.planner.plan.skills.clone();
+                    let text = format!("{msg}\nSkills to buy: {}", self.skill_names(&chosen));
+                    return Exec::Done(ToolOut::ok(text, msg).visual(Visual::Skills(chosen)).open(OpenAt::Plan).undo(Some(undo)));
                 }
                 let quick = self.auto_pick_skills();
                 match self.start_pick(ctx) {

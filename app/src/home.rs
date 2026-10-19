@@ -383,15 +383,24 @@ impl App {
             ("🏆", "On the record", "Log a real result on Career → Results", logged > 0),
         ];
         c.trainer_since = self.root.as_ref().and_then(|r| std::fs::metadata(r.join(crate::data::UMAS_FILE)).ok()).and_then(|m| m.created().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| crate::live::utc_date(d.as_secs() as i64));
-        // Tips: the game's glossary and the app's own.
+        // Tips: the sourced facts and glossary in knowledge/mechanics.md (a fact has no term);
+        // uma.guide's glossary only if that file has none.
         c.tips = self
             .kb
-            .glossary
+            .tips
             .iter()
-            .filter(|g| g.description.len() > 40 && g.description.len() < 420)
-            .map(|g| (g.term.clone(), g.description.clone(), "uma.guide glossary".to_string()))
-            .chain(crate::GLOSSARY.iter().map(|(t, m)| (t.to_string(), m.to_string(), "umaLord Help".to_string())))
+            .map(|t| (String::new(), t.text.clone(), t.source.clone()))
+            .chain(self.kb.terms.iter().filter(|t| t.source != "general").map(|t| (t.term.clone(), t.meaning.clone(), t.source.clone())))
             .collect();
+        if c.tips.is_empty() {
+            c.tips = self
+                .kb
+                .glossary
+                .iter()
+                .filter(|g| g.description.len() > 40 && g.description.len() < 420)
+                .map(|g| (g.term.clone(), g.description.clone(), "uma.guide glossary".to_string()))
+                .collect();
+        }
         c
     }
 }

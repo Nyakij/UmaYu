@@ -167,6 +167,13 @@ the steps to plan a career, and the game words the app uses.
     Settings > AI assistant, or set the ANTHROPIC_API_KEY environment variable.
 
 
+Game knowledge: the Help window's word list and Home's "Did you know?" card come from
+knowledge\mechanics.md, notes gathered from community guides (GameTora, uma.guide and
+community sheets), each with its source. knowledge\racecourses.md describes every Champions
+Meeting course (corners, slopes, how much Stamina each style needs), and
+knowledge\skills.md gives skill advice, including a community tier list that the Skills page
+and the planner's "Not simulated" list show as "Tier list: CM ... TT ...".
+
 Settings (the cog at the top right, or Ctrl+comma) has five sections. Everything saves as
 you change it.
 - Profile: your trainer name, the data folder, and saving, loading or emptying the account.

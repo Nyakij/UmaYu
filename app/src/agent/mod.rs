@@ -274,7 +274,7 @@ fn build_registry() -> Vec<ToolSpec> {
         spec("explain_card", Read, "🃏", "Explained a card", "Why a card is or isn't a good pick for the working plan: its rank and score for the slot it would fill, the meta sheet's backing, and the reasons.", query()),
         spec("recommend_trainees", Read, "🐴", "Suggested trainees", "The owned trainees that fit the working plan best: the meta sheet's picks you own first (★), then the best aptitude fits, with stars, potential and aptitudes for the goal.", obj(json!({"top_n": {"type": "integer", "minimum": 1, "maximum": 12}}), &[])),
         spec("list_notes", Read, "📝", "Listed notes", "List the project's markdown notes: insights.md (Claude's evidence-backed opinions), sources.md, plans/*.md (career plans), results/*.md (real results logs), account/*.md.", obj(json!({}), &[])),
-        spec("read_note", Read, "📝", "Read a note", "Read one note file by its path from list_notes, e.g. insights.md or results/careers.md.", obj(json!({"path": {"type": "string"}}), &["path"])),
+        spec("read_note", Read, "📝", "Read a note", "Read one note file by its path from list_notes, e.g. insights.md, results/careers.md, or the sourced knowledge notes: knowledge/mechanics.md (race mechanics, Team Trials scoring, the CM format, sparks, Grand Concert), knowledge/racecourses.md (every CM course's layout and stamina by style) and knowledge/skills.md (skill advice, debuffs, post-race hints).", obj(json!({"path": {"type": "string"}}), &["path"])),
         spec("glossary", Read, "📖", "Looked up a term", "Look up a community term (e.g. 'MLB', 'spark', 'CM').", obj(json!({"term": {"type": "string"}}), &["term"])),
         // --- Draft
         spec("new_plan", Draft, "📋", "Started a plan", "Start a new working plan in the Planner, replacing the one open there (undoable). For a Champions Meeting this sets its course, conditions, scenario and disabled skills.", obj(json!({
@@ -318,7 +318,7 @@ fn build_registry() -> Vec<ToolSpec> {
             "add_skills": skills(), "remove_skills": skills()
         }), &["uma"])),
         // --- Long
-        spec("auto_pick_skills", Long, "✨", "Auto-picked skills", "Choose the working plan's skills to buy: a quick pick, then the optimiser races sets of skills within the SP budget and verifies the result over 1000 races (about 20 s). Needs a trainee, target stats and a course or CM. Simulation output.", obj(json!({"objective": {"type": "string", "enum": ["lengths", "consistency"], "description": "Most lengths on average (default), or the best bad races"}}), &[])),
+        spec("auto_pick_skills", Long, "✨", "Auto-picked skills", "Choose the working plan's skills to buy: a quick pick, then the optimiser races sets of skills within the SP budget and verifies the result over 1000 races (about 20 s). Needs a trainee, target stats and a course or CM. Simulation output.", obj(json!({"objective": {"type": "string", "enum": ["lengths", "consistency", "rating"], "description": "Most lengths on average (default); Team Trials consistency; or rating: the most skill evaluation points (for a parent's rank), no racing"}}), &[])),
         spec("simulate_skills", Long, "📊", "Simulated the skills on offer", "Race every skill the trainee, the owned cards and the friend card can teach on the plan's course (the skill chart), so the deck ranking and auto-pick use simulated gains. Returns the best. Simulation output.", obj(json!({"top_n": {"type": "integer", "minimum": 1, "maximum": 30}}), &[])),
         spec("run_compare", Long, "🏁", "Raced two builds", "Race Uma 1 against Uma 2 many times in the Race sim (Moomoolator's engine) and report who wins, by how much, how often, full-spurt, HP-survival and rushed rates, and Uma 2's skill activations. builds 'plan' (default) loads the working plan first: the trainee without vs with her skills to buy. Simulation output.", obj(json!({
             "builds": {"type": "string", "enum": ["plan", "current"], "description": "'plan' loads the working plan; 'current' races the builds as they are"},
@@ -611,6 +611,10 @@ mod tests {
             .map(String::from)
             .collect();
         assert!(missing.is_empty(), "no glyph for {missing:?}");
+        // The community tier list's marks, shown on the Skills page and in Step 5.
+        for sym in ["⍟", "◎", "◯", "▲", "△", "✕"] {
+            assert!(ctx.fonts_mut(|f| f.has_glyphs(&font, sym)), "no glyph for the tier mark {sym}");
+        }
         // The check can tell: the compass drew as an empty box.
         assert!(!ctx.fonts_mut(|f| f.has_glyphs(&font, "🧭")));
     }

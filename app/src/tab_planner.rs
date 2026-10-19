@@ -1467,7 +1467,16 @@ impl App {
                 });
             });
             if is_friend {
-                ui.label(RichText::new("Any Global SSR, at the LB set under the slot.").size(12.5).color(p.weak));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Any Global SSR, at the LB set under the slot. Find someone lending it:").size(12.5).color(p.weak));
+                    // Friend databases from the community resource list (rentry.co/uma-resources).
+                    if ui.link(RichText::new("uma.moe ↗").size(12.5)).on_hover_text("uma.moe: a friend database to search for a support card to borrow").clicked() {
+                        open_url("https://uma.moe/");
+                    }
+                    if ui.link(RichText::new("ChronoGenesis ↗").size(12.5)).on_hover_text("ChronoGenesis: search trainers' showcased umas and MLB support cards").clicked() {
+                        open_url("https://chronogenesis.net/friend_search");
+                    }
+                });
             }
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.planner.picker_search).hint_text("🔍 Search uma or title").desired_width(260.0));

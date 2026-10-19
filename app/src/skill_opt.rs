@@ -67,7 +67,7 @@ pub(crate) enum PickObjective {
     Lengths,
     /// Team Trials: gains weighted by how often the skill triggers; cheap, reliable skills.
     Consistency,
-    /// Rating or parent value: needs skill evaluation points, which aren't in the data yet.
+    /// Rating or parent value: the most evaluation points within the budget, no racing.
     Rating,
 }
 
@@ -78,7 +78,7 @@ impl PickObjective {
         match self {
             PickObjective::Lengths => "Win the CM race (lengths)",
             PickObjective::Consistency => "Team Trials (consistency)",
-            PickObjective::Rating => "Rating / parent (needs data)",
+            PickObjective::Rating => "Rating / parent (points)",
         }
     }
 
@@ -86,7 +86,7 @@ impl PickObjective {
         match self {
             PickObjective::Lengths => "The set that gains the most lengths on average in the plan's race.",
             PickObjective::Consistency => "Each skill's gain is weighted by how often it triggers, so cheap, reliable skills win.",
-            PickObjective::Rating => "Needs each skill's evaluation points (the Rating/Score Calculator sheet), which aren't in knowledge/ yet.",
+            PickObjective::Rating => "The most skill evaluation points within the SP budget, for the uma's rank: an SS rank parent makes better sparks (uma.guide, Parenting). Points come from uma.guide's skill data. The game also scales skills tied to a distance or style by the uma's aptitude, which isn't modelled. No racing.",
         }
     }
 }

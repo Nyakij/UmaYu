@@ -21,8 +21,13 @@ You answer the user's questions about their Uma Musume: Pretty Derby account, an
    - `cm_schedule.json` is uma.guide's list of Champions Meetings by number, with the training `scenario` that was current for each (e.g. CM 20: Grand Concert). A preset's `id` is its CM number.
    - `sim/` holds the race simulator's raw data (skill conditions, courses). You rarely need it.
 4. `knowledge/data/pvp_meta.json` is the community PvP meta sheet (Lightning, Daptrius and Henry's "PvP Deck & Uma Recommendation" Google Sheet). One line per CM or LoH; search for `"number":21`. For each style (`Front`, `Pace`, `Late`, `End`) it gives Beginner, Standard and Whale decks (five cards plus a `borrow` card, with card `id`s, `note`s and LB minimums), recommended `umas`, `accel` and `advice` text, `skills` resolved to skill ids, and `parents` to look for. It also has the event's `stats`, `style_ranking` and `analysis`. It is **community opinion**: label it as such. The sheet says its skill advice past CM 21 still needs checking, and later events use JP cards (no `id`).
-5. `knowledge/scenarios.json` describes each Global training scenario: base training values, scenario-linked characters, skill-point sources, and the assumptions the app's career simulation makes. Each number is marked as sourced or assumed.
-6. `insights.md` holds evidence-backed opinions about this account. `results/*.md` holds real career, Team Trials, Champions Meeting, League of Heroes and spark results. `plans/*.md` holds saved career plans.
+5. **Sourced knowledge notes.** Each section names its source and the date it was read; label what you quote from them the same way.
+   - `knowledge/mechanics.md`: stats in races, Wit and rushing tables, phases, HP and the full spurt, position keep, start delay, corners and gates, the Champions Meeting format, Team Trials scoring, career training, Grand Concert, skill costs, sparks and inheritance, rating, and the glossary.
+   - `knowledge/racecourses.md`: how to read a course, Team Trials course odds, CM notes, and a generated section per Champions Meeting course (corners, straights, slopes, speed bonus stats, events, stamina per style).
+   - `knowledge/skills.md`: how skills work, the community tier list, debuffs (which the simulator can't value), skills the simulator overrates, Team Trials picks, and hidden post-race hints.
+   - `knowledge/data/skill_tiers.json`: the community tier list by skill id (Team Trials and CM tiers, with a reason). Community opinion.
+6. `knowledge/scenarios.json` describes each Global training scenario: base training values, scenario-linked characters, skill-point sources, and the assumptions the app's career simulation makes. Each number is marked as sourced or assumed.
+7. `insights.md` holds evidence-backed opinions about this account. `results/*.md` holds real career, Team Trials, Champions Meeting, League of Heroes and spark results. `plans/*.md` holds saved career plans.
 
 ## How to answer
 

@@ -899,10 +899,103 @@ def write_pvp_meta() -> None:
     print(f"pvp meta: {len(events)} events, {mismatches} name mismatches between the sheet's tabs")
 
 
+# The community skill tier list: "Uma Musume Skills Spreadsheet" by Dylan (@dylank0), formatted
+# by sayaduck; its Tierlist tab ranks every skill for Team Trials and for Champions Meeting.
+TIER_SHEET = "1oB3eTvKqREtJDWJL0q80O_VjBcpOmRl5xE0z5fZKgFY"
+TIER_TABS = {"readme": 2142834421, "tierlist": 1499223104}
+# What each template placeholder can stand for (others match any words).
+TIER_FILLS = {
+    "Run Style": "Front Runner|Pace Chaser|Late Surger|End Closer",
+    "Distance": "Sprint|Mile|Medium|Long",
+    "Rotation": "Right|Left",
+    "Season": "Spring|Summer|Fall|Autumn|Winter",
+    "Weather": "Sunny|Cloudy|Rainy|Snowy",
+}
+TIER_SCALE = {
+    "⍟": "essential for its distance or style",
+    "◎": "among the best for its distance or style",
+    "◯": "good, but short of ◎ in strength or conditions",
+    "▲": "situational: anywhere from ⍟ to ✕ depending on the race",
+    "△": "only with spare SP or nothing better",
+    "✕": "useless or very inconsistent",
+}
+
+
+def write_skill_tiers() -> None:
+    """knowledge/data/skill_tiers.json: each skill's Team Trials and CM tier from the sheet, by id.
+
+    The sheet writes families as templates ("[Run Style] Corners ◯", "Flustered [Run Style]s"); a
+    template matches every skill whose name fits it. Community opinion, not game data."""
+    import csv
+    import io
+
+    def tab(gid: int) -> list:
+        text = fetch(f"https://docs.google.com/spreadsheets/d/{TIER_SHEET}/gviz/tq?tqx=out:csv&gid={gid}")
+        return list(csv.reader(io.StringIO(text)))
+
+    readme = tab(TIER_TABS["readme"])
+    updated = ""
+    for row in readme:
+        for c in row:
+            m = re.search(r"Last Update:\s*([A-Z][a-z]+ \d{1,2})(?:st|nd|rd|th)?, (\d{4})", c)
+            if m and not updated:
+                updated = dt.datetime.strptime(f"{m.group(1)} {m.group(2)}", "%B %d %Y").date().isoformat()
+    rows = tab(TIER_TABS["tierlist"])
+    skills = read_jsonl("skills.json")
+    fold = lambda s: re.sub(r"\s+", " ", s.replace("◯", "○").replace("〇", "○")).strip()
+    names = {}
+    for s in skills:
+        names.setdefault(fold(s["name"]), []).append(s["id"])
+    out, unmatched, seen = [], [], set()
+    # Both halves of the tab list the same skills (sorted for Team Trials, then for CM), each with
+    # its Team Trials tier and its CM tier; read the first half.
+    for r in rows[1:]:
+        if len(r) < 8 or not r[1].strip():
+            continue
+        written = fold(r[1])
+        if "[" in written:
+            fill = lambda m: "(" + TIER_FILLS.get(m.group(1).replace("\\", ""), ".+?") + ")"
+            pattern = re.compile("^" + re.sub(r"\\\[([^\]]+)\\\]", fill, re.escape(written)) + "$")
+            # Each match with what fills the template ("Pace Chaser" for "[Run Style] Corners ◯").
+            ids = [(i, m.group(1)) for n, v in names.items() if (m := pattern.match(n)) for i in v]
+        else:
+            ids = [(i, "") for i in names.get(written, [])]
+        if not ids:
+            unmatched.append(r[1].strip())
+            continue
+        score = r[4].strip()
+        for sid, filled in ids:
+            if sid in seen:
+                continue
+            seen.add(sid)
+            target = r[6].strip()
+            out.append({
+                "id": sid,
+                "tt": r[2].strip(),
+                "cm": r[3].strip(),
+                "score_per_sp": float(score) if re.fullmatch(r"\d+(\.\d+)?", score) else None,
+                "for": filled or ("" if target in ("/", "") or target.startswith("[") else target),
+                "why": re.sub(r"\s+", " ", r[7]).strip(),
+                "as_written": r[1].strip(),
+            })
+    head = {
+        "source": f"https://docs.google.com/spreadsheets/d/{TIER_SHEET}/ (Uma Musume Skills Spreadsheet, Tierlist tab)",
+        "authors": "Dylan (@dylank0), formatted by sayaduck (@sayaduck)",
+        "sheet_updated": updated,
+        "fetched": dt.date.today().isoformat(),
+        "caveat": "Community opinion, not game data. Tiers depend on the track (▲ above all), and the sheet predates later skill balance changes such as Global's 2026-07-01 adjustment. Score/SP is the sheet's Team Trials points per skill point.",
+        "scale": TIER_SCALE,
+        "unmatched": unmatched,
+    }
+    with open(os.path.join(OUT, "skill_tiers.json"), "w", encoding="utf-8") as f:
+        f.write(json.dumps(head, ensure_ascii=False)[:-1] + ',"skills":[\n' + ",\n".join(json.dumps(s, ensure_ascii=False) for s in out) + "\n]}\n")
+    print(f"skill tiers: {len(out)} skills (sheet updated {updated}), {len(unmatched)} names not on Global: {', '.join(unmatched)}")
+
+
 def main():
     if "--only" in sys.argv:
-        # Refresh just one part: `--only umalator` (Moomoolator data), `--only cm` (CM schedule)
-        # or `--only meta` (the PvP recommendation sheet).
+        # Refresh just one part: `--only umalator` (Moomoolator data), `--only cm` (CM schedule),
+        # `--only meta` (the PvP recommendation sheet) or `--only tiers` (the skill tier list).
         part = sys.argv[sys.argv.index("--only") + 1]
         if part == "umalator":
             write_umalator()
@@ -910,8 +1003,10 @@ def main():
             write_cm_schedule(fetch(discover_chunks()["uma-data"]))
         elif part == "meta":
             write_pvp_meta()
+        elif part == "tiers":
+            write_skill_tiers()
         else:
-            raise SystemExit(f"unknown part {part}; use umalator, cm or meta")
+            raise SystemExit(f"unknown part {part}; use umalator, cm, meta or tiers")
         return
     if "--from" in sys.argv:
         d = sys.argv[sys.argv.index("--from") + 1]

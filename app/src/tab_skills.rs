@@ -714,6 +714,12 @@ impl App {
                 if k.wit_check {
                     badge(ui, "Wit check", p.weak).on_hover_text("Whether it triggers depends partly on Wit");
                 }
+                if k.grade != 0 {
+                    badge(ui, format!("{:+} rating", k.grade), p.weak).on_hover_text("Evaluation points: what it adds to an uma's rank when learned (uma.guide's data). The game also scales skills tied to a distance or style by her aptitude.");
+                }
+                if let Some((tiers, t)) = self.kb.skill_tiers.as_ref().and_then(|x| Some((x, x.get(id)?))) {
+                    badge(ui, format!("Tier list: CM {} · TT {}", t.cm, t.tt), p.gold).on_hover_text(tiers.explain(t));
+                }
             });
             let tags = self.kb.tag_line(&k.tags());
             if !tags.is_empty() {

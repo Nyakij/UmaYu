@@ -335,6 +335,11 @@ impl App {
 
     /// ✨ Auto-pick: a quick pick at once, then the optimiser in the background.
     pub(crate) fn auto_pick(&mut self, ctx: &egui::Context) {
+        if self.planner.plan.pick_objective == PickObjective::Rating {
+            let msg = self.rating_auto_pick();
+            self.planner.skill_status = Some((msg, false));
+            return;
+        }
         let mut msg = self.auto_pick_skills();
         let mut warn = false;
         match self.start_pick(ctx) {
@@ -345,6 +350,18 @@ impl App {
             }
         }
         self.planner.skill_status = Some((msg, warn));
+    }
+
+    /// Auto-pick for Rating / parent: the points knapsack, at once. Returns the status line.
+    pub(crate) fn rating_auto_pick(&mut self) -> String {
+        let (chosen, points) = self.rating_pick();
+        let cost = self.chosen_cost(&chosen, self.plan_career().as_ref());
+        let n = chosen.len();
+        self.planner.plan.skills = chosen;
+        format!(
+            "Picked {n} skill{} worth {points} evaluation points for about {cost:.0} SP (uma.guide's skill data; aptitude scaling of distance and style skills isn't modelled).",
+            if n == 1 { "" } else { "s" }
+        )
     }
 
     /// Step 5.
@@ -431,10 +448,7 @@ impl App {
             ui.label(RichText::new("Aim").color(p.weak));
             egui::ComboBox::from_id_salt("pick_objective").selected_text(pl.pick_objective.label()).show_ui(ui, |ui| {
                 for o in PickObjective::ALL {
-                    let enabled = o != PickObjective::Rating;
-                    ui.add_enabled_ui(enabled, |ui| {
-                        ui.selectable_value(&mut pl.pick_objective, o, o.label()).on_hover_text(o.explain()).on_disabled_hover_text(o.explain());
-                    });
+                    ui.selectable_value(&mut pl.pick_objective, o, o.label()).on_hover_text(o.explain());
                 }
             })
             .response
@@ -854,15 +868,20 @@ impl App {
     fn unsimulated_list(&mut self, ui: &mut egui::Ui, pick: &PickCtx) {
         let p = pal(ui);
         let pinned = self.planner.plan.pinned_skills.clone();
-        let items: Vec<(u32, &'static str)> = pick.rows.keys().filter(|id| !pinned.contains(id)).filter_map(|id| self.skill_unsimulated(*id).map(|why| (*id, why))).collect();
+        let mut items: Vec<(u32, &'static str)> = pick.rows.keys().filter(|id| !pinned.contains(id)).filter_map(|id| self.skill_unsimulated(*id).map(|why| (*id, why))).collect();
         if items.is_empty() {
             return;
         }
+        // The community tier list's CM tier first (it rates what the simulator can't), then name.
+        let rank = |id: u32| self.kb.skill_tiers.as_ref().and_then(|t| t.get(id)).map_or(9, |t| crate::notes::tier_rank(&t.cm));
+        items.sort_by_key(|(id, _)| (rank(*id), self.kb.skill_name(*id)));
         let meta = self.plan_meta_skills();
         let career = self.plan_career();
         let mut pin = None;
         egui::CollapsingHeader::new(RichText::new(format!("Not simulated ({}): debuffs and skills that depend on other umas", items.len())).size(size::SM))
             .id_salt("pick_unsimulated")
+            // UMALORD_EXPLAIN=1 opens it too, for screenshots.
+            .default_open(std::env::var_os("UMALORD_EXPLAIN").is_some())
             .show(ui, |ui| {
                 ui.label(RichText::new("One simulated uma can't value these, so auto-pick leaves them to you. Pin one to buy it.").size(size::SM).color(p.weak));
                 for (id, why) in items {
@@ -875,6 +894,10 @@ impl App {
                         }
                         self.skill_link(ui, id, false);
                         ui.label(RichText::new(format!("{:.0} SP", self.skill_cost(id, career.as_ref()))).size(size::SM).color(p.weak));
+                        // The community tier list rates what the simulator can't.
+                        if let Some((tiers, t)) = self.kb.skill_tiers.as_ref().and_then(|x| Some((x, x.get(id)?))) {
+                            badge(ui, format!("CM {} · TT {}", t.cm, t.tt), p.gold).on_hover_text(tiers.explain(t));
+                        }
                         ui.label(RichText::new(why).size(size::SM).color(p.weak));
                     });
                 }
@@ -1035,6 +1058,38 @@ mod tests {
 
     fn small(input: &mut Input) {
         input.tune = Tune { keep: 6, step_runs: 15, verify_runs: 40, drop_runs: 15, endgame_sp: 250.0, min_gain: 0.02, swap_time: std::time::Duration::ZERO, swap_pool: 2 };
+    }
+
+    /// Rating / parent: the most evaluation points within the budget, pins in, bans out, one per
+    /// group, and every pick worth points (skills.json's `grade`).
+    #[test]
+    fn rating_pick_maximises_points() {
+        let mut a = cm21();
+        assert!(a.kb.skills.values().filter(|s| s.grade > 0).count() > 500, "skills.json carries evaluation points");
+        let rows: Vec<u32> = a.pick_rows().into_keys().collect();
+        let best = *rows.iter().max_by_key(|id| a.kb.skills[id].grade).unwrap();
+        let cheap = *rows.iter().filter(|id| **id != best && **id / 10 != best / 10).min_by_key(|id| a.kb.skills[id].sp).unwrap();
+        a.planner.plan.pick_objective = PickObjective::Rating;
+        a.planner.plan.banned_skills = vec![best];
+        a.planner.plan.pinned_skills = vec![cheap];
+        let ctx = egui::Context::default();
+        a.auto_pick(&ctx);
+        let (msg, warn) = a.planner.skill_status.clone().unwrap();
+        assert!(!warn && msg.contains("evaluation points"), "{msg}");
+        assert!(a.planner.pick_job.is_none(), "no racing for rating");
+        let chosen = a.planner.plan.skills.clone();
+        assert!(chosen.contains(&cheap) && !chosen.contains(&best));
+        assert!(a.chosen_cost(&chosen, a.plan_career().as_ref()) <= a.pick_budget().unwrap() + 5.0);
+        let groups: std::collections::HashSet<u32> = chosen.iter().map(|id| id / 10).collect();
+        assert_eq!(groups.len(), chosen.len(), "one skill per group");
+        // More points than the lengths pick spends the same SP on.
+        let (_, points) = a.rating_pick();
+        a.planner.plan.pick_objective = PickObjective::Lengths;
+        a.planner.plan.banned_skills.clear();
+        a.planner.plan.pinned_skills.clear();
+        let lengths = a.recommend_skills(&rows);
+        let lengths_points: i64 = lengths.iter().map(|id| i64::from(a.kb.skills[id].grade)).sum();
+        assert!(points >= lengths_points, "{points} vs {lengths_points}");
     }
 
     /// Pinned skills are always bought, banned and CM-disabled ones never; the budget and the

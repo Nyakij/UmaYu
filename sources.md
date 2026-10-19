@@ -1,6 +1,39 @@
 # Sources
 
-The user supplied these. Claude notes what each covers, which server's data it shows, and how to read it. Last checked: 2026-10-17 (Moomoolator ported into the app; scenario and training sources added).
+The user supplied these. Claude notes what each covers, which server's data it shows, and how to read it. Last checked: 2026-10-18 (community resources read for `knowledge/mechanics.md`, `skills.md` and `racecourses.md`).
+
+## The community resource list
+
+- **Umamusume Guides and Resources** (originally a Steam guide, id 3540114219, since removed by Steam: "visible only to the owner"), mirrored at https://rentry.co/uma-resources, with its changelog at https://rentry.co/uma-resources-changelog (last entry 2026-07-22 when read). A hub of guides, tools, friend databases, scenario guides and an FAQ. The FAQ answers common questions (Open vs Graded League, 9★ parents, SR vs SSR, ◎ upgrades, blue spark odds, rushing). Read with `get_page_text`; links come out of the page with a small `querySelectorAll('article a')` script.
+- **How to read each kind of source:**
+  - JS-rendered sites (uma.guide, GameTora): the built-in browser's `get_page_text`.
+  - Google Sheets: `/gviz/tq?tqx=out:csv&gid=<gid>` (tab names and gids are in the `/htmlview` page's script). `curl.exe` fetches them.
+  - Google Docs: `/document/d/<id>/export?format=txt`.
+- umamusu.wiki's search is behind a Cloudflare check; its New Player Guide (https://umamusu.wiki/Game:New_Player_Guide) opens normally.
+
+## Used for knowledge/ (read 2026-10-18)
+
+| Resource | What it covers | Used in |
+|---|---|---|
+| GameTora, Race Mechanics Handbook (robflop, Gertas), https://gametora.com/umamusume/race-mechanics | Stats in races, phases, ground, speed and acceleration, start delay, last spurt, position keep, rushing, spot struggle, duels, the anniversary mechanics, corner numbers, gate brackets. Global and JP. | `mechanics.md`, cross-checked against `app/src/sim/` |
+| uma.guide guides (https://uma.guide/guides/): Team Trials, Parenting in Umamusume, Umalator 101, CM21 pre-guide, Racecourse Analysis, Skills Explained, Debuff Skills, Career Mechanics, Champions Meeting Basics (`beginners-cm`), Grand Concert, Race Mechanics (archived) | TT scoring and course odds; spark and affinity rates; simulation advice; CM 21's course and stats; accel zones and skill timing; activation and cooldowns; debuffs; training formulas and career events; the CM format; Grand Concert's lessons and SP | `mechanics.md`, `skills.md`, `racecourses.md`, `knowledge/scenarios.json` |
+| uma.guide glossary (`knowledge/data/glossary.json`) | Community terms, the CM and LoH formats | the glossary in `mechanics.md` |
+| Uma Musume Skills Spreadsheet (Dylan @dylank0, formatted by sayaduck; sheet updated 2025-12-12), https://docs.google.com/spreadsheets/d/1oB3eTvKqREtJDWJL0q80O_VjBcpOmRl5xE0z5fZKgFY | Every skill rated for Team Trials and CM, with Team Trials score per SP and a reason. Tabs: README, Speed, Accel, Other, Stamina, Debuff, Greens, Tierlist, References. Community opinion; predates the 2026-07-01 balance changes | `knowledge/data/skill_tiers.json` (`update_knowledge.py --only tiers`), `skills.md` |
+| Hidden Guaranteed Post-Race Skill Hints (Causew and others), https://docs.google.com/spreadsheets/d/1RnkYfATh3-I9Y_HK_GK7-LEbk1wlvuGDtwDhBaCNZfY | Which race wins give which hint (43 rows); the "Random Skills" tab was empty | `skills.md` |
+| Spark Proc Chances (IceDynamix), https://docs.google.com/spreadsheets/d/1mT_uH79lZwEth6qGvjBOvrRKxwfKixr6vfhgzoW1s-U | Spark proc odds by stars and affinity, affinity statistics. Its pink 1★ rate (1%) differs from uma.guide's (2%) | `mechanics.md`, Sparks |
+| Umamusume Rating Calculator (dak, Neon, IceDynamix; v3.1.0), https://docs.google.com/spreadsheets/d/1AAZCVDMiCozDNKte-5JYSm7SWUeVJ0o87i1iDY1bnWM | Stat score multipliers; skill scores in hidden sheets, depending on aptitude. The author now recommends daftuyda.moe/optimizer | `mechanics.md`, Rating |
+
+## Listed, not used yet
+
+- **Reference Document (Global)** (Erzzy), https://docs.google.com/document/d/11X2P7pLuh-k9E7PhRiD20nDX22rNWtCpC1S4IMx_8pQ: card evaluations, inheritance, builds, banner reviews. Large; read it for card notes (`knowledge/support_cards/`).
+- **Support Card Encyclopedia** (Luh), https://docs.google.com/spreadsheets/d/1zZOBxjcgJEKna7ftYKq0AlZS25Q3hE_occ7kXB-Q6MQ; **Pull Guide 2.0** (rdr), https://docs.google.com/spreadsheets/d/1KudiJHMUOXJaRrh4zYjDorWLqb6Scvi50M2CRyT_Aqo; **Support Card Tier List** (Euophrys), https://euophrys.github.io/uma-tiers/#/global: card value opinions, for `knowledge/support_cards/*.md`.
+- **Inheritance/Parenting Guide** (Crazyfellow), https://docs.google.com/document/d/1Q3IJKbtkplmuY-PAJMNjYiLtasv0eU0aIBEqp8_C3tg; **Breeding Tree Planner** (Depore), https://umamily.moe/; **Spark Farming Calculator**, https://docs.google.com/spreadsheets/d/1c0n6kl1BnSX3MEsX8a3UEmWkSBppXgbERLC56UEVrq4; GameTora's **Affinity Calculator**, https://gametora.com/umamusume/compatibility: parent planning.
+- **Estimated Timeline** (SoulEC), https://docs.google.com/spreadsheets/d/e/2PACX-1vQ1bJUx-NQHJvwYE3Jcs9UP5aFVdWwoPVZc5Z7GN3oUGyB7-Rl8YZ48y-lJEvFWTGIrQmOa-yTehPkK/pubhtml; **Another Umamusume Timeline** (Phoenix), https://docs.google.com/spreadsheets/d/1ClwQpAPpVJDnHWYAkbAsk7k9DfvkQ8CJJvjQy3jg4Wc: estimated banners, CMs and features. The app's Home timeline uses the official news instead.
+- **Required Stamina Calculator**, https://docs.google.com/spreadsheets/d/1x6go-4Er40nbC3WgsXqHD5GkyzC_zbJ141C96OodVew (tabs in Japanese); the app's HP calculator and Stamina mode cover the same ground. **Stamina Threshold and Home Turf Advantage in Team Trials** (Charles), https://docs.google.com/document/d/1fXDspwdXJJ-aQ-Al1GezQRSrc_6gTjwZaSNUYrGzggk: gone (HTTP 410 on 2026-10-18).
+- **Skill Optimizer and Rating Calculator** (Void), https://daftuyda.moe/optimizer, and **Skill Hint Finder**, https://daftuyda.moe/hints: feature ideas for Step 5 (hint levels, Fast Learner, aims); not data.
+- **Simulators to cross-check against:** VFalator (https://kachi-dev.github.io/uma-tools/umalator-global), alpha123's Umalator and Skill Activation Visualizer (https://alpha123.github.io/uma-tools/), mee1080's race simulator in English (https://kachi-dev.github.io/umasim-en/race). Record disagreements with the app in `insights.md`.
+- **Friend databases** for finding a borrow card: uma.moe (https://uma.moe/), ChronoGenesis (https://chronogenesis.net/friend_search), UmaPure (https://uma-global.pure-db.com/). The Planner's friend-slot picker links the first two.
+- GameTora's **Race Scheduler**, **Training Event Helper** and **Banner Planner**; uma.guide's **Agenda Planner**; Kiwizer's Canva; the **Gameplans** sheet; the **Team Trials Tracker** (AndrewZorz).
 
 ## Guide and database sites
 
