@@ -1928,7 +1928,7 @@ impl App {
             return Err(format!("{} has no table to add to.", crate::tab_results::LOGS[i].1));
         }
         let fields = input["fields"].as_object().ok_or("fields should map column names to values.")?;
-        let mut row: Vec<String> = headers.iter().map(|h| if h.starts_with("Date") { today() } else { String::new() }).collect();
+        let mut row: Vec<String> = headers.iter().map(|h| if h.starts_with("Date") { crate::ui_util::local_today() } else { String::new() }).collect();
         let mut unknown = Vec::new();
         for (k, v) in fields {
             let value = v.as_str().map(String::from).unwrap_or_else(|| v.to_string());

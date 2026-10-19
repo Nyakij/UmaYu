@@ -6,6 +6,7 @@
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Key, Modifiers, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, vec2};
 
 use crate::onboarding::Edit;
+use crate::ui_util::UiExt;
 use crate::theme::{pal, size};
 use crate::ui_util::{ToastAction, ToastKind, draw_lb, draw_stars, placeholder, semibold, tile_grid, today, truncate, type_color_str, type_icon};
 use crate::{App, Jump};
@@ -197,10 +198,10 @@ impl App {
             if search.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 self.add_first_match(kind);
             }
-            ui.checkbox(&mut self.onboarding.only_owned, "Only mine");
-            ui.checkbox(&mut self.onboarding.newest_first, "Newest first").on_hover_text("Recent releases first: new players own the recent banners");
+            ui.tick(&mut self.onboarding.only_owned, "Only mine");
+            ui.tick(&mut self.onboarding.newest_first, "Newest first").on_hover_text("Recent releases first: new players own the recent banners");
             if kind == GridKind::Cards {
-                ui.checkbox(&mut self.onboarding.show_r, "R cards").on_hover_text("R cards are rarely worth a deck slot, so they're hidden unless you have them");
+                ui.tick(&mut self.onboarding.show_r, "R cards").on_hover_text("R cards are rarely worth a deck slot, so they're hidden unless you have them");
             }
             ui.separator();
             ui.label(RichText::new("New picks start as").color(p.weak)).on_hover_text("Set this first, then one click adds each item with these values. Set it to MLB, click every maxed card, then set it back for the rest.");
@@ -282,13 +283,13 @@ impl App {
                         GridKind::Umas => {
                             ui.label(RichText::new("Stars").color(p.weak));
                             for s in 1..=5u8 {
-                                if ui.small_button(format!("{s}★")).clicked() {
+                                if ui.small_btn(format!("{s}★")).clicked() {
                                     self.set_uma_values(&ids, Some(s), None);
                                 }
                             }
                             ui.label(RichText::new("Potential").color(p.weak));
                             for l in 1..=5u8 {
-                                if ui.small_button(format!("P{l}")).clicked() {
+                                if ui.small_btn(format!("P{l}")).clicked() {
                                     self.set_uma_values(&ids, None, Some(l));
                                 }
                             }
@@ -352,7 +353,7 @@ impl App {
                     let missing: Vec<u32> = section.ids.iter().copied().filter(|id| self.owned_card(*id).is_none()).collect();
                     if !missing.is_empty() {
                         let label = format!("＋ Add all {} at LB{}", missing.len(), self.onboarding.brush_lb);
-                        if ui.small_button(label).on_hover_text("Adds every card in this group you haven't added, at the brush's limit break. Ctrl+Z undoes it.").clicked() {
+                        if ui.small_btn(label).on_hover_text("Adds every card in this group you haven't added, at the brush's limit break. Ctrl+Z undoes it.").clicked() {
                             add_all = Some(missing);
                         }
                     }
@@ -835,7 +836,7 @@ mod tests {
 
     fn frame(a: &mut App, ctx: &egui::Context, events: Vec<egui::Event>) {
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))), events, ..Default::default() };
-        let _ = ctx.run_ui(input, |ui| a.frame(ui));
+        let _ = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
     }
 
     fn key(k: Key, shift: bool) -> egui::Event {

@@ -182,12 +182,18 @@ you change it.
   and decorations behind the pages, where chibi Seiun Sky appears (everywhere, small beside
   each page title; on Home and empty pages only; or nowhere: she never covers your data),
   the size of everything, and comfortable or compact spacing.
-- Data and updates: how old the game data and the meta sheet are, and how to refresh them.
+- Data and updates: how old the game data, the meta sheet and the skill tier list are, and
+  how to refresh them.
 - AI assistant: who answers on the Ask tab, the model, your API key, and what the assistant
   may do without asking.
 - About: the version, credits, license and keyboard shortcuts.
 
 Messages such as "Saved" pop up at the bottom of the window for a few seconds.
+
+On a small window (down to 960x600) the side panels make room: the Collection filters fold
+into a strip of icons while a table is shown (click >> to open them again), the planner's
+saved plans become a + button and a folder menu, and the status bar at the bottom shortens
+its labels (hover one for the full text).
 
 Keyboard shortcuts (also listed in Help):
 - Ctrl+1 to Ctrl+4: Home, Collection, Career, Ask

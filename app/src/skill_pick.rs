@@ -10,6 +10,7 @@ use eframe::egui::{self, CornerRadius, RichText, Stroke, vec2};
 use egui_extras::Column;
 
 use crate::App;
+use crate::ui_util::UiExt;
 use crate::knowledge::grade_rank;
 use crate::sim::run::Progress;
 use crate::skill_opt::{self, Candidate, Input, MetaInfluence, Outcome, Phase, PickObjective, Tune};
@@ -401,7 +402,7 @@ impl App {
                 }
                 match &self.planner.pick_job {
                     Some(job) => {
-                        if ui.small_button("✖").on_hover_text("Stop auto-pick").clicked() {
+                        if ui.small_btn("✖").on_hover_text("Stop auto-pick").clicked() {
                             job.cancel();
                         }
                         let secs = job.started.elapsed().as_secs();
@@ -425,7 +426,7 @@ impl App {
                             start_chart = true;
                         }
                         if let Some(job) = &self.planner.skill_job {
-                            if ui.small_button("✖").on_hover_text("Stop simulating").clicked() {
+                            if ui.small_btn("✖").on_hover_text("Stop simulating").clicked() {
                                 job.cancel();
                             }
                             ui.add(egui::ProgressBar::new(job.fraction()).desired_width(120.0).text(format!("{} skills", job.count())));
@@ -461,9 +462,9 @@ impl App {
             })
             .response
             .on_hover_text(pl.meta_influence.explain());
-            ui.checkbox(&mut pl.fast_learner, "Fast Learner (−10%)").on_hover_text("The Fast Learner condition: every skill costs 10% of its base price less (uma.guide glossary)");
-            ui.checkbox(&mut pl.shop.on, "I'm at the skill shop now").on_hover_text("Use the career's real final stats and SP, and only the skills on offer with their hint levels");
-            ui.checkbox(&mut self.planner.only_fitting, "Hide skills that don't fit");
+            ui.tick(&mut pl.fast_learner, "Fast Learner (−10%)").on_hover_text("The Fast Learner condition: every skill costs 10% of its base price less (uma.guide glossary)");
+            ui.tick(&mut pl.shop.on, "I'm at the skill shop now").on_hover_text("Use the career's real final stats and SP, and only the skills on offer with their hint levels");
+            ui.tick(&mut self.planner.only_fitting, "Hide skills that don't fit");
         });
         if self.planner.plan.shop.on {
             self.shop_panel(ui);
@@ -536,7 +537,7 @@ impl App {
                 }
             }
             let mut manual = self.planner.plan.sp_budget.is_some();
-            if ui.checkbox(&mut manual, "set by hand").changed() {
+            if ui.tick(&mut manual, "set by hand").changed() {
                 self.planner.plan.sp_budget = manual.then(|| budget.unwrap_or(1500.0).round() as u32);
             }
             if let Some(b) = &mut self.planner.plan.sp_budget {
@@ -697,7 +698,7 @@ impl App {
             match key {
                 "pick" => {
                     let mut on = is_chosen;
-                    if ui.checkbox(&mut on, "").on_hover_text(if is_chosen { "Bought. Click to unpick." } else { "Click to buy" }).changed() {
+                    if ui.tick(&mut on, "").on_hover_text(if is_chosen { "Bought. Click to unpick." } else { "Click to buy" }).changed() {
                         toggles.push(r.id);
                     }
                 }
@@ -715,18 +716,18 @@ impl App {
                 }
                 "offer" => {
                     let mut on = self.planner.plan.shop.offered.contains_key(&r.id);
-                    if ui.checkbox(&mut on, "").on_hover_text("On offer at the shop").changed() {
+                    if ui.tick(&mut on, "").on_hover_text("On offer at the shop").changed() {
                         offers.push(r.id);
                     }
                 }
                 "hint" => {
                     if let Some(&lv) = self.planner.plan.shop.offered.get(&r.id) {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        if ui.small_button("−").clicked() && lv > 0 {
+                        if ui.small_btn("−").on_hover_text("One hint level lower").clicked() && lv > 0 {
                             hints.push((r.id, lv - 1));
                         }
-                        ui.label(semibold(format!("Lv{lv}"), size::SM));
-                        if ui.small_button("+").clicked() && lv < 5 {
+                        ui.label(semibold(format!("Lv{lv}"), size::SM)).on_hover_text("The hint level the shop shows: each level takes 10% off (35% at Lv4, 40% at Lv5)");
+                        if ui.small_btn("+").on_hover_text("One hint level higher").clicked() && lv < 5 {
                             hints.push((r.id, lv + 1));
                         }
                     }
@@ -886,7 +887,7 @@ impl App {
                 ui.label(RichText::new("One simulated uma can't value these, so auto-pick leaves them to you. Pin one to buy it.").size(size::SM).color(p.weak));
                 for (id, why) in items {
                     ui.horizontal(|ui| {
-                        if ui.small_button("📌").on_hover_text("Pin it: auto-pick always buys it").clicked() {
+                        if ui.small_btn("📌").on_hover_text("Pin it: auto-pick always buys it").clicked() {
                             pin = Some(id);
                         }
                         if let Some((_, advice)) = meta.get(&id) {

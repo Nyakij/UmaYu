@@ -37,6 +37,10 @@ What changed in each release. Releases are built from the tagged source by GitHu
 - The Notes tab is gone from the top bar; open the notes and data files from ⚙ → Advanced → Browse notes and data files. Help links to it too.
 - **Chibi Seiun Sky no longer covers your data.** By default she now stands beside Home's welcome and on empty pages; in ⚙ you can also show her beside every page title, or hide her. The background switch now only turns the sky and decorations on and off.
 - Light mode is easier to read: green, orange, gold, pink, grade letters and card-type names are darker on white, and every status colour passes the WCAG AA contrast check (a test keeps it that way).
+- **Small windows work better (960×600):** the Collection filters fold away while a table is shown, the planner's saved plans fold into a slim rail with a menu, the Ask and Results side panels narrow, and the status bar shortens its labels (the full text is on hover).
+- Course drawings number corners the way skills count them: the last corner is 4 (Chukyo 1200's two corners are 3 and 4, not 1 and 2).
+- Small buttons are at least 24 px square, so they're easier to hit, and every icon-only button says what it does on hover.
+- Settings → Data and updates shows the skill tier list's date, and About credits the tier list and the guides behind the glossary.
 
 ### Fixed
 
@@ -44,6 +48,11 @@ What changed in each release. Releases are built from the tagged source by GitHu
 - The Claude API key badge said a key was set even when none was.
 - Save my data no longer opens Explorer by itself; its message has a Show button instead.
 - Showing a profile with `UMALORD_PROFILE` (for screenshots) no longer overwrites the Ask tab's roster digest with that profile's roster.
+- Umas and cards Global launched with no longer say "Released 2017-01-01" (uma.guide's JP date); they show Global's launch day.
+- Unticked checkboxes were nearly invisible in dark mode; they have an outline now.
+- In the evening (anywhere west of UTC) a new result's date, a new plan's date and the roster's "Last updated" said tomorrow; they use your computer's date now.
+- The planner's Upcoming CM row explains both marks: ✔ announced, ? estimated.
+- The Results form ran off the right edge on a narrow window, and long plan and file names wrapped onto two lines; they now fit or shorten with "…".
 
 ## [0.1.1] - 2026-10-18
 

@@ -8,6 +8,7 @@ use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 
 use crate::collection_kit::{self as kit, SortOption};
+use crate::ui_util::UiExt;
 use crate::knowledge::{Distance, SkillSource, Style, Surface, effects_text};
 use crate::tab_umas::FILTER_W;
 use crate::theme::{pal, size};
@@ -143,8 +144,10 @@ impl App {
             collapsed = false;
             kit::set_rail(&ctx, "skills", false);
         }
-        // A narrow window with the details open: fold the filters so the list keeps its room.
-        let auto_fold = !collapsed && self.skills.selected.is_some() && ui.available_width() < 1100.0 && !self.focus_search.get();
+        // A narrow window with the details open, or with a table: fold the filters so the list
+        // keeps its room.
+        let table_fold = !kit::opened_by_hand(&ctx, "skills");
+        let auto_fold = !collapsed && ui.available_width() < 1100.0 && !self.focus_search.get() && (self.skills.selected.is_some() || table_fold);
         collapsed |= auto_fold;
         let active = self.skills.filter.count() + usize::from(!self.skills.search.trim().is_empty()) + usize::from(self.skills.course.is_some());
         if collapsed {
@@ -152,6 +155,7 @@ impl App {
                 if kit::rail(ui, active, &[("🔍", "Search"), ("✨", "Rarity and type"), ("🏇", "Works for"), ("🏁", "Course")]) {
                     if auto_fold {
                         self.skills.selected = None;
+                        kit::open_by_hand(&ctx, "skills");
                     } else {
                         kit::set_rail(&ctx, "skills", false);
                     }
@@ -185,7 +189,10 @@ impl App {
         let available = self.kb.skills.keys().filter(|id| self.skill_available(**id)).count();
         let total = self.kb.skills.len();
         let cols = self.skill_cols();
+        // Too narrow for one line: the tools move to a second, and the sort with them when even
+        // the switch and the count fill the first.
         let narrow = ui.available_width() < 860.0;
+        let very_narrow = ui.available_width() < 640.0;
         ui.horizontal(|ui| {
             ui.set_min_height(30.0);
             let options = [
@@ -196,8 +203,10 @@ impl App {
             ui.add_space(8.0);
             let shown = if list.len() == if self.skills.available_only { available } else { total } { format!("{} skills", list.len()) } else { format!("Showing {}", list.len()) };
             ui.label(semibold(shown, size::BODY));
-            ui.add_space(8.0);
-            kit::sort_picker(ui, "skill_sort", &mut self.skills.sort, &SKILL_SORTS);
+            if !very_narrow {
+                ui.add_space(8.0);
+                kit::sort_picker(ui, "skill_sort", &mut self.skills.sort, &SKILL_SORTS);
+            }
             if !narrow {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     self.table_tools(ui, "skills", &cols, list.len(), |app, (r, k)| app.skill_text(list[r], k));
@@ -206,6 +215,9 @@ impl App {
         });
         if narrow {
             ui.horizontal(|ui| {
+                if very_narrow {
+                    kit::sort_picker(ui, "skill_sort", &mut self.skills.sort, &SKILL_SORTS);
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     self.table_tools(ui, "skills", &cols, list.len(), |app, (r, k)| app.skill_text(list[r], k));
                 });
@@ -699,7 +711,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(semibold(&k.name, 21.0).color(tier_color(ui, k.tier())));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    if ui.small_button("✖").on_hover_text("Close").clicked() {
+                    if ui.small_btn("✖").on_hover_text("Close").clicked() {
                         self.skills.selected = None;
                     }
                 });

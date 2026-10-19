@@ -600,7 +600,7 @@ mod tests {
     fn tool_icons_render() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx, crate::theme::Mode::Dark);
-        let _ = ctx.run_ui(Default::default(), |_| {});
+        let _ = crate::ui_util::test_frame(&ctx, Default::default(), |_| {});
         let font = egui::FontId::proportional(14.0);
         let extra = ["💭", "✳", "✔", "✖", "↶", "🔧", "📋", "■", "➤", "⚠", "★"];
         let missing: Vec<String> = registry()

@@ -131,7 +131,9 @@ fn course_feature(course: &Course, m: f64) -> String {
     let mut parts = vec![format!("{m:.0} m · {phase_name}")];
     if let Some((i, c)) = course.corners.iter().enumerate().find(|(_, c)| m >= c.start && m < c.start + c.length) {
         let last = i + 1 == course.corners.len();
-        parts.push(format!("Corner {}{} ({:.0}–{:.0} m)", i + 1, if last { ", the final corner" } else { "" }, c.start, c.start + c.length));
+        // Numbered as the game counts them for skills: the last corner is 4, then backwards.
+        let n = crate::course_notes::corner_numbers(course.corners.len())[i];
+        parts.push(format!("Corner {n}{} ({:.0}–{:.0} m)", if last { ", the final corner" } else { "" }, c.start, c.start + c.length));
     } else if let Some(s) = course.straights.iter().find(|s| m >= s.start && m < s.end) {
         let last = (s.end - d).abs() < 1.0;
         parts.push(format!("{} ({:.0}–{:.0} m)", if last { "The final straight" } else { "A straight" }, s.start, s.end));
@@ -199,12 +201,13 @@ pub fn course_strip_in(ui: &mut egui::Ui, course: &Course, height: f32, markers:
         let r = Rect::from_min_max(pos2(x(s.start), track.top()), pos2(x(s.end), track.bottom()));
         painter.rect_filled(r, CornerRadius::same(4), if last { p.accent.gamma_multiply(0.55) } else { p.border });
     }
+    let numbers = crate::course_notes::corner_numbers(course.corners.len());
     for (i, c) in course.corners.iter().enumerate() {
         let r = Rect::from_min_max(pos2(x(c.start), track.top()), pos2(x(c.start + c.length), track.bottom()));
         let fill = series(3, ui.visuals().dark_mode).gamma_multiply(0.65);
         painter.rect_filled(r.shrink2(vec2(0.5, 0.0)), CornerRadius::same(4), fill);
         if r.width() > 12.0 {
-            painter.text(r.center(), Align2::CENTER_CENTER, (i + 1).to_string(), FontId::proportional(10.5), ink_on(fill));
+            painter.text(r.center(), Align2::CENTER_CENTER, numbers[i].to_string(), FontId::proportional(10.5), ink_on(fill));
         }
     }
     // Slopes: ramps up or down under the track, with the grade.

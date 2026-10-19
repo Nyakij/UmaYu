@@ -25,10 +25,12 @@ pub mod size {
     /// Headline numbers in stat tiles.
     pub const XXL: f32 = 28.0;
     /// Hero numbers: one per page at most.
+    #[allow(dead_code)] // part of the scale, unused for now
     pub const DISPLAY: f32 = 40.0;
 }
 
 /// Gaps between things, before the density setting scales them (see `space`).
+#[allow(dead_code)] // the whole scale, though not every step is used yet
 pub mod gap {
     pub const XS: f32 = 4.0;
     pub const SM: f32 = 8.0;
@@ -106,14 +108,6 @@ impl Chibi {
     pub fn from_key(key: &str) -> Option<Chibi> {
         Chibi::ALL.into_iter().find(|c| c.key() == key)
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Chibi::Everywhere => "Everywhere",
-            Chibi::Home => "Home and empty pages",
-            Chibi::Off => "Off",
-        }
-    }
 }
 
 static CHIBI: AtomicU8 = AtomicU8::new(1);
@@ -138,10 +132,6 @@ pub fn density() -> f32 {
 /// A gap from `gap`, scaled by the density setting.
 pub fn space(g: f32) -> f32 {
     g * density()
-}
-
-pub fn compact() -> bool {
-    DENSITY.load(Ordering::Relaxed) == 1
 }
 
 /// Switch between comfortable and compact spacing; restyles a running app.

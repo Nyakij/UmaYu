@@ -7,6 +7,7 @@ use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 
 use crate::collection_kit::{self as kit, SortOption, TileGroup};
+use crate::ui_util::UiExt;
 use crate::data::Uma;
 use crate::knowledge::{Aptitude, grade_rank};
 use crate::theme::{pal, size};
@@ -204,8 +205,10 @@ impl App {
             collapsed = false;
             kit::set_rail(&ctx, "umas", false);
         }
-        // A narrow window with the details open: fold the filters so the list keeps its room.
-        let auto_fold = !collapsed && self.umas.selected.is_some() && ui.available_width() < 1100.0 && !self.focus_search.get();
+        // A narrow window with the details open, or with a table: fold the filters so the list
+        // keeps its room.
+        let table_fold = self.view == View::Table && !kit::opened_by_hand(&ctx, "umas");
+        let auto_fold = !collapsed && ui.available_width() < 1100.0 && !self.focus_search.get() && (self.umas.selected.is_some() || table_fold);
         collapsed |= auto_fold;
         let active = self.umas.filter.count() + usize::from(!self.umas.search.trim().is_empty());
         if collapsed {
@@ -213,6 +216,7 @@ impl App {
                 if kit::rail(ui, active, &[("🔍", "Search"), ("★", "Stars"), ("P", "Potential"), ("A", "Aptitudes")]) {
                     if auto_fold {
                         self.umas.selected = None;
+                        kit::open_by_hand(&ctx, "umas");
                     } else {
                         kit::set_rail(&ctx, "umas", false);
                     }
@@ -721,7 +725,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(semibold(&uma.name, 22.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            if ui.small_button("✖").on_hover_text("Close").clicked() {
+                            if ui.small_btn("✖").on_hover_text("Close").clicked() {
                                 self.umas.selected = None;
                             }
                         });
@@ -737,7 +741,11 @@ impl App {
                             badge(ui, format!("Potential {} of 5", uma.potential), pal(ui).warn).on_hover_text("Some of her potential skills are still locked");
                         }
                         if let Some(i) = &info {
-                            badge(ui, format!("Released {}", i.release), p.weak);
+                            if i.release == crate::knowledge::GLOBAL_LAUNCH {
+                                badge(ui, "On Global since launch", p.weak).on_hover_text(format!("She was there when the Global server opened, {}.", i.release));
+                            } else {
+                                badge(ui, format!("Released {}", i.release), p.weak).on_hover_text("When she arrived on the Global server.");
+                            }
                         }
                     });
                 });

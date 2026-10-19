@@ -246,7 +246,7 @@ impl App {
     /// Settings → Profile → Save my data: write the account to profiles/.
     pub(crate) fn export_profile(&self) -> Result<PathBuf, String> {
         let root = self.root.as_ref().ok_or("umaLord folder not found.")?;
-        profile::export(root, &self.profile_name(), &today())
+        profile::export(root, &self.profile_name(), &crate::ui_util::local_today())
     }
 
     fn import_profile(&mut self, p: &Profile) -> Result<String, String> {
@@ -294,7 +294,7 @@ impl App {
     /// changes can be undone as one action. Returns how many rows changed.
     pub(crate) fn apply_edits(&mut self, edits: &[Edit], record: bool) -> Result<usize, String> {
         let root = self.root.clone().ok_or("umaLord folder not found.")?;
-        let today = today();
+        let today = crate::ui_util::local_today();
         let (up, cp) = (root.join(crate::data::UMAS_FILE), root.join(crate::data::CARDS_FILE));
         let mut umas = std::fs::read_to_string(&up).map_err(|e| e.to_string())?;
         let mut cards = std::fs::read_to_string(&cp).map_err(|e| e.to_string())?;

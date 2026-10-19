@@ -8,6 +8,7 @@ use std::sync::{Arc, mpsc};
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense, Stroke, pos2, vec2};
 
 use crate::App;
+use crate::ui_util::UiExt;
 use crate::knowledge::{Distance, Style};
 use crate::sim::builder::build_skill_data;
 use crate::sim::course::Course;
@@ -489,7 +490,7 @@ impl App {
             crate::ui_util::segmented(ui, &mut self.sim.mode, &modes);
         });
         if self.sim.mode == Mode::Stamina {
-            ui.checkbox(&mut self.sim.force_full, "Force a full spurt").on_hover_text("Shows how far short of a full spurt the build is");
+            ui.tick(&mut self.sim.force_full, "Force a full spurt").on_hover_text("Shows how far short of a full spurt the build is");
         }
         if self.sim.mode == Mode::HpCalc {
             ui.horizontal(|ui| {
@@ -508,14 +509,14 @@ impl App {
                 ui.label("Seed").on_hover_text("The starting point for the random numbers. The same seed gives the same results.");
                 ui.add_enabled(!self.sim.auto_seed, egui::DragValue::new(&mut o.seed).range(0.0..=4_294_967_295.0).speed(1.0).fixed_decimals(0));
             });
-            ui.checkbox(&mut self.sim.auto_seed, "New seed each run").on_hover_text("Off: rerun with the same seed for repeatable results");
-            ui.checkbox(&mut o.sync_rng, "Sync RNG").on_hover_text("Both umas see the same random events, so the gap shows the build difference");
-            ui.checkbox(&mut o.wit_check, "Wit check").on_hover_text("Skills can fail to activate on a Wit roll");
-            ui.checkbox(&mut o.rushed, "Rushed (kakari)").on_hover_text("Umas can get over-eager mid-race and burn HP, as in the game");
-            ui.checkbox(&mut o.lane_movement, "Lane movement").on_hover_text("Umas move between lanes on corners and straights");
-            ui.checkbox(&mut o.lead_competition, "Spot struggle").on_hover_text("Front runners fighting for the lead early on");
+            ui.tick(&mut self.sim.auto_seed, "New seed each run").on_hover_text("Off: rerun with the same seed for repeatable results");
+            ui.tick(&mut o.sync_rng, "Sync RNG").on_hover_text("Both umas see the same random events, so the gap shows the build difference");
+            ui.tick(&mut o.wit_check, "Wit check").on_hover_text("Skills can fail to activate on a Wit roll");
+            ui.tick(&mut o.rushed, "Rushed (kakari)").on_hover_text("Umas can get over-eager mid-race and burn HP, as in the game");
+            ui.tick(&mut o.lane_movement, "Lane movement").on_hover_text("Umas move between lanes on corners and straights");
+            ui.tick(&mut o.lead_competition, "Spot struggle").on_hover_text("Front runners fighting for the lead early on");
             let mut dueling = o.compete_fight;
-            if ui.checkbox(&mut dueling, "Dueling").on_hover_text("Late-race duels on the final straight").changed() {
+            if ui.tick(&mut dueling, "Dueling").on_hover_text("Late-race duels on the final straight").changed() {
                 o.compete_fight = dueling;
                 o.dueling = dueling.then_some([30.0, 30.0, 25.0, 20.0, 15.0]);
             }
@@ -660,7 +661,7 @@ impl App {
             if self.sim.mode != Mode::HpCalc {
                 match &self.sim.job {
                     Some(job) => {
-                        if ui.small_button("✖").on_hover_text("Stop the run").clicked() {
+                        if ui.small_btn("✖").on_hover_text("Stop the run").clicked() {
                             job.progress.cancel.store(true, Ordering::Relaxed);
                         }
                         let done = job.progress.done.load(Ordering::Relaxed) as f32;
@@ -761,10 +762,10 @@ impl App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.sim.mode == Mode::Compare {
                         let other = 1 - i;
-                        if ui.small_button(if i == 0 { "Copy →" } else { "← Copy" }).on_hover_text(format!("Copy this build to Uma {}", other + 1)).clicked() {
+                        if ui.small_btn(if i == 0 { "Copy →" } else { "← Copy" }).on_hover_text(format!("Copy this build to Uma {}", other + 1)).clicked() {
                             self.sim.umas[other] = self.sim.umas[i].clone();
                         }
-                        if i == 0 && ui.small_button("⇄ Swap").on_hover_text("Swap Uma 1 and Uma 2").clicked() {
+                        if i == 0 && ui.small_btn("⇄ Swap").on_hover_text("Swap Uma 1 and Uma 2").clicked() {
                             self.sim.umas.swap(0, 1);
                         }
                     }
@@ -808,7 +809,7 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 match &meta {
                     Some((label, stats)) => {
-                        if ui.small_button("📈 Use meta stats").on_hover_text(format!("The community meta sheet's recommended stats for {label}: {}. Community opinion, not game data.", stats.map(|v| format!("{v:.0}")).join(" / "))).clicked() {
+                        if ui.small_btn("📈 Use meta stats").on_hover_text(format!("The community meta sheet's recommended stats for {label}: {}. Community opinion, not game data.", stats.map(|v| format!("{v:.0}")).join(" / "))).clicked() {
                             set_stats = Some(*stats);
                         }
                     }
@@ -914,7 +915,7 @@ impl App {
             let (add, clear) = ui
                 .horizontal(|ui| {
                     let add = search_combo(ui, ("sim_add_skill", i), "＋ Add skill…", 260.0, items, None);
-                    (add, ui.small_button("Clear").on_hover_text("Remove every skill except the unique").clicked())
+                    (add, ui.small_btn("Clear").on_hover_text("Remove every skill except the unique").clicked())
                 })
                 .inner;
             if let Some(id) = add {
@@ -1254,7 +1255,7 @@ impl App {
         match running {
             Some(k) if k == kind => {
                 let job = self.sim.extra.as_ref().expect("job");
-                if ui.small_button("✖").on_hover_text("Stop").clicked() {
+                if ui.small_btn("✖").on_hover_text("Stop").clicked() {
                     job.progress.cancel.store(true, Ordering::Relaxed);
                 }
                 let done = job.progress.done.load(Ordering::Relaxed) as f32;
@@ -1522,7 +1523,7 @@ impl App {
             ui.selectable_value(&mut self.sim.chart_pool, ChartPool::Account, "Skills on your account").on_hover_text("Hints and events from cards you own, skills of umas you own, and Uma 1's own skills");
             ui.selectable_value(&mut self.sim.chart_pool, ChartPool::AllGlobal, "All Global skills");
             ui.separator();
-            ui.checkbox(&mut self.sim.chart_per_sp, "Sort by lengths per 100 SP");
+            ui.tick(&mut self.sim.chart_per_sp, "Sort by lengths per 100 SP");
         });
         let Some(rows) = self.sim.chart.clone() else {
             if self.sim.job.is_none() {
@@ -1548,7 +1549,7 @@ impl App {
                 }
                 ui.end_row();
                 for r in &rows {
-                    if ui.small_button("＋").on_hover_text("Add to Uma 1").clicked() {
+                    if ui.small_btn("＋").on_hover_text("Add to Uma 1").clicked() {
                         add = Some(r.id);
                     }
                     self.skill_link(ui, r.id, !self.skill_available(r.id));
@@ -1808,7 +1809,7 @@ mod tests {
                 a.sim.pinned = Some(0);
                 a.sim.replay.t = 20.0;
                 let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0))), ..Default::default() };
-                let _ = ctx.run_ui(input, |ui| a.frame(ui));
+                let _ = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
             }
         }
     }

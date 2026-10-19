@@ -692,6 +692,9 @@ fn read<T: for<'de> Deserialize<'de>>(dir: &Path, file: &str) -> Result<T, Strin
     serde_json::from_str(&text).map_err(|e| format!("{file}: {e}"))
 }
 
+/// The day the Global server opened.
+pub const GLOBAL_LAUNCH: &str = "2025-06-26";
+
 impl Knowledge {
     pub fn load(root: Option<&Path>) -> Knowledge {
         let Some(root) = root else {
@@ -732,13 +735,20 @@ impl Knowledge {
     }
 
     pub fn from_parts(
-        umas: Vec<UmaInfo>,
-        cards: Vec<CardInfo>,
+        mut umas: Vec<UmaInfo>,
+        mut cards: Vec<CardInfo>,
         skills: Vec<SkillInfo>,
         races: Vec<RaceInfo>,
         glossary: Vec<GlossaryEntry>,
         built: Option<String>,
     ) -> Knowledge {
+        // uma.guide dates what Global launched with by JP's calendar (2017-01-01 for umas,
+        // 2021-02-24 for cards); on Global they all arrived on launch day.
+        for r in umas.iter_mut().map(|u| &mut u.release).chain(cards.iter_mut().map(|c| &mut c.release)) {
+            if !r.is_empty() && r.as_str() < GLOBAL_LAUNCH {
+                *r = GLOBAL_LAUNCH.to_string();
+            }
+        }
         let mut sources: HashMap<u32, Vec<SkillSource>> = HashMap::new();
         let mut add = |skill: u32, src: SkillSource| {
             let list = sources.entry(skill).or_default();

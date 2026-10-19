@@ -9,7 +9,7 @@ use crate::App;
 use crate::data::{is_separator, tables};
 use crate::tab_umas::filter_heading;
 use crate::theme::pal;
-use crate::ui_util::{card_titled, empty_state, open_url, page_header, search_combo, semibold, today};
+use crate::ui_util::{card_titled, empty_state, open_url, page_header, search_combo, local_today, semibold};
 
 const LOG_ICONS: [&str; 5] = ["🐴", "👥", "🏆", "⭐", "✨"];
 
@@ -65,14 +65,14 @@ impl App {
             s.headers = t.headers;
             s.rows = t.rows.into_iter().filter(|r| r.iter().any(|c| !c.is_empty())).collect();
         }
-        s.form = s.headers.iter().map(|h| if h.starts_with("Date") { today() } else { String::new() }).collect();
+        s.form = s.headers.iter().map(|h| if h.starts_with("Date") { local_today() } else { String::new() }).collect();
     }
 
     pub(crate) fn results_tab(&mut self, ui: &mut egui::Ui) {
         if self.results.loaded != Some(self.results.log) {
             self.load_log();
         }
-        egui::Panel::left("results_logs").resizable(false).exact_size(240.0).frame(crate::side_frame()).show(ui, |ui| {
+        egui::Panel::left("results_logs").resizable(false).exact_size(if ui.available_width() < 1100.0 { 200.0 } else { 240.0 }).frame(crate::side_frame()).show(ui, |ui| {
             let weak = pal(ui).weak;
             ui.label(semibold("Logs", 17.0));
             ui.label(RichText::new("One log per kind of result. Pick one to add to it or read it.").size(12.5).color(weak));
@@ -120,8 +120,10 @@ impl App {
                 for (i, h) in self.results.headers.iter().enumerate() {
                     ui.label(RichText::new(h).color(p.weak));
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.results.form[i]).desired_width(560.0));
                         let (options, append) = &suggestions[i];
+                        // Leave room for the suggestion button, so a narrow window doesn't cut it off.
+                        let room = ui.available_width() - if options.is_empty() { 0.0 } else { 96.0 };
+                        ui.add(egui::TextEdit::singleline(&mut self.results.form[i]).desired_width(room.clamp(160.0, 560.0)));
                         if !options.is_empty() {
                             let label = if *append { "＋ add" } else { "✨ pick" };
                             let items = || options.iter().map(|o| (Some(o.clone()), o.clone(), String::new())).collect();
@@ -336,9 +338,10 @@ impl App {
                     for f in files {
                         let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                         let b = egui::Button::new(RichText::new(format!("📄 {name}")).size(13.5))
+                            .truncate()
                             .selected(self.notes.selected.as_ref() == Some(f))
                             .min_size(vec2(ui.available_width(), 26.0));
-                        if ui.add(b).clicked() {
+                        if ui.add(b).on_hover_text(&name).clicked() {
                             self.notes.selected = Some(f.clone());
                         }
                     }

@@ -17,7 +17,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Out,
     # Page names from the list below; empty means all of them.
     [string[]]$Pages = @(),
-    # mode-look pairs: dark or light, then sky, sakura, sunset or night ("dark" alone means dark-sky).
+    # mode-look pairs: dark or light, then sky, sakura, sunset, night, track or ink ("dark" alone means dark-sky).
     [string[]]$Themes = @('dark-sky', 'light-sky', 'light-sakura'),
     [string[]]$Sizes = @('1400x900', '960x600'),
     # How many copies of the app run at once.
@@ -68,14 +68,19 @@ $all = [ordered]@{
     'cards-grid'     = @{ TAB = 'cards' }
     'cards-table'    = @{ TAB = 'cards'; VIEW = 'table' }
     'card-detail'    = @{ TAB = 'cards'; SELECT = '30076' }
+    'cards-compare'  = @{ TAB = 'cards'; COMPARE = '30076,30057' }
     'cards-add'      = @{ ADD = '30076' }
     'skills'         = @{ TAB = 'skills' }
     'skill-detail'   = @{ TAB = 'skills'; SELECT = '200512' }
+    'skills-course'  = @{ TAB = 'skills'; COURSE = 'cm' }
     'planner-empty'  = @{ TAB = 'planner' }
     'planner-demo'   = @{ TAB = 'planner'; SELECT = '100601' }
     'planner-skills' = @{ TAB = 'planner'; SELECT = '100601'; RUN = '1'; SCROLL = '1500' }
     'sim-empty'      = @{ TAB = 'sim' }
     'sim-run'        = @{ TAB = 'sim'; SELECT = '100601'; RUN = '1' }
+    'sim-race'       = @{ TAB = 'sim'; SELECT = '100601'; RUN = '1'; RESULTS = 'race' }
+    'sim-skills'     = @{ TAB = 'sim'; SELECT = '100601'; RUN = '1'; RESULTS = 'skills' }
+    'sim-stamina'    = @{ TAB = 'sim'; SELECT = '100601'; RUN = '1'; RESULTS = 'stamina' }
     'results'        = @{ TAB = 'results' }
     'ask'            = @{ TAB = 'ask' }
     'notes'          = @{ TAB = 'notes' }
@@ -90,7 +95,8 @@ $names = if ($Pages.Count) { $Pages } else { @($all.Keys) }
 foreach ($n in $names) { if (-not $all.Contains($n)) { throw "Unknown page '$n'. Pages: $($all.Keys -join ', ')" } }
 
 $vars = 'SCREENSHOT', 'TAB', 'VIEW', 'SELECT', 'RUN', 'SCROLL', 'SETUP', 'SETTINGS', 'SETTINGS_PAGE', 'HELP', 'ADD', 'PICKER',
-    'WINDOW', 'THEME', 'LOOK', 'MASCOT', 'CHIBI', 'PROFILE', 'ASK', 'INSTALL', 'ROOT', 'LIVE'
+    'WINDOW', 'THEME', 'LOOK', 'MASCOT', 'CHIBI', 'PROFILE', 'ASK', 'INSTALL', 'ROOT', 'LIVE', 'SHOP', 'EXPLAIN', 'COMPARE',
+    'COURSE', 'RAIL', 'RESULTS', 'EXTRA', 'REPLAY', 'SCALE', 'DENSITY', 'HOVER', 'APPROVE', 'AGENT_DIR'
 $running = New-Object System.Collections.ArrayList
 $count = 0
 foreach ($name in $names) {

@@ -10,6 +10,7 @@ use eframe::egui::{self, Color32, CornerRadius, RichText, Sense, Stroke, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::App;
+use crate::ui_util::UiExt;
 use crate::career::CareerResult;
 use crate::recommend::RankCache;
 use crate::sim::run::{ChartRow, Progress};
@@ -239,7 +240,7 @@ impl Default for Plan {
     fn default() -> Self {
         Self {
             title: String::new(),
-            created: today(),
+            created: crate::ui_util::local_today(),
             purpose: Purpose::ChampionsMeeting,
             distance: Distance::Medium,
             surface: Surface::Turf,
@@ -557,7 +558,12 @@ impl App {
     }
 
     pub(crate) fn planner_tab(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("plan_list").resizable(false).exact_size(240.0).frame(crate::side_frame()).show(ui, |ui| self.plan_list(ui));
+        // A narrow window keeps the plan's width: the saved plans fold into a rail with a menu.
+        if ui.available_width() < 1100.0 {
+            egui::Panel::left("plan_list_rail").resizable(false).exact_size(crate::collection_kit::RAIL_W).frame(crate::collection_kit::rail_frame()).show(ui, |ui| self.plan_rail(ui));
+        } else {
+            egui::Panel::left("plan_list").resizable(false).exact_size(240.0).frame(crate::side_frame()).show(ui, |ui| self.plan_list(ui));
+        }
         egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
             let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
             if let Some(y) = self.debug_scroll {
@@ -574,13 +580,50 @@ impl App {
         }
     }
 
+    fn new_plan(&mut self) {
+        self.planner.plan = Plan::default();
+        self.planner.open_file = None;
+        self.planner.skill_status = None;
+    }
+
+    /// The saved plans on a narrow window: ＋ for a new plan, 📂 for a menu of saved ones.
+    fn plan_rail(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            let new = crate::ui_util::primary_button(ui, "＋", 15.0).min_size(vec2(32.0, 32.0));
+            if ui.add(new).on_hover_text("New plan: start an empty one. Save the current one first if you want to keep it.").clicked() {
+                self.new_plan();
+            }
+            ui.add_space(6.0);
+            let mut load = None;
+            ui.menu_button(RichText::new("📂").size(16.0), |ui| {
+                ui.set_min_width(240.0);
+                ui.label(RichText::new("Saved plans").strong());
+                if self.planner.files.is_empty() {
+                    ui.label(RichText::new("No saved plans yet. Plans you save land in the plans folder.").size(12.5).color(pal(ui).weak));
+                }
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for (path, title) in &self.planner.files {
+                        let open = self.planner.open_file.as_ref() == Some(path);
+                        if ui.add(egui::Button::new(format!("📋 {title}")).selected(open)).clicked() {
+                            load = Some(path.clone());
+                            ui.close();
+                        }
+                    }
+                });
+            })
+            .response
+            .on_hover_text(format!("Saved plans ({}): click to pick one", self.planner.files.len()));
+            if let Some(path) = load {
+                self.open_plan_file(&path);
+            }
+        });
+    }
+
     fn plan_list(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
         let new = crate::ui_util::primary_button(ui, "＋ New plan", 14.5).min_size(vec2(ui.available_width(), 32.0));
         if ui.add(new).on_hover_text("Start an empty plan. Save the current one first if you want to keep it.").clicked() {
-            self.planner.plan = Plan::default();
-            self.planner.open_file = None;
-            self.planner.skill_status = None;
+            self.new_plan();
         }
         crate::ui_util::section_label(ui, "Saved plans", "Plans you saved, newest first. Click one to open it. They live in the plans folder as markdown files.");
         let mut load = None;
@@ -591,8 +634,8 @@ impl App {
             for (path, title) in &self.planner.files {
                 let open = self.planner.open_file.as_ref() == Some(path);
                 let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                let b = egui::Button::new(RichText::new(format!("📋 {title}")).size(13.5)).selected(open).min_size(vec2(ui.available_width(), 28.0));
-                if ui.add(b).on_hover_text(name).clicked() {
+                let b = egui::Button::new(RichText::new(format!("📋 {title}")).size(13.5)).truncate().selected(open).min_size(vec2(ui.available_width(), 28.0));
+                if ui.add(b).on_hover_text(format!("{title}\n{name}")).clicked() {
                     load = Some(path.clone());
                 }
             }
@@ -811,7 +854,7 @@ impl App {
                     let text: Vec<String> = ev.stats.iter().zip(names).map(|(v, n)| format!("{n} {v}")).collect();
                     ui.label(text.join(" · ")).on_hover_text(if ev.description.is_empty() { "\"++\" means more is better." } else { &ev.description });
                     let parsed: Vec<Option<u32>> = ev.stats.iter().map(|v| v.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()).collect();
-                    if parsed.iter().all(Option::is_some) && ui.small_button("Use these").on_hover_text("Set Step 3's target stats to these").clicked() {
+                    if parsed.iter().all(Option::is_some) && ui.small_btn("Use these").on_hover_text("Set Step 3's target stats to these").clicked() {
                         for (i, v) in parsed.into_iter().enumerate() {
                             self.planner.plan.target[i] = v.unwrap_or(self.planner.plan.target[i]);
                         }
@@ -963,7 +1006,9 @@ impl App {
                 ui.set_width(LABEL_W);
                 ui.label(RichText::new("Upcoming CM").color(p.weak));
                 if shown.iter().any(|e| !e.announced) {
-                    ui.label(RichText::new("? estimated").size(11.0).color(p.weak)).on_hover_text("Not announced yet: Umalator's guess at the date, course and conditions.");
+                    let legend = if shown.iter().any(|e| e.announced) { "✔ announced · ? estimated" } else { "? estimated" };
+                    ui.label(RichText::new(legend).size(11.0).color(p.weak))
+                        .on_hover_text("✔: announced in the game's news. ?: not announced yet, so Umalator's guess at the date, course and conditions.");
                 }
             });
             ui.horizontal_wrapped(|ui| {
@@ -1070,7 +1115,7 @@ impl App {
             match (&current, &cm_course) {
                 (Some(r), _) => {
                     badge(ui, format!("{} {} {}m · {}", r.track, r.surface, r.distance, r.name), p.link).on_hover_text(format!("{} ({}), turns {}", r.name, r.grade, r.direction));
-                    if ui.small_button("✖").on_hover_text("Clear the course (unlinks the CM too)").clicked() {
+                    if ui.small_btn("✖").on_hover_text("Clear the course (unlinks the CM too)").clicked() {
                         let plan = &mut self.planner.plan;
                         plan.course = None;
                         plan.cm_date = None;
@@ -1339,7 +1384,7 @@ impl App {
                             ui.label(RichText::new("LB").size(12.0).color(p.weak));
                             ui.add(egui::DragValue::new(&mut self.planner.plan.friend_lb).range(0..=4));
                         }
-                        if id.is_some() && ui.small_button("✖").on_hover_text("Remove").clicked() {
+                        if id.is_some() && ui.small_btn("✖").on_hover_text("Remove").clicked() {
                             clear = Some(slot);
                         }
                     });

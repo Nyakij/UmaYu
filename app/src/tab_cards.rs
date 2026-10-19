@@ -8,6 +8,7 @@ use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 
 use crate::collection_kit::{self as kit, SortOption, TileGroup};
+use crate::ui_util::UiExt;
 use crate::data::{CardType, Rarity, SupportCard};
 use crate::knowledge::{CardInfo, effect, effect_at};
 use crate::tab_umas::FILTER_W;
@@ -178,8 +179,10 @@ impl App {
             collapsed = false;
             kit::set_rail(&ctx, "cards", false);
         }
-        // A narrow window with the details open: fold the filters so the list keeps its room.
-        let auto_fold = !collapsed && self.cards.selected.is_some() && ui.available_width() < 1100.0 && !self.focus_search.get();
+        // A narrow window with the details open, or with a table: fold the filters so the list
+        // keeps its room.
+        let table_fold = self.view == View::Table && !kit::opened_by_hand(&ctx, "cards");
+        let auto_fold = !collapsed && ui.available_width() < 1100.0 && !self.focus_search.get() && (self.cards.selected.is_some() || table_fold);
         collapsed |= auto_fold;
         let active = self.cards.filter.count() + usize::from(!self.cards.search.trim().is_empty());
         if collapsed {
@@ -187,6 +190,7 @@ impl App {
                 if kit::rail(ui, active, &[("🔍", "Search"), ("🃏", "Type and rarity"), ("◆", "Limit break"), ("💡", "Teaches"), ("📈", "Effect minimums")]) {
                     if auto_fold {
                         self.cards.selected = None;
+                        kit::open_by_hand(&ctx, "cards");
                     } else {
                         kit::set_rail(&ctx, "cards", false);
                     }
@@ -443,7 +447,7 @@ impl App {
                         });
                         ui.label("≥");
                         ui.add(egui::DragValue::new(min).range(0..=200).speed(1.0));
-                        if ui.small_button("✕").on_hover_text("Remove this minimum").clicked() {
+                        if ui.small_btn("✕").on_hover_text("Remove this minimum").clicked() {
                             drop = Some(i);
                         }
                     });
@@ -1039,8 +1043,8 @@ impl App {
                         a.kind = if on { None } else { Some(t.to_string()) };
                     }
                 }
-                ui.checkbox(&mut a.owned_only, "Owned only").on_hover_text("Only cards you have, to raise their LB or level");
-                ui.checkbox(&mut a.upcoming, "Not on Global yet").on_hover_text("uma.guide lists some cards ahead of their Global release");
+                ui.tick(&mut a.owned_only, "Owned only").on_hover_text("Only cards you have, to raise their LB or level");
+                ui.tick(&mut a.upcoming, "Not on Global yet").on_hover_text("uma.guide lists some cards ahead of their Global release");
             });
             ui.add_space(6.0);
             let q = a.search.trim().to_lowercase();
@@ -1235,7 +1239,7 @@ impl App {
         let row = crate::data::CardRow { id, title: info.title.clone(), uma: info.uma.clone(), card_type, lb: a.lb, level: a.level, notes: a.notes.trim().to_string() };
         let path = root.join(crate::data::CARDS_FILE);
         let text = std::fs::read_to_string(&path).map_err(|e| format!("Couldn't read {}: {e}", path.display()))?;
-        let (new, updated) = crate::data::upsert_card(&text, &row, &crate::ui_util::today())?;
+        let (new, updated) = crate::data::upsert_card(&text, &row, &crate::ui_util::local_today())?;
         std::fs::write(&path, new).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
         self.reload_roster();
         self.write_digest();
@@ -1323,7 +1327,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(semibold(&card.uma, 21.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            if ui.small_button("✖").on_hover_text("Close").clicked() {
+                            if ui.small_btn("✖").on_hover_text("Close").clicked() {
                                 self.cards.selected = None;
                             }
                         });

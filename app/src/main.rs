@@ -92,7 +92,7 @@ fn main() -> eframe::Result {
         let result = data::find_root(None).ok_or_else(|| "umaLord folder not found.".to_string()).and_then(|root| {
             let current = Roster::load(Some(&root)).0.profile.unwrap_or_else(|| "My account".into());
             if cmd == "--export-profile" {
-                profile::export(&root, name.as_deref().unwrap_or(&current), &ui_util::today()).map(|p| format!("Saved {}", p.display()))
+                profile::export(&root, name.as_deref().unwrap_or(&current), &ui_util::local_today()).map(|p| format!("Saved {}", p.display()))
             } else {
                 profile::start_over(&root, name.as_deref().unwrap_or(""), &profile::stamp())
                     .map(|b| b.map_or("Nothing to back up; the account is empty now.".into(), |p| format!("Backed up to {}; the account is empty now.", p.display())))
@@ -367,7 +367,7 @@ mod tests {
             let mut times = Vec::new();
             for _ in 0..6 {
                 let t = std::time::Instant::now();
-                let _ = ctx.run_ui(input(), |ui| a.frame(ui));
+                let _ = crate::ui_util::test_frame(&ctx, input(), |ui| a.frame(ui));
                 times.push(t.elapsed().as_secs_f64() * 1e3);
             }
             let steady = times[1..].iter().sum::<f64>() / (times.len() - 1) as f64;
@@ -398,7 +398,7 @@ mod tests {
         let texts = |a: &mut App| {
             let mut n = 0;
             for _ in 0..3 {
-                let out = ctx.run_ui(input(), |ui| a.frame(ui));
+                let out = crate::ui_util::test_frame(&ctx, input(), |ui| a.frame(ui));
                 n = out.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Text(_))).count();
             }
             n
@@ -1294,22 +1294,26 @@ impl App {
         let weak = theme::pal(ui).weak;
         ui.style_mut().override_text_style = Some(egui::TextStyle::Small);
         ui.style_mut().visuals.override_text_color = Some(weak);
+        // On a narrow window the labels shorten and the full text moves to the hover, so the
+        // line never runs off the edge.
+        let narrow = ui.available_width() < 1250.0;
         ui.horizontal(|ui| {
             if let Some(name) = &self.roster.profile {
                 ui.label(format!("👤 {name}")).on_hover_text("Whose account this is. ⚙ Settings → Profile renames it or switches accounts.");
                 ui.separator();
             }
             if let Some(server) = &self.roster.server {
-                ui.label(format!("🌐 Server: {server}"));
+                let short = server.split(" (").next().unwrap_or(server);
+                ui.label(if narrow { format!("🌐 {short}") } else { format!("🌐 Server: {server}") }).on_hover_text(format!("Server: {server}"));
                 ui.separator();
             }
             match &self.source {
-                Source::Folder(p) => ui.label("📁 Your data folder").on_hover_text(p.display().to_string()),
+                Source::Folder(p) => ui.label(if narrow { "📁 Data folder" } else { "📁 Your data folder" }).on_hover_text(p.display().to_string()),
                 Source::Embedded => ui.label(RichText::new("⚠ Using a built-in snapshot: the umaLord folder wasn't found").color(theme::pal(ui).warn)),
             };
             if let Some(d) = &self.roster.cards_updated {
                 ui.separator();
-                ui.label(format!("Roster last updated {d}"));
+                ui.label(if narrow { format!("Roster {d}") } else { format!("Roster last updated {d}") }).on_hover_text(format!("Your roster files were last updated {d}."));
             }
             ui.separator();
             match (&self.kb.error, &self.kb.built) {
@@ -1317,25 +1321,33 @@ impl App {
                     ui.label(RichText::new("⚠ Game data missing: run tools/update_knowledge.py").color(theme::pal(ui).warn)).on_hover_text(e);
                 }
                 (None, built) => {
-                    ui.label(format!("Game data from uma.guide{}", built.as_ref().map(|b| format!(", {}", &b[..10.min(b.len())])).unwrap_or_default()))
-                        .on_hover_text(format!(
-                            "Global server: {} umas · {} support cards · {} skills",
-                            self.kb.umas.len(),
-                            self.kb.cards.len(),
-                            self.kb.skills.len()
-                        ));
+                    let day = built.as_ref().map(|b| b[..10.min(b.len())].to_string());
+                    let text = match (&day, narrow) {
+                        (Some(d), true) => format!("uma.guide {d}"),
+                        (Some(d), false) => format!("Game data from uma.guide, {d}"),
+                        (None, _) => "Game data from uma.guide".to_string(),
+                    };
+                    ui.label(text).on_hover_text(format!(
+                        "Game data from uma.guide{}. Global server: {} umas · {} support cards · {} skills",
+                        day.map(|d| format!(", {d}")).unwrap_or_default(),
+                        self.kb.umas.len(),
+                        self.kb.cards.len(),
+                        self.kb.skills.len()
+                    ));
                 }
             }
             ui.separator();
             let (text, hover, warn) = self.live_status();
+            let text = if narrow { text.replace(" (umamusume.com)", "") } else { text };
             let r = ui.label(if warn { RichText::new(text).color(theme::pal(ui).warn) } else { RichText::new(text) });
             if !hover.is_empty() {
                 r.on_hover_text(hover);
             }
             if !self.roster.warnings.is_empty() {
                 ui.separator();
-                ui.label(RichText::new(format!("⚠ {} lines in your roster files couldn't be read", self.roster.warnings.len())).color(theme::pal(ui).warn))
-                    .on_hover_text(self.roster.warnings.join("\n"));
+                let n = self.roster.warnings.len();
+                let text = if narrow { format!("⚠ {n} unread lines") } else { format!("⚠ {n} lines in your roster files couldn't be read") };
+                ui.label(RichText::new(text).color(theme::pal(ui).warn)).on_hover_text(format!("{n} lines in your roster files couldn't be read:\n{}", self.roster.warnings.join("\n")));
             }
         });
     }

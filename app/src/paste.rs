@@ -6,6 +6,7 @@
 use eframe::egui::{self, RichText, vec2};
 
 use crate::App;
+use crate::ui_util::UiExt;
 use crate::knowledge::Knowledge;
 use crate::theme::{pal, size};
 use crate::ui_util::{ToastKind, draw_lb, semibold};
@@ -310,7 +311,7 @@ impl App {
                     ui.end_row();
                     let kb = &self.kb;
                     for (i, m) in self.onboarding.paste.rows.iter_mut().enumerate() {
-                        ui.checkbox(&mut m.include, "");
+                        ui.tick(&mut m.include, "");
                         ui.label(RichText::new(crate::ui_util::truncate(&m.line.text, 34)).size(13.0)).on_hover_text(&m.line.text);
                         let current = m.best.map_or_else(|| "No match: pick one".to_string(), |t| target_label(kb, t));
                         let others = m.others.clone();

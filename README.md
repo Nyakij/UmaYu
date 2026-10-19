@@ -23,9 +23,10 @@
 
 | | |
 |---|---|
-| 📋 **Plan a career** | Pick the next Champions Meeting and a trainee. Trainee suggestions, the deck fill and ✨ Auto-pick start from the community PvP meta sheet's picks for that CM and running style (marked ★); simulated careers rank the rest. Skills are bought within the skill points your simulated careers end with. |
-| 🏁 **Race sim** | A Rust port of Moomoolator's race engine, checked against umalator.app. Race two builds 1,000 times, chart which skills gain the most lengths on a course, check stamina. No browser needed. |
-| 📚 **Collection** | Your umas and support cards, with effects at your limit break and level, the skills they teach, and their events. |
+| 🏠 **Home** | The next Champions Meeting at a glance: announced or estimated, its course drawn, what the community meta sheet recommends, your best umas for it and your plan. Below: what's coming up in the game's news, and your stable in charts. |
+| 📋 **Plan a career** | Pick the next Champions Meeting and a trainee. Trainee suggestions and the deck fill start from the community PvP meta sheet's picks for that CM and running style (marked ★); simulated careers rank the rest. ✨ Auto-pick races the skills on offer and keeps the set that gains the most together, within the skill points your simulated careers end with. |
+| 🏁 **Race sim** | A Rust port of Moomoolator's race engine, checked against umalator.app. Race two builds 1,000 times and see where the lengths are won, speed and HP over the race, and what each skill is worth; check stamina. No browser needed. |
+| 📚 **Collection** | Your umas and support cards, with effects at your limit break and level, the skills they teach, and their events. Every skill in the game, with the ones that can trigger on a course and the community tier list. |
 | ✨ **Set up in minutes** | Click the umas and cards you own, or load a profile file someone saved for you. ⚙ Settings → Save my data puts your whole account in one file. |
 | 💬 **Ask** | Questions about your roster in plain English, answered by a free OpenCode model or your own Claude API key. It can also build a plan, pick the deck and skills, and race it in the simulator for you, asking before it saves anything. |
 | 🎨 **Themes** | Seiun Sky, Sakura, Sunset, Starry night, Track day and the high-contrast Ink, in dark or light, or following Windows. |
@@ -61,11 +62,12 @@ Every release is built and tested by [GitHub Actions](https://github.com/brickc4
 
 ## Themes
 
-![Home in each theme: Seiun Sky, Sakura (light), Sunset and Starry night](docs/screenshots/themes.jpg)
+![Home in each theme: Seiun Sky, Sakura (light), Sunset, Starry night, Track day (light) and Ink](docs/screenshots/themes.jpg)
 
 ## How the picks work
 
-- **Meta first.** For a plan aimed at a Champions Meeting, each card gets a rating (★ to ★★★) from how many of the community sheet's decks for that CM and running style include it: Whale, Standard and Beginner decks, and honorable mentions. A copy at a low limit break counts for less. Auto-pick buys the skills the sheet's advice names, and the ones its recommended cards are brought for, before anything else.
+- **Meta first for cards.** For a plan aimed at a Champions Meeting, each card gets a rating (★ to ★★★) from how many of the community sheet's decks for that CM and running style include it: Whale, Standard and Beginner decks, and honorable mentions. A copy at a low limit break counts for less.
+- **Races for skills.** Auto-pick races each skill on offer in the simulator, then builds the set step by step, adding whichever skill gains the most on top of those already chosen per skill point, and checks the final set in 1,000 races. The sheet's skill advice breaks ties by default; in Step 5 you can make it count more, or not at all.
 - **Simulation for the rest.** Among cards with the same rating, and for anything the sheet doesn't cover, each card is scored by what it adds to simulated careers in the CM's scenario (stats toward your targets, skill points, scenario links), plus the lengths its skills gain on the course in the race simulator.
 - These are suggestions, not a solved optimum. The career model's assumptions are listed, each marked sourced or assumed, in [`knowledge/scenarios.json`](knowledge/scenarios.json).
 

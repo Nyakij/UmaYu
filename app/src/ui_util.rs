@@ -228,6 +228,28 @@ pub fn tile_grid(ui: &mut egui::Ui, n: usize, tile: Vec2, min_gap: f32, row_gap:
 }
 
 /// The main action on a page: filled with the accent colour, with text that reads on it.
+/// `small_btn`: egui's small button, but at least 24×24 px, so it's easy to hit.
+/// `tick`: a checkbox whose empty box has an outline in dark mode too, where buttons have none.
+pub trait UiExt {
+    fn small_btn(&mut self, text: impl Into<egui::WidgetText>) -> egui::Response;
+    fn tick(&mut self, checked: &mut bool, text: impl Into<egui::WidgetText>) -> egui::Response;
+}
+
+impl UiExt for egui::Ui {
+    fn small_btn(&mut self, text: impl Into<egui::WidgetText>) -> egui::Response {
+        self.add(egui::Button::new(text).small().min_size(egui::vec2(24.0, 24.0)))
+    }
+
+    fn tick(&mut self, checked: &mut bool, text: impl Into<egui::WidgetText>) -> egui::Response {
+        let outline = egui::Stroke::new(1.0, pal(self).weak.gamma_multiply(0.7));
+        let saved = self.visuals().widgets.inactive.bg_stroke;
+        self.visuals_mut().widgets.inactive.bg_stroke = outline;
+        let r = self.checkbox(checked, text);
+        self.visuals_mut().widgets.inactive.bg_stroke = saved;
+        r
+    }
+}
+
 pub fn primary_button(ui: &egui::Ui, text: impl Into<String>, size: f32) -> egui::Button<'static> {
     let p = pal(ui);
     egui::Button::new(semibold(text, size).color(p.on_accent)).fill(p.accent)
@@ -1138,7 +1160,7 @@ pub fn columns_menu(ui: &mut egui::Ui, table: &str, cols: &[TableCol]) {
     ui.menu_button("☰ Columns", |ui| {
         for c in cols.iter().filter(|c| c.optional) {
             let mut on = !hidden.contains(c.key);
-            let mut r = ui.checkbox(&mut on, &c.title);
+            let mut r = ui.tick(&mut on, &c.title);
             if !c.hover.is_empty() {
                 r = r.on_hover_text(&c.hover);
             }
@@ -1281,14 +1303,6 @@ pub fn toast_action(ctx: &egui::Context, text: impl Into<String>, kind: ToastKin
     push_toast(ctx, Toast { text: text.into(), kind, action: Some((label.to_string(), action)), shown: 0.0, last: None });
 }
 
-/// A result as a toast: success for `Ok`, an error for `Err`.
-pub fn toast_result(ctx: &egui::Context, result: Result<String, String>) {
-    match result {
-        Ok(m) => toast(ctx, m, ToastKind::Success),
-        Err(e) => toast(ctx, e, ToastKind::Error),
-    }
-}
-
 fn push_toast(ctx: &egui::Context, t: Toast) {
     ctx.data_mut(|d| {
         let list = d.get_temp_mut_or_default::<Vec<Toast>>(toast_id());
@@ -1301,7 +1315,16 @@ fn push_toast(ctx: &egui::Context, t: Toast) {
     ctx.request_repaint();
 }
 
+/// One frame in a test. Its texture uploads are dropped: debug builds check they were handled.
+#[cfg(test)]
+pub fn test_frame(ctx: &egui::Context, input: egui::RawInput, run_ui: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+    let mut out = ctx.run_ui(input, run_ui);
+    out.textures_delta.clear();
+    out
+}
+
 /// The messages showing now, oldest first (for tests).
+#[cfg(test)]
 pub fn toasts_now(ctx: &egui::Context) -> Vec<(String, ToastKind)> {
     ctx.data(|d| d.get_temp::<Vec<Toast>>(toast_id())).unwrap_or_default().into_iter().map(|t| (t.text, t.kind)).collect()
 }
@@ -1432,6 +1455,13 @@ pub fn stepper(ui: &mut egui::Ui, steps: &[&str], at: usize) -> Option<usize> {
     clicked
 }
 
+/// Today's date on this computer's clock, for dates the user writes down: a result, the day a
+/// plan was made, a file name. Game schedules compare against `today()`, which is UTC.
+pub fn local_today() -> String {
+    let (y, m, d, ..) = crate::live::local(crate::live::now());
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 /// Today's date (UTC) as YYYY-MM-DD, without a date crate.
 pub fn today() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -1461,7 +1491,7 @@ mod tests {
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 900.0));
         let frame = |events: Vec<egui::Event>| {
             let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
-            let out = ctx.run_ui(input, |ui| {
+            let out = crate::ui_util::test_frame(&ctx, input, |ui| {
                 super::search_combo(ui, "t", "Pick one", 200.0, || items.clone(), None);
             });
             // Rows drawn: text shapes that are item labels.
@@ -1536,7 +1566,7 @@ mod tests {
         let mut frame = |dt: f64| {
             t += dt;
             let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), ..Default::default() };
-            let _ = ctx.run_ui(input, |ui| {
+            let _ = crate::ui_util::test_frame(&ctx, input, |ui| {
                 super::show_toasts(ui.ctx());
             });
         };
@@ -1570,7 +1600,7 @@ mod tests {
         let mut sort2 = super::TableSort { key: "stars", desc: true };
         for _ in 0..2 {
             let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
-            let _ = ctx.run_ui(input, |ui| {
+            let _ = crate::ui_util::test_frame(&ctx, input, |ui| {
                 crate::collection_kit::chip_set(ui, &mut set, &[(1, "5★".into(), Some(3), None, "Five stars".into()), (2, "4★".into(), None, None, String::new())]);
                 crate::collection_kit::option_chips(ui, &mut one, &[(0, "Any"), (1, "P5")]);
                 ui.horizontal(|ui| crate::collection_kit::sort_picker(ui, "s", &mut sort2, &[("stars", "Stars", true), ("name", "Name", false)]));

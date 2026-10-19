@@ -8,6 +8,7 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontFamily, FontId, Rect
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::theme::{SEMIBOLD, pal, size};
+use crate::ui_util::UiExt;
 use crate::ui_util::{TableSort, chip, count_badge, semibold};
 
 /// The width of the collapsed filter sidebar.
@@ -58,6 +59,16 @@ pub(crate) fn set_rail(ctx: &egui::Context, tab: &str, collapsed: bool) {
     let mut all = setting::<std::collections::BTreeMap<String, bool>>(ctx, "collection_rail");
     all.insert(tab.to_string(), collapsed);
     set_setting(ctx, "collection_rail", all);
+}
+
+/// Whether the filters were opened by hand after a narrow window folded them for a table
+/// (this session only), so they stay open.
+pub(crate) fn opened_by_hand(ctx: &egui::Context, tab: &str) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(cache_id(&format!("rail_open_{tab}")))).unwrap_or(false)
+}
+
+pub(crate) fn open_by_hand(ctx: &egui::Context, tab: &str) {
+    ctx.data_mut(|d| d.insert_temp(cache_id(&format!("rail_open_{tab}")), true));
 }
 
 /// The frame of the collapsed rail.
@@ -206,7 +217,7 @@ pub(crate) fn option_chips<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut O
 
 /// A labelled switch: the label, and a checkbox. Returns true when it changed.
 pub(crate) fn toggle_row(ui: &mut egui::Ui, on: &mut bool, label: &str, hover: &str) -> bool {
-    let r = ui.checkbox(on, label);
+    let r = ui.tick(on, label);
     let changed = r.changed();
     if !hover.is_empty() {
         r.on_hover_text(hover);
@@ -488,7 +499,7 @@ mod tests {
                 time: Some(f as f64 * 0.1),
                 ..Default::default()
             };
-            let _ = ctx.run_ui(input, |ui| app.frame(ui));
+            let _ = crate::ui_util::test_frame(&ctx, input, |ui| app.frame(ui));
         }
     }
 

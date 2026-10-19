@@ -55,7 +55,7 @@ impl Profile {
 /// "2026-10-18-1760781234": today and the Unix time, unique enough for backup names.
 pub fn stamp() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    format!("{}-{secs}", crate::ui_util::today())
+    format!("{}-{secs}", crate::ui_util::local_today())
 }
 
 /// Whether a profile may write this path: only the account's own files, never outside them.

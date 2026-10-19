@@ -20,6 +20,7 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, vec2};
 use serde_json::{Value, json};
 
 use crate::App;
+use crate::ui_util::UiExt;
 use crate::agent::{Approval, Card, Exec, OpenAt, ToolOut, Visual, Wait};
 use crate::tab_umas::filter_heading;
 use crate::theme::{pal, size};
@@ -1208,7 +1209,7 @@ impl App {
 
     pub(crate) fn ask_tab(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
-        egui::Panel::right("ask_settings").resizable(false).exact_size(300.0).frame(crate::side_frame()).show(ui, |ui| {
+        egui::Panel::right("ask_settings").resizable(false).exact_size(if ui.available_width() < 1100.0 { 240.0 } else { 300.0 }).frame(crate::side_frame()).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| self.ask_settings(ui));
         });
         egui::Panel::bottom("ask_input").resizable(false).frame(egui::Frame::new().inner_margin(Margin::symmetric(18, 10))).show(ui, |ui| {
@@ -1399,12 +1400,12 @@ impl App {
                             if !c.open.is_empty() || undo.is_some() {
                                 ui.horizontal_wrapped(|ui| {
                                     for at in &c.open {
-                                        if ui.small_button(at.label()).clicked() {
+                                        if ui.small_btn(at.label()).clicked() {
                                             actions.push(ChatAction::Open(at.clone()));
                                         }
                                     }
                                     if let Some(u) = undo
-                                        && ui.small_button("↶ Undo").on_hover_text("Put back the plan and Race sim as they were before this step (and every later step)").clicked()
+                                        && ui.small_btn("↶ Undo").on_hover_text("Put back the plan and Race sim as they were before this step (and every later step)").clicked()
                                     {
                                         actions.push(ChatAction::Undo(u));
                                     }
@@ -1583,7 +1584,7 @@ impl App {
         let safe = note.starts_with("keeps nothing");
         badge(ui, format!("{} {note}", if safe { "🔒" } else { "ℹ" }), if safe { p.accent } else { pal(ui).warn });
         ui.add_space(4.0);
-        if ui.small_button("🔄 Refresh models").clicked() && s.oc.models_rx.is_none() {
+        if ui.small_btn("🔄 Refresh models").clicked() && s.oc.models_rx.is_none() {
             s.oc.models.clear();
             s.oc.models_rx = Some(crate::ask_opencode::list_models(exe));
         }
@@ -1617,7 +1618,7 @@ impl App {
         badge(ui, format!("{} {}", if has_key { "✔" } else { "✖" }, s.auth_label()), if has_key { p.accent } else { pal(ui).warn });
         ui.add_space(4.0);
         ui.add(egui::TextEdit::singleline(&mut s.key_input).password(true).hint_text("sk-ant-…").desired_width(f32::INFINITY));
-        ui.checkbox(&mut s.remember, "Remember on this PC");
+        ui.tick(&mut s.remember, "Remember on this PC");
         if s.remember && !s.key_input.trim().is_empty() && ui.button("💾 Save key").clicked() {
             let ok = crate::settings::set("api_key", json!(s.key_input.trim()));
             if ok {
@@ -1625,7 +1626,7 @@ impl App {
             }
             s.status = Some((if ok { "Key saved.".into() } else { "Couldn't save the key.".into() }, !ok));
         }
-        if s.saved_key.is_some() && ui.small_button("Forget saved key").clicked() {
+        if s.saved_key.is_some() && ui.small_btn("Forget saved key").clicked() {
             crate::settings::set("api_key", Value::Null);
             s.saved_key = None;
         }
@@ -1637,10 +1638,10 @@ impl App {
         let p = pal(ui);
         filter_heading(ui, "What the assistant may do without asking");
         ui.label(RichText::new("Drafts (the working plan, the Race sim's builds) always change at once and can be undone from the chat. Writing files asks first, unless you allow it here.").size(12.0).color(p.weak));
-        if ui.checkbox(&mut s.auto_save, "Save plans to the plans folder").changed() {
+        if ui.tick(&mut s.auto_save, "Save plans to the plans folder").changed() {
             crate::settings::set("agent_auto_save_plan", json!(s.auto_save));
         }
-        if ui.checkbox(&mut s.auto_log, "Add entries to the results logs").changed() {
+        if ui.tick(&mut s.auto_log, "Add entries to the results logs").changed() {
             crate::settings::set("agent_auto_log_result", json!(s.auto_log));
         }
         ui.add_enabled(false, egui::Checkbox::new(&mut false, "Change your roster (limit breaks, stars, potential)"));
@@ -1742,7 +1743,7 @@ mod tests {
             crate::theme::install(&ctx, mode);
             for size in [egui::vec2(1400.0, 900.0), egui::vec2(960.0, 600.0)] {
                 let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
-                let _ = ctx.run_ui(input, |ui| a.frame(ui));
+                let _ = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
             }
         }
         assert!(a.approval_showing());

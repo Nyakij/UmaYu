@@ -2,7 +2,9 @@
 //! is expected to use, from the simulator's course data (Moomoolator's `course_data.json`) and
 //! the event presets, with a stamina estimate per style from the HP calculator (`sim::hpcalc`).
 //!
-//! `cargo test --release course_notes -- --ignored` rewrites the block between the markers.
+//! `cargo test --release course_notes -- --ignored` rewrites the block between the markers. The
+//! app itself only uses `corner_numbers`; the generator runs from that test.
+#![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
 use std::fmt::Write;
 

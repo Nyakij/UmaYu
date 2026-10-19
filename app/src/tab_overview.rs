@@ -5,6 +5,7 @@
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Rect, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use crate::charts;
+use crate::ui_util::UiExt;
 use crate::data::{CardType, Rarity, Uma};
 use crate::home::{Cat, HomeCache};
 use crate::knowledge::{Distance, EventPreset, Style, grade_rank};
@@ -782,7 +783,7 @@ impl App {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(semibold(&u.name, size::LG));
-                    if ui.small_button("↻").on_hover_text("Another one").clicked() {
+                    if ui.small_btn("↻").on_hover_text("Another one").clicked() {
                         self.home.uma_offset += 1;
                     }
                 });
@@ -912,7 +913,7 @@ impl App {
             } else {
                 ui.label(semibold(term, size::MD));
             }
-            if ui.small_button("↻").on_hover_text("Another one").clicked() {
+            if ui.small_btn("↻").on_hover_text("Another one").clicked() {
                 self.home.tip_offset += 1;
             }
         });
@@ -976,7 +977,7 @@ mod tests {
         let mut texts: Vec<String> = Vec::new();
         for _ in 0..4 {
             let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 4000.0))), ..Default::default() };
-            let out = ctx.run_ui(input, |ui| a.frame(ui));
+            let out = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
             texts = out.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_string()) } else { None }).collect();
         }
         for title in ["Coming up", "Continue where you left off", "Your stable", "Support cards by type", "Who can run where", "Uma of the day", "Trainer card", "Missing pieces", "Did you know?"] {
@@ -996,7 +997,7 @@ mod tests {
             let mut y = None;
             for f in 0..4 {
                 let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1600.0))), time: Some(f64::from(f) * 0.1), ..Default::default() };
-                let out = ctx.run_ui(input, |ui| a.frame(ui));
+                let out = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
                 y = out.shapes.iter().find_map(|s| if let egui::Shape::Text(t) = &s.shape { (t.galley.text() == "Your stable").then_some(t.pos.y + offset) } else { None });
             }
             y.expect("Your stable on screen")

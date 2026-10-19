@@ -127,11 +127,6 @@ impl LiveData {
         }
         self
     }
-
-    /// When any source last worked.
-    pub fn last_success(&self) -> Option<i64> {
-        self.news.fetched_at.max(self.umalator.fetched_at)
-    }
 }
 
 // ---------------------------------------------------------------------------

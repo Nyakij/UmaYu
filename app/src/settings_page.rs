@@ -5,6 +5,7 @@
 use eframe::egui::{self, Align2, Color32, CornerRadius, FontFamily, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, vec2};
 
 use crate::theme::{self, Look, pal, size};
+use crate::ui_util::UiExt;
 use crate::ui_util::{ToastKind, chibi, semibold, web_link};
 use crate::{App, settings};
 
@@ -217,7 +218,7 @@ fn command_line(ui: &mut egui::Ui, cmd: &str) {
         egui::Frame::new().fill(p.input).stroke(Stroke::new(1.0, p.border)).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
             ui.label(RichText::new(cmd).monospace().size(size::SM));
         });
-        if ui.small_button("📋 Copy").on_hover_text("Copy the command, to paste in PowerShell in the umaLord folder").clicked() {
+        if ui.small_btn("📋 Copy").on_hover_text("Copy the command, to paste in PowerShell in the umaLord folder").clicked() {
             ui.ctx().copy_text(cmd.to_string());
         }
     });
@@ -478,7 +479,7 @@ impl App {
 
     /// The sky-and-decorations switch.
     pub(crate) fn background_toggle(&mut self, ui: &mut egui::Ui) {
-        if ui.checkbox(&mut self.mascot, "Sky and decorations behind the pages").changed() {
+        if ui.tick(&mut self.mascot, "Sky and decorations behind the pages").changed() {
             settings::set("mascot", serde_json::json!(self.mascot));
         }
     }
@@ -558,7 +559,7 @@ impl App {
         );
         ui.add_space(4.0);
         let mut on = crate::live::enabled();
-        if ui.checkbox(&mut on, "Fetch the latest schedule when the app starts (at most every 6 hours)").changed() {
+        if ui.tick(&mut on, "Fetch the latest schedule when the app starts (at most every 6 hours)").changed() {
             crate::live::set_enabled(on);
         }
         let now = crate::live::now();
@@ -619,6 +620,13 @@ impl App {
                 ui.label(RichText::new(&m.authors).size(size::SM).color(p.weak));
             }
             None => _ = ui.label(RichText::new("Not downloaded (knowledge/data/pvp_meta.json is missing).").color(p.warn)),
+        });
+        setting_row(ui, "Skill tier list", "The community skills spreadsheet's Team Trials and Champions Meeting tiers, shown on skills and used by the Rating auto-pick.", |ui| match &self.kb.skill_tiers {
+            Some(t) => {
+                ui.label(format!("Sheet updated {} · {} skills · community opinion, not game data", t.sheet_updated, t.len())).on_hover_text(format!("{}\n\n{}", t.caveat, t.source));
+                ui.label(RichText::new(&t.authors).size(size::SM).color(p.weak));
+            }
+            None => _ = ui.label(RichText::new("Not downloaded (knowledge/data/skill_tiers.json is missing).").color(p.warn)),
         });
         heading(ui, "Refreshing it");
         ui.label(
@@ -698,6 +706,8 @@ impl App {
             ("Game data", "uma.guide: umas, cards, skills, races and events", "https://uma.guide"),
             ("Race simulator", "a port of Moomoolator (TheCing/uma-tools), which builds on alpha123's Umalator and kachi-dev's VFalator", "https://umalator.app"),
             ("Meta picks", "the community \"PvP Deck & Uma Recommendation\" sheet by Lightning, Daptrius and Henry", ""),
+            ("Skill tiers", "the community \"Uma Musume Skills Spreadsheet\" tier list by Dylan, formatted by sayaduck", ""),
+            ("Glossary and tips", "GameTora, uma.guide and other community guides, each cited in knowledge/mechanics.md", ""),
             ("Chibi art", "GameTora", "https://gametora.com"),
         ] {
             ui.horizontal_wrapped(|ui| {
@@ -745,7 +755,7 @@ mod tests {
                 a.open_settings(page);
                 for _ in 0..2 {
                     let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(960.0, 600.0))), ..Default::default() };
-                    let _ = ctx.run_ui(input, |ui| a.frame(ui));
+                    let _ = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
                 }
                 assert!(a.settings.open, "{page:?} closed itself");
             }

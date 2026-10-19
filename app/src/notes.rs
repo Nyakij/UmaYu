@@ -57,17 +57,13 @@ impl SkillTiers {
         self.skills.len()
     }
 
-    /// "TT ◎ · CM ⍟" with the meaning of each on hover.
-    pub fn short(&self, t: &SkillTier) -> String {
-        format!("TT {} · CM {}", t.tt, t.cm)
-    }
-
     /// A line for hovers and the assistant: both tiers spelled out, the reason, and the source.
     pub fn explain(&self, t: &SkillTier) -> String {
         let mean = |s: &str| self.scale.get(s).map_or(String::new(), |m| format!(" ({m})"));
         let target = if t.target.is_empty() { String::new() } else { format!(", filed under {}", t.target) };
+        let score = t.score_per_sp.map(|s| format!(" Team Trials points per SP: {s:.2}.")).unwrap_or_default();
         format!(
-            "Community tier list{target}: Team Trials {}{}, Champions Meeting {}{}. Why: {}. Source: {}, sheet updated {}. Community opinion.",
+            "Community tier list{target}: Team Trials {}{}, Champions Meeting {}{}. Why: {}.{score} Source: {}, sheet updated {}. Community opinion.",
             t.tt,
             mean(&t.tt),
             t.cm,
