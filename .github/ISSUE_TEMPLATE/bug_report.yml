@@ -10,8 +10,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: Which release you're running (the zip's name, e.g. umaLord-v0.1.1.zip).
-      placeholder: v0.1.1
+      description: Which release you're running (the zip's name, e.g. umaLord-v0.2.0.zip).
+      placeholder: v0.2.0
     validations:
       required: true
   - type: textarea
