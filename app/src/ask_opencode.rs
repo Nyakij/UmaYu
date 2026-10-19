@@ -1,9 +1,11 @@
 //! The Ask tab's free backend: OpenCode (opencode.ai) run in the umaLord folder, read-only.
 //!
 //! Each question runs `opencode run --format json`, which prints one JSON event per line:
-//! `tool_use` (a file read or search), `text` (part of the answer), `step_finish` (token counts)
-//! and `error`. Follow-up questions pass `--session <id>` so OpenCode keeps the conversation.
-//! OpenCode reads AGENTS.md for its instructions and knowledge/digest/owned.md for the roster.
+//! `tool_use` (a file read or search, or one of umaLord's tools), `text` (part of the answer),
+//! `step_finish` (token counts) and `error`. Follow-up questions pass `--session <id>` so OpenCode
+//! keeps the conversation. OpenCode reads AGENTS.md for its instructions and
+//! knowledge/digest/owned.md for the roster, and gets umaLord's agent tools from this exe run as
+//! an MCP server (`mcp_config`, passed in `OPENCODE_CONFIG_CONTENT`).
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -73,11 +75,21 @@ pub fn is_free(model: &str) -> bool {
     model.starts_with("opencode/") && (model.ends_with("-free") || model == "opencode/big-pickle")
 }
 
+/// One finished tool call: the tool ("read", or "umalord_run_compare" for umaLord's own), what it
+/// looked at, and what it returned.
+#[derive(Debug, PartialEq, Default)]
+pub struct ToolEvent {
+    pub tool: String,
+    pub target: String,
+    pub output: String,
+    pub error: bool,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum OcEvent {
     Session(String),
     Text(String),
-    Tool(String),
+    Tool(ToolEvent),
     Tokens(u64, u64),
     Error(String),
     Done(Result<(), String>),
@@ -147,9 +159,16 @@ pub fn parse_line(line: &str) -> Vec<OcEvent> {
             }
         }
         "tool_use" => {
-            let input = &part["state"]["input"];
-            let target = ["filePath", "pattern", "path", "description"].iter().find_map(|k| input[k].as_str()).unwrap_or_default();
-            out.push(OcEvent::Tool(format!("{} {target}", part["tool"].as_str().unwrap_or("tool")).trim().to_string()));
+            let state = &part["state"];
+            let input = &state["input"];
+            let target = ["filePath", "pattern", "path", "description", "query"].iter().find_map(|k| input[k].as_str()).unwrap_or_default();
+            let output = state["output"].as_str().or_else(|| state["error"].as_str()).unwrap_or_default();
+            out.push(OcEvent::Tool(ToolEvent {
+                tool: part["tool"].as_str().unwrap_or("tool").to_string(),
+                target: target.to_string(),
+                output: output.to_string(),
+                error: state["status"] == "error",
+            }));
         }
         "step_finish" => {
             let t = &part["tokens"];
@@ -166,14 +185,38 @@ pub fn parse_line(line: &str) -> Vec<OcEvent> {
     out
 }
 
+/// OpenCode's config for umaLord's tools: this exe as a local MCP server on the folder, with the
+/// bridge folder the window watches for approvals (opencode.ai/docs/mcp-servers, checked
+/// 2026-10-18: `mcp.<name>` = `{type: "local", command, environment, timeout}`; inline config
+/// from `OPENCODE_CONFIG_CONTENT` overrides opencode.json).
+pub fn mcp_config(exe: &Path, root: &Path, bridge: Option<&Path>) -> String {
+    let mut env = serde_json::Map::new();
+    if let Some(b) = bridge {
+        env.insert(crate::agent::bridge::ENV.into(), Value::String(b.display().to_string()));
+    }
+    serde_json::json!({
+        "mcp": {"umalord": {
+            "type": "local",
+            "command": [exe.display().to_string(), "--mcp", root.display().to_string()],
+            "environment": env,
+            "enabled": true,
+            // Loading the game data takes a moment; the tool list itself doesn't wait for it.
+            "timeout": 20000,
+        }}
+    })
+    .to_string()
+}
+
 /// Run one question. Events arrive on the returned channel, ending with `Done`.
-/// `child` holds the running process so the UI can stop it.
+/// `child` holds the running process so the UI can stop it. `mcp` is `mcp_config`'s JSON.
+#[allow(clippy::too_many_arguments)]
 pub fn ask(
     exe: PathBuf,
     root: PathBuf,
     model: String,
     session: Option<String>,
     question: String,
+    mcp: Option<String>,
     child: Arc<Mutex<Option<Child>>>,
     wake: impl Fn() + Send + 'static,
 ) -> Receiver<OcEvent> {
@@ -185,6 +228,9 @@ pub fn ask(
         };
         let mut cmd = command(&exe);
         cmd.current_dir(&root).env("OPENCODE_PERMISSION", READ_ONLY).args(["run", "--format", "json", "--model", &model, "--dir"]).arg(&root);
+        if let Some(m) = &mcp {
+            cmd.env("OPENCODE_CONFIG_CONTENT", m);
+        }
         if let Some(s) = &session {
             cmd.args(["--session", s]);
         }
@@ -359,7 +405,12 @@ mod tests {
         let text = r#"{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"OK umaLord"}}"#;
         assert_eq!(parse_line(text), vec![OcEvent::Session("ses_1".into()), OcEvent::Text("OK umaLord".into())]);
         let tool = r#"{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"notes.txt"}}}}"#;
-        assert_eq!(parse_line(tool)[1], OcEvent::Tool("read notes.txt".into()));
+        assert_eq!(parse_line(tool)[1], OcEvent::Tool(ToolEvent { tool: "read".into(), target: "notes.txt".into(), ..Default::default() }));
+        let mcp = r#"{"type":"tool_use","part":{"type":"tool","tool":"umalord_run_compare","state":{"status":"completed","input":{},"output":"Compare (simulation output)"}}}"#;
+        assert_eq!(parse_line(mcp)[0], OcEvent::Tool(ToolEvent { tool: "umalord_run_compare".into(), output: "Compare (simulation output)".into(), ..Default::default() }));
+        let cfg: Value = serde_json::from_str(&mcp_config(Path::new("C:/u/umalord.exe"), Path::new("C:/u"), Some(Path::new("C:/a")))).unwrap();
+        assert_eq!(cfg["mcp"]["umalord"]["command"], serde_json::json!(["C:/u/umalord.exe", "--mcp", "C:/u"]));
+        assert_eq!(cfg["mcp"]["umalord"]["environment"][crate::agent::bridge::ENV], "C:/a");
         let fin = r#"{"type":"step_finish","sessionID":"ses_1","part":{"tokens":{"input":972,"output":39,"reasoning":10,"cache":{"read":4096,"write":0}},"cost":0}}"#;
         assert_eq!(parse_line(fin)[1], OcEvent::Tokens(5068, 49));
         assert!(parse_line("not json").is_empty());

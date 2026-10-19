@@ -5,6 +5,7 @@
 //! Usage: `umalord [path-to-umaLord-folder]`. Without a path it searches upward from the
 //! current dir and the exe for `account/support_cards.md`.
 
+mod agent;
 mod ask;
 mod ask_opencode;
 mod career;
@@ -73,6 +74,14 @@ fn main() -> eframe::Result {
         }
         println!("{msg}");
         std::process::exit(code);
+    }
+    // `umalord --mcp [folder]`: the assistant's tools as an MCP server on stdin/stdout, for
+    // OpenCode (the Ask tab starts it), Claude Code or Claude Desktop. No window.
+    if args.first().is_some_and(|a| a == "--mcp") {
+        let root = data::find_root(args.get(1).map(PathBuf::from));
+        let stdin = std::io::stdin();
+        let result = agent::mcp::serve(stdin.lock(), std::io::stdout(), move || agent::mcp::headless_app(root));
+        std::process::exit(i32::from(result.is_err()));
     }
     // `umalord --export-profile [name]`: save the account to profiles/<name>-<date>.umalord.json.
     // `umalord --start-over [name]`: back the account up to profiles/backups/, then empty it.
@@ -665,6 +674,8 @@ pub(crate) struct App {
     pub sim_data: Option<std::sync::Arc<sim::data::SimData>>,
     pub sim_error: Option<String>,
     pub ask: ask::AskState,
+    /// The assistant's undo snapshots and pending page (`agent/`).
+    pub agent: agent::AgentState,
     pub md_cache: egui_commonmark::CommonMarkCache,
     /// Dark mode (default) or light; saved in settings.json.
     pub dark: bool,
@@ -687,7 +698,9 @@ pub(crate) struct App {
     screenshot_to: Option<PathBuf>,
     screenshot_requested: bool,
     debug_question: Option<String>,
-    debug_asked: bool,
+    pub debug_asked: bool,
+    /// When an approval card first showed (UMALORD_APPROVE=ask).
+    debug_approval_at: Option<f64>,
     debug_install: bool,
     /// `UMALORD_SCROLL=<px>`: hold the planner scrolled this far down, for screenshots.
     pub debug_scroll: Option<f32>,
@@ -756,6 +769,7 @@ impl App {
             uma_art: scan_art(root.as_deref(), "umas"),
             kb: Knowledge::load(root.as_deref()),
             ask: ask::AskState::new(root.as_deref()),
+            agent: Default::default(),
             planner: tab_planner::PlannerState::new(root.as_deref()),
             notes: tab_results::NotesState::default(),
             notes_back: Tab::Home,
@@ -794,6 +808,7 @@ impl App {
             screenshot_requested: false,
             debug_question: env("UMALORD_ASK").filter(|q| !q.trim().is_empty()),
             debug_asked: false,
+            debug_approval_at: None,
             debug_install: env("UMALORD_INSTALL").is_some_and(|v| v == "1"),
             debug_scroll: env("UMALORD_SCROLL").and_then(|s| s.parse().ok()),
             debug_run: env("UMALORD_RUN").is_some_and(|v| v == "1"),
@@ -1182,6 +1197,11 @@ impl App {
                 }
             }
             Some(ui_util::ToastAction::Undo) => self.undo_setup(),
+            Some(ui_util::ToastAction::OpenPlan(path)) => {
+                if self.open_plan_file(&path) {
+                    self.go_career(CareerTab::Plan);
+                }
+            }
             None => {}
         }
     }
@@ -1569,7 +1589,14 @@ impl App {
         if ctx.input(|i| i.time) < 0.5 {
             ctx.all_styles_mut(|s| s.interaction.tooltip_delay = f32::INFINITY);
         }
-        let waiting = (installing || (self.debug_asked && self.ask_busy())) && ctx.input(|i| i.time) < 300.0;
+        // UMALORD_APPROVE=ask: the shot once an approval card has shown for a second (the chat
+        // scrolls down to it first).
+        if self.ask.shot_on_approval && self.approval_showing() && self.debug_approval_at.is_none() {
+            self.debug_approval_at = Some(ctx.input(|i| i.time));
+        }
+        let card_shown = self.debug_approval_at.is_some_and(|t| ctx.input(|i| i.time) - t > 1.0);
+        let asking = self.debug_asked && self.ask_busy() && !card_shown;
+        let waiting = (installing || asking) && ctx.input(|i| i.time) < 300.0;
         if !self.screenshot_requested && !waiting && ctx.input(|i| i.time) >= 2.5 {
             self.screenshot_requested = true;
             let ctx2 = ctx.clone();
@@ -1592,6 +1619,12 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.frame(ui);
+    }
+
+    /// Closing the window mid-answer stops OpenCode (and the tools server it started) and the
+    /// Claude request, rather than leaving them running.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.stop_ask_processes();
     }
 }
 

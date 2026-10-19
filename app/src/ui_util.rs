@@ -1253,6 +1253,8 @@ pub enum ToastAction {
     Open(std::path::PathBuf),
     /// Undo the change the toast reported.
     Undo,
+    /// Open a saved plan in the Planner.
+    OpenPlan(std::path::PathBuf),
 }
 
 #[derive(Clone)]

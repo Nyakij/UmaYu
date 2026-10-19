@@ -27,7 +27,7 @@
 | 🏁 **Race sim** | A Rust port of Moomoolator's race engine, checked against umalator.app. Race two builds 1,000 times, chart which skills gain the most lengths on a course, check stamina. No browser needed. |
 | 📚 **Collection** | Your umas and support cards, with effects at your limit break and level, the skills they teach, and their events. |
 | ✨ **Set up in minutes** | Click the umas and cards you own, or load a profile file someone saved for you. ⚙ Settings → Save my data puts your whole account in one file. |
-| 💬 **Ask** | Questions about your roster in plain English, answered by a free OpenCode model or your own Claude API key. |
+| 💬 **Ask** | Questions about your roster in plain English, answered by a free OpenCode model or your own Claude API key. It can also build a plan, pick the deck and skills, and race it in the simulator for you, asking before it saves anything. |
 | 🎨 **Themes** | Seiun Sky, Sakura, Sunset, Starry night, Track day and the high-contrast Ink, in dark or light, or following Windows. |
 
 <table>
@@ -105,6 +105,28 @@ The [Release workflow](.github/workflows/release.yml) builds, tests and packages
 ## Use it with Claude Code
 
 Open the folder in Claude Code. [`CLAUDE.md`](CLAUDE.md) tells Claude how to keep your roster up to date from screenshots, simulate saved plans, log real results, and keep evidence-backed opinions in `insights.md`.
+
+### umaLord's tools in Claude Code or Claude Desktop (MCP)
+
+`umalord.exe --mcp <folder>` serves the same tools the Ask tab uses (your roster, the game data, the meta sheet, the CM schedule, the planner and the race simulator) as an MCP server over stdio. Point it at your umaLord folder.
+
+Claude Code:
+
+```
+claude mcp add umalord -- C:\path\to\umaLord\umalord.exe --mcp C:\path\to\umaLord
+```
+
+Claude Desktop, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "umalord": { "command": "C:\\path\\to\\umaLord\\umalord.exe", "args": ["--mcp", "C:\\path\\to\\umaLord"] }
+  }
+}
+```
+
+Without the app's window, the tools that write files (`save_plan`, `log_result`, `update_owned`) run when called, so leave your client's per-tool approval on. Plans it saves appear in the app's Planner under Saved plans.
 
 ## Credits
 

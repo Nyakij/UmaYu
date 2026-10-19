@@ -94,7 +94,7 @@ impl App {
         });
         egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(1000.0);
+                ui.set_max_width(ui.available_width().min(1000.0));
                 self.results_body(ui);
             });
         });
@@ -250,6 +250,31 @@ impl App {
         }
     }
 
+    /// The columns of a results log's first table.
+    pub(crate) fn result_headers(&self, log: usize) -> Vec<String> {
+        let Some(root) = &self.root else { return Vec::new() };
+        let text = std::fs::read_to_string(root.join(LOGS[log.min(LOGS.len() - 1)].1)).unwrap_or_default();
+        tables(&text).into_iter().next().map(|t| t.headers).unwrap_or_default()
+    }
+
+    /// Add a row to a results log, newest first (the assistant's `log_result`).
+    pub(crate) fn add_result_row(&mut self, log: usize, row: &[String]) -> Result<PathBuf, String> {
+        let root = self.root.clone().ok_or("umaLord folder not found.")?;
+        let path = root.join(LOGS[log.min(LOGS.len() - 1)].1);
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let new = insert_row(&text, row).ok_or("No table found in the file.")?;
+        std::fs::write(&path, new).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+        self.home_dirty();
+        self.results.loaded = None;
+        Ok(path)
+    }
+
+    /// Show one log on the Results page.
+    pub(crate) fn show_results_log(&mut self, log: usize) {
+        self.results.log = log.min(LOGS.len() - 1);
+        self.results.loaded = None;
+    }
+
     fn add_result(&mut self) {
         let Some(root) = self.root.clone() else { return };
         if self.results.form.iter().filter(|f| !f.trim().is_empty()).count() <= 1 {
@@ -347,7 +372,7 @@ impl App {
                 self.tab = self.notes_back;
             }
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(1000.0);
+                ui.set_max_width(ui.available_width().min(1000.0));
                 crate::ui_util::card(ui, |ui| {
                     if let Some((_, text)) = &self.notes.loaded {
                         egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, text);

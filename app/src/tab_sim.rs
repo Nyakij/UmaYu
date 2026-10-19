@@ -272,7 +272,7 @@ impl App {
     }
 
     /// Pick an outfit: stars from the roster, its unique skill, aptitudes and best style.
-    fn set_outfit(&mut self, i: usize, outfit: u32) {
+    pub(crate) fn set_outfit(&mut self, i: usize, outfit: u32) {
         let stars = self.owned_uma(outfit).map_or(3, |u| u.stars);
         let Some(data) = self.sim_data.clone() else { return };
         let u = &mut self.sim.umas[i];
@@ -1736,6 +1736,20 @@ impl App {
             n += before - u.skills.len();
         }
         n
+    }
+
+    /// How far the running Race sim job is, 0–1.
+    pub(crate) fn sim_job_fraction(&self) -> Option<f32> {
+        let p = self.sim.job.as_ref().map(|j| &j.progress).or(self.sim.extra.as_ref().map(|j| &j.progress))?;
+        let done = p.done.load(Ordering::Relaxed) as f32;
+        Some((done / p.total.load(Ordering::Relaxed).max(1) as f32).min(1.0))
+    }
+
+    /// Stop the Race sim's runs (the assistant's Stop button).
+    pub(crate) fn cancel_sim_jobs(&self) {
+        for p in self.sim.job.as_ref().map(|j| &j.progress).into_iter().chain(self.sim.extra.as_ref().map(|j| &j.progress)) {
+            p.cancel.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Planner's "Simulate": load the plan and run Compare.

@@ -1,29 +1,41 @@
-//! Ask: questions about this account, answered by Claude with tools over the roster, the
-//! knowledge base and the notes. Raw HTTP through Windows' curl.exe (Rust has no official
-//! Anthropic SDK, and TLS crates need a C compiler this toolchain lacks).
+//! Ask: an assistant that answers questions about this account and works the app with the tools
+//! in `agent/`: it drafts plans, picks decks and skills, runs the race simulator, and saves plans
+//! and results once the user approves.
 //!
-//! The UI thread runs the tools (they read App state); a worker thread only does HTTP.
+//! Two backends. The Claude API: raw HTTP through Windows' curl.exe (Rust has no official
+//! Anthropic SDK, and TLS crates need a C compiler this toolchain lacks), streamed over SSE; the UI
+//! thread runs the tools (they read and change App state) and a worker thread only does HTTP.
+//! OpenCode: `opencode run` with the same tools over MCP (`umalord.exe --mcp`), which writes its
+//! approvals, page requests and draft to the bridge folder this tab watches (`agent/bridge.rs`).
 
-use std::path::Path;
-use std::sync::mpsc::{Receiver, channel};
+use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Stdio};
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, vec2};
 use serde_json::{Value, json};
 
 use crate::App;
-use crate::knowledge::{Distance, Style, Surface, grade_rank};
+use crate::agent::{Approval, Card, Exec, OpenAt, ToolOut, Visual, Wait};
 use crate::tab_umas::filter_heading;
-use crate::theme::pal;
+use crate::theme::{pal, size};
 use crate::ui_util::{badge, semibold, truncate};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
-const MAX_TOOL_ROUNDS: u32 = 12;
+/// Tool rounds per question: enough for plan → deck → skills → simulations → save.
+const MAX_TOOL_ROUNDS: u32 = 30;
+/// Wall-clock limit per question.
+const QUESTION_LIMIT: Duration = Duration::from_secs(15 * 60);
 
-/// (model id, label, supports server-side refusal fallbacks)
-pub const MODELS: [(&str, &str, bool); 3] = [
-    ("claude-opus-5-5", "Claude Opus 5.5", true),
-    ("claude-sonnet-5-5", "Claude Sonnet 5.5", true),
-    ("claude-haiku-5-5", "Claude Haiku 5.5", false),
+/// (model id, label, supports server-side refusal fallbacks, supports `thinking.display: "updates"`)
+pub const MODELS: [(&str, &str, bool, bool); 3] = [
+    ("claude-opus-5-5", "Claude Opus 5.5", true, true),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5", true, true),
+    ("claude-haiku-5-5", "Claude Haiku 5.5", false, false),
 ];
 pub const EFFORTS: [&str; 4] = ["low", "medium", "high", "xhigh"];
 
@@ -33,9 +45,27 @@ enum Auth {
     Bearer(String),
 }
 
-struct Turn {
-    role: &'static str,
-    text: String,
+/// One line of the chat.
+pub(crate) enum Turn {
+    User(String),
+    Assistant(String),
+    /// A short progress note the model wrote between tool calls.
+    Note(String),
+    Tool(ToolTurn),
+}
+
+pub(crate) struct ToolTurn {
+    pub icon: &'static str,
+    pub label: String,
+    pub state: ToolState,
+}
+
+pub(crate) enum ToolState {
+    Running,
+    /// A Write tool waiting for Approve or Deny; with a bridge id when OpenCode's server asked.
+    Asking(String, Option<u64>),
+    Done(Card),
+    Failed(Card),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -54,12 +84,46 @@ pub(crate) struct OcState {
     /// OpenCode's session id, so follow-up questions keep the conversation.
     pub session: Option<String>,
     pub rx: Option<Receiver<crate::ask_opencode::OcEvent>>,
-    pub child: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    pub child: Arc<Mutex<Option<Child>>>,
     /// The current answer already has a turn that new text parts append to.
     pub answer_open: bool,
     pub install_rx: Option<Receiver<crate::ask_opencode::InstallEvent>>,
     pub install_progress: u64,
     pub install_error: Option<String>,
+    /// The bridge folder: when it was last scanned, the approvals already shown, the draft's
+    /// time, and the plans/ files' times when the question started.
+    pub scanned: Option<Instant>,
+    pub plans_scanned: Option<Instant>,
+    pub shown: HashSet<u64>,
+    pub draft_seen: Option<SystemTime>,
+    pub plans_before: HashMap<PathBuf, SystemTime>,
+}
+
+/// One tool call of the current round.
+struct Call {
+    id: String,
+    name: String,
+    input: Value,
+    /// Index of its card in `turns`.
+    turn: usize,
+    state: CallState,
+}
+
+enum CallState {
+    Queued,
+    Waiting(Wait),
+    /// The card shows the question; Approve or Deny answers it.
+    Asking,
+    /// The `tool_result` block.
+    Ready(Value),
+}
+
+/// The response being streamed.
+struct Stream {
+    rx: Receiver<StreamEvent>,
+    child: Arc<Mutex<Option<Child>>>,
+    /// Content block index → its turn (text or note).
+    turns: HashMap<usize, usize>,
 }
 
 pub(crate) struct AskState {
@@ -67,24 +131,39 @@ pub(crate) struct AskState {
     pub oc: OcState,
     /// Full API transcript, append-only (thinking blocks stay valid).
     messages: Vec<Value>,
-    turns: Vec<Turn>,
+    pub(crate) turns: Vec<Turn>,
     input: String,
-    pending: Option<Receiver<Result<Value, String>>>,
+    stream: Option<Stream>,
+    calls: Vec<Call>,
     rounds: u32,
-    model: usize,
-    effort: usize,
+    started: Option<Instant>,
+    /// The system prompt, fixed for the conversation: thinking blocks are tied to it.
+    system: Option<String>,
+    pub(crate) model: usize,
+    pub(crate) effort: usize,
     key_input: String,
     remember: bool,
     saved_key: Option<String>,
     status: Option<(String, bool)>,
     tokens_in: u64,
     tokens_out: u64,
+    cache_read: u64,
     activity: Vec<String>,
+    /// Approve (true) or Deny clicked on the card at this turn.
+    answer: Option<(usize, bool)>,
+    /// Settings → AI assistant: Write tools that may run without asking.
+    pub auto_save: bool,
+    pub auto_log: bool,
+    /// `UMALORD_APPROVE=ask`: take the screenshot when an approval card shows.
+    pub shot_on_approval: bool,
 }
+
+/// The OpenCode assistant's draft, as its card in the chat.
+const DRAFT_CARD: &str = "The assistant's working plan";
 
 /// Example questions shown on an empty chat.
 const SUGGESTIONS: [&str; 4] = [
-    "Who are my best Long-distance trainees, and which of them are Pace Chasers?",
+    "Plan the next Champions Meeting for my best Pace uma and simulate it.",
     "Build me a Speed-heavy deck from my MLB SSRs for a Medium Turf race.",
     "Which of my support cards give a hint for a corner recovery skill?",
     "Which of my umas should I raise to Potential 5 first, and why?",
@@ -95,6 +174,7 @@ impl AskState {
         let saved_key = crate::settings::get("api_key").and_then(|v| v.as_str().map(str::to_string)).filter(|k| !k.is_empty());
         let exe = crate::ask_opencode::find_exe(root);
         let saved = |k: &str| crate::settings::get(k).and_then(|v| v.as_str().map(str::to_string));
+        let flag = |k: &str| !cfg!(test) && crate::settings::get(k).and_then(|v| v.as_bool()).unwrap_or(false);
         let backend = match saved("ask_backend").as_deref() {
             Some("claude_api") => Backend::ClaudeApi,
             // Default to the free backend; if OpenCode isn't installed the tab offers the download.
@@ -114,21 +194,35 @@ impl AskState {
                 install_rx: None,
                 install_progress: 0,
                 install_error: None,
+                scanned: None,
+                plans_scanned: None,
+                shown: HashSet::new(),
+                draft_seen: None,
+                plans_before: HashMap::new(),
             },
             messages: Vec::new(),
             turns: Vec::new(),
             input: String::new(),
-            pending: None,
+            stream: None,
+            calls: Vec::new(),
             rounds: 0,
+            started: None,
+            system: None,
             model: 0,
-            effort: 2,
+            effort: 1,
             key_input: String::new(),
             remember: false,
             saved_key,
             status: None,
             tokens_in: 0,
             tokens_out: 0,
+            cache_read: 0,
             activity: Vec::new(),
+            answer: None,
+            // UMALORD_APPROVE=1 allows plan saves and result logs without asking (unattended runs).
+            auto_save: flag("agent_auto_save_plan") || std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "1"),
+            auto_log: flag("agent_auto_log_result") || std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "1"),
+            shot_on_approval: std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "ask"),
         }
     }
 
@@ -158,6 +252,26 @@ impl AskState {
             "no key set yet"
         }
     }
+
+    /// Whether a Write tool may run without the approval card.
+    fn auto_approved(&self, tool: &str, a: &Approval) -> bool {
+        !a.always_ask && ((tool == "save_plan" && self.auto_save) || (tool == "log_result" && self.auto_log))
+    }
+
+    fn clear(&mut self) {
+        self.messages.clear();
+        self.turns.clear();
+        self.calls.clear();
+        self.activity.clear();
+        self.status = None;
+        self.system = None;
+        self.tokens_in = 0;
+        self.tokens_out = 0;
+        self.cache_read = 0;
+        self.oc.session = None;
+        self.oc.shown.clear();
+        self.oc.draft_seen = None;
+    }
 }
 
 #[cfg(windows)]
@@ -176,117 +290,221 @@ fn ant_token() -> Option<String> {
     (out.status.success() && !token.is_empty()).then_some(token)
 }
 
-/// POST the body with curl.exe; headers go through a temp file so the key isn't on a command line.
-fn post(body: &Value, auth: &Auth, betas: &[&str]) -> Result<Value, String> {
-    let tmp = std::env::temp_dir();
-    let stamp = format!("umalord-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-    let body_path = tmp.join(format!("{stamp}.json"));
-    let head_path = tmp.join(format!("{stamp}.hdr"));
-    let mut headers = vec!["content-type: application/json".to_string(), "anthropic-version: 2023-06-01".to_string()];
-    let mut betas: Vec<&str> = betas.to_vec();
-    match auth {
-        Auth::ApiKey(k) => headers.push(format!("x-api-key: {k}")),
-        Auth::Bearer(t) => {
-            headers.push(format!("authorization: Bearer {t}"));
-            betas.push("oauth-2025-04-20");
+// ---------------------------------------------------------------------------
+// Streaming
+
+pub(crate) enum StreamEvent {
+    /// Text for the content block at this index.
+    Text(usize, String),
+    /// A progress note's text for the block at this index.
+    Note(usize, String),
+    /// A tool call started streaming its input.
+    Tool(String),
+    /// The whole message: content, stop_reason, usage, model, and `invalid_inputs` (tool use id →
+    /// the raw input that wasn't valid JSON).
+    Done(Result<Value, String>),
+}
+
+/// The message as the SSE events build it.
+#[derive(Default)]
+struct Acc {
+    blocks: Vec<Value>,
+    partial: HashMap<usize, String>,
+    stop_reason: Value,
+    usage: serde_json::Map<String, Value>,
+    model: String,
+    invalid: serde_json::Map<String, Value>,
+    error: Option<String>,
+}
+
+impl Acc {
+    /// Apply one SSE `data:` payload.
+    fn apply(&mut self, data: &Value) -> Vec<StreamEvent> {
+        let mut out = Vec::new();
+        let idx = data["index"].as_u64().unwrap_or(0) as usize;
+        match data["type"].as_str().unwrap_or_default() {
+            "message_start" => {
+                self.model = data["message"]["model"].as_str().unwrap_or_default().to_string();
+                if let Some(u) = data["message"]["usage"].as_object() {
+                    self.usage.extend(u.clone());
+                }
+            }
+            "content_block_start" => {
+                let block = data["content_block"].clone();
+                if self.blocks.len() <= idx {
+                    self.blocks.resize(idx + 1, Value::Null);
+                }
+                match block["type"].as_str().unwrap_or_default() {
+                    "tool_use" => {
+                        self.partial.insert(idx, String::new());
+                        out.push(StreamEvent::Tool(block["name"].as_str().unwrap_or_default().to_string()));
+                    }
+                    "text" => {
+                        if let Some(t) = block["text"].as_str().filter(|t| !t.is_empty()) {
+                            out.push(StreamEvent::Text(idx, t.to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+                self.blocks[idx] = block;
+            }
+            "content_block_delta" => {
+                let d = &data["delta"];
+                let Some(block) = self.blocks.get_mut(idx) else { return out };
+                let append = |b: &mut Value, key: &str, s: &str| {
+                    let now = b[key].as_str().unwrap_or_default().to_string();
+                    b[key] = Value::String(now + s);
+                };
+                match d["type"].as_str().unwrap_or_default() {
+                    "text_delta" => {
+                        let t = d["text"].as_str().unwrap_or_default();
+                        append(block, "text", t);
+                        out.push(StreamEvent::Text(idx, t.to_string()));
+                    }
+                    "input_json_delta" => self.partial.entry(idx).or_default().push_str(d["partial_json"].as_str().unwrap_or_default()),
+                    "thinking_delta" => {
+                        let t = d["thinking"].as_str().unwrap_or_default();
+                        append(block, "thinking", t);
+                        if !t.is_empty() {
+                            out.push(StreamEvent::Note(idx, t.to_string()));
+                        }
+                    }
+                    "signature_delta" => append(block, "signature", d["signature"].as_str().unwrap_or_default()),
+                    "citations_delta" => {
+                        if !block["citations"].is_array() {
+                            block["citations"] = json!([]);
+                        }
+                        if let Some(c) = block["citations"].as_array_mut() {
+                            c.push(d["citation"].clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "content_block_stop" => {
+                if let Some(raw) = self.partial.remove(&idx)
+                    && let Some(block) = self.blocks.get_mut(idx)
+                {
+                    // Eager input streaming: the API doesn't validate the input, so parse it strictly.
+                    match serde_json::from_str::<Value>(if raw.trim().is_empty() { "{}" } else { &raw }) {
+                        Ok(v) if v.is_object() => block["input"] = v,
+                        _ => {
+                            block["input"] = json!({});
+                            if let Some(id) = block["id"].as_str() {
+                                self.invalid.insert(id.to_string(), Value::String(raw));
+                            }
+                        }
+                    }
+                }
+            }
+            "message_delta" => {
+                if !data["delta"]["stop_reason"].is_null() {
+                    self.stop_reason = data["delta"]["stop_reason"].clone();
+                }
+                if !data["delta"]["stop_details"].is_null() {
+                    self.usage.insert("stop_details".into(), data["delta"]["stop_details"].clone());
+                }
+                if let Some(u) = data["usage"].as_object() {
+                    self.usage.extend(u.clone());
+                }
+            }
+            "error" => self.error = Some(data["error"]["message"].as_str().unwrap_or("The API reported an error.").to_string()),
+            _ => {}
         }
+        out
     }
-    if !betas.is_empty() {
-        headers.push(format!("anthropic-beta: {}", betas.join(",")));
+
+    fn finish(mut self) -> Result<Value, String> {
+        if let Some(e) = self.error {
+            return Err(format!("API error: {e}"));
+        }
+        let details = self.usage.remove("stop_details").unwrap_or(Value::Null);
+        Ok(json!({
+            "content": self.blocks.into_iter().filter(|b| !b.is_null()).collect::<Vec<_>>(),
+            "stop_reason": self.stop_reason,
+            "stop_details": details,
+            "usage": self.usage,
+            "model": self.model,
+            "invalid_inputs": self.invalid,
+        }))
     }
-    let result = (|| {
-        std::fs::write(&body_path, body.to_string()).map_err(|e| e.to_string())?;
-        std::fs::write(&head_path, headers.join("\n")).map_err(|e| e.to_string())?;
-        let out = hidden(std::process::Command::new("curl.exe").args([
-            "-sS",
-            "--max-time",
-            "900",
-            "-X",
-            "POST",
-            API_URL,
-            "-H",
-            &format!("@{}", head_path.display()),
-            "--data-binary",
-            &format!("@{}", body_path.display()),
-            "-w",
-            "\n%{http_code}",
-        ]))
-        .output()
-        .map_err(|e| format!("couldn't run curl.exe: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("curl failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+}
+
+/// POST the body with curl.exe and stream the answer back. Headers go through a temp file so the
+/// key isn't on a command line.
+fn stream_request(body: Value, auth: Auth, betas: Vec<&'static str>, child: Arc<Mutex<Option<Child>>>, tx: Sender<StreamEvent>, wake: impl Fn() + Send + 'static) {
+    std::thread::spawn(move || {
+        let send = |e: StreamEvent| {
+            let _ = tx.send(e);
+            wake();
+        };
+        let tmp = std::env::temp_dir();
+        let stamp = format!("umalord-{}-{}", std::process::id(), SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        let body_path = tmp.join(format!("{stamp}.json"));
+        let head_path = tmp.join(format!("{stamp}.hdr"));
+        let mut headers = vec!["content-type: application/json".to_string(), "anthropic-version: 2023-06-01".to_string()];
+        let mut betas = betas;
+        match &auth {
+            Auth::ApiKey(k) => headers.push(format!("x-api-key: {k}")),
+            Auth::Bearer(t) => {
+                headers.push(format!("authorization: Bearer {t}"));
+                betas.push("oauth-2025-04-20");
+            }
         }
-        let text = String::from_utf8_lossy(&out.stdout).to_string();
-        let (json_text, code) = text.rsplit_once('\n').unwrap_or((&text, "0"));
-        let v: Value = serde_json::from_str(json_text).map_err(|e| format!("bad response ({code}): {e}"))?;
-        if code.trim() != "200" {
-            let msg = v["error"]["message"].as_str().unwrap_or("unknown error");
-            return Err(format!("API error {}: {msg}", code.trim()));
+        if !betas.is_empty() {
+            headers.push(format!("anthropic-beta: {}", betas.join(",")));
         }
-        Ok(v)
-    })();
-    let _ = std::fs::remove_file(&body_path);
-    let _ = std::fs::remove_file(&head_path);
-    result
+        let result = (|| -> Result<Value, String> {
+            std::fs::write(&body_path, body.to_string()).map_err(|e| e.to_string())?;
+            std::fs::write(&head_path, headers.join("\n")).map_err(|e| e.to_string())?;
+            let mut cmd = std::process::Command::new("curl.exe");
+            cmd.args(["-sS", "-N", "--max-time", "900", "-X", "POST", API_URL, "-H", &format!("@{}", head_path.display()), "--data-binary", &format!("@{}", body_path.display()), "-w", "\n%{http_code}"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            hidden(&mut cmd);
+            let mut proc = cmd.spawn().map_err(|e| format!("couldn't run curl.exe: {e}"))?;
+            let stdout = proc.stdout.take();
+            let mut stderr = proc.stderr.take();
+            *child.lock().unwrap_or_else(|p| p.into_inner()) = Some(proc);
+            let mut acc = Acc::default();
+            let mut other = String::new();
+            for line in BufReader::new(stdout.ok_or("no output from curl")?).lines().map_while(Result::ok) {
+                if let Some(d) = line.strip_prefix("data:") {
+                    if let Ok(v) = serde_json::from_str::<Value>(d.trim()) {
+                        for e in acc.apply(&v) {
+                            send(e);
+                        }
+                    }
+                } else if !line.starts_with("event:") && !line.trim().is_empty() {
+                    other.push_str(&line);
+                    other.push('\n');
+                }
+            }
+            let mut err = String::new();
+            if let Some(e) = stderr.as_mut() {
+                let _ = e.read_to_string(&mut err);
+            }
+            let status = child.lock().unwrap_or_else(|p| p.into_inner()).take().and_then(|mut p| p.wait().ok());
+            let Some(status) = status else { return Err("Stopped.".into()) };
+            if !status.success() {
+                return Err(format!("curl failed: {}", err.trim()));
+            }
+            let (json_text, code) = other.trim_end().rsplit_once('\n').map_or(("", other.trim()), |(a, b)| (a, b.trim()));
+            if code != "200" {
+                let msg = serde_json::from_str::<Value>(json_text).ok().and_then(|v| v["error"]["message"].as_str().map(String::from)).unwrap_or_else(|| "unknown error".into());
+                return Err(format!("API error {code}: {msg}"));
+            }
+            acc.finish()
+        })();
+        let _ = std::fs::remove_file(&body_path);
+        let _ = std::fs::remove_file(&head_path);
+        send(StreamEvent::Done(result));
+    });
 }
 
 // ---------------------------------------------------------------------------
-// Tools
-
-fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
-    json!({
-        "name": name,
-        "description": description,
-        "input_schema": {"type": "object", "properties": properties, "required": required},
-    })
-}
-
-fn tools() -> Value {
-    let target = json!({
-        "distance": {"type": "string", "enum": ["Sprint", "Mile", "Medium", "Long"]},
-        "surface": {"type": "string", "enum": ["Turf", "Dirt"]},
-        "style": {"type": "string", "enum": ["Front", "Pace", "Late", "End"], "description": "Running style: Front Runner, Pace Chaser, Late Surger, End Closer"},
-    });
-    let mut find_umas = target.clone();
-    find_umas["min_grade"] = json!({"type": "string", "enum": ["S", "A", "B", "C"], "description": "Minimum aptitude grade for the given filters (default A)"});
-    let mut search = target;
-    search["query"] = json!({"type": "string", "description": "Text to match in name or effect summary; may be empty"});
-    search["owned_only"] = json!({"type": "boolean", "description": "Only skills this account can get now (default true)"});
-    search["category"] = json!({"type": "string", "enum": ["Speed Boost", "Acceleration", "Recovery", "Passive", "Debuff", "Lane Effect", "Vision", "Unique", "Evolved"]});
-    json!([
-        tool("find_umas", "List the account's owned umas whose aptitudes fit a distance, surface and/or style, best fit first, with stars, potential and aptitude grades.", find_umas, &[]),
-        tool("get_uma", "Full knowledge for one trainee outfit: base stats, growth rates, aptitudes, unique/innate/potential skills (with which are locked at the owned potential), evolved skills and their conditions, event skills, career objectives, and whether the account owns it. Query by name, outfit or id.", json!({"query": {"type": "string"}}), &["query"]),
-        tool("get_card", "Full knowledge for one support card: support effects at the owned level and at max level, unique effect, skill hints, event skills, and every event with its outcomes. Query by uma name, card title or id.", json!({"query": {"type": "string"}}), &["query"]),
-        tool("search_skills", "Search skills. Returns name, rarity, SP cost, effect, what it is restricted to, uma.guide's trigger summary, and where this account can get it.", search, &[]),
-        tool("get_skill", "Full detail for one skill: effects, trigger conditions, cooldown, and every source (owned or not).", json!({"query": {"type": "string"}}), &["query"]),
-        tool("find_races", "Find races/courses by race name or racecourse: track, surface, distance, direction, grade.", json!({"query": {"type": "string"}}), &["query"]),
-        tool("list_notes", "List the project's markdown notes: insights.md (Claude's evidence-backed opinions), sources.md, plans/*.md (career plans), results/*.md (real results logs), account/*.md.", json!({}), &[]),
-        tool("read_note", "Read one note file by its path from list_notes, e.g. insights.md or results/careers.md.", json!({"path": {"type": "string"}}), &["path"]),
-        tool("glossary", "Look up a community term (e.g. 'MLB', 'spark', 'CM').", json!({"term": {"type": "string"}}), &["term"]),
-    ])
-}
-
-fn parse_distance(v: &Value) -> Option<Distance> {
-    Distance::ALL.into_iter().find(|d| v.as_str() == Some(d.label()))
-}
-fn parse_surface(v: &Value) -> Option<Surface> {
-    Surface::ALL.into_iter().find(|d| v.as_str() == Some(d.label()))
-}
-fn parse_style(v: &Value) -> Option<Style> {
-    Style::ALL.into_iter().find(|d| v.as_str() == Some(d.short()) || v.as_str() == Some(d.label()))
-}
-
-fn clip(s: String, max: usize) -> String {
-    if s.len() <= max {
-        s
-    } else {
-        let mut end = max;
-        while !s.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}\n…(truncated)", &s[..end])
-    }
-}
+// The conversation
 
 impl App {
     fn system_prompt(&self) -> String {
@@ -298,323 +516,447 @@ impl App {
             roster.push_str(&format!("- card {} {} {} [{}] LB{} Lv{}\n", c.rarity.label(), c.card_type.label(), c.uma, c.title, c.lb, c.level));
         }
         format!(
-            "You are the umaLord assistant inside the user's desktop app for Uma Musume: Pretty Derby (Global/English server).\n\
-             You answer questions about this specific account: which umas and support cards it owns, what to train and why, \
-             decks, skills, parents and sparks, and goals such as Team Trials, Champions Meeting, parent runs and League of Heroes.\n\n\
+            "You are the umaLord assistant inside the user's desktop app for Uma Musume: Pretty Derby (Global/English server). Today is {today}.\n\
+             You answer questions about this account (its umas and support cards, what to train and why, decks, skills, parents and sparks, and goals such as \
+             Team Trials, Champions Meeting, parent runs and League of Heroes), and you can work the app: draft career plans, choose trainees, decks and skills, \
+             run the race simulator, and save plans and results once the user approves.\n\n\
              How to work:\n\
              - Use the tools for every game fact (aptitudes, growth, skill effects, card effects, events). Don't state game numbers from memory; if a tool can't confirm something, say it's unverified.\n\
              - Recommend owned umas and cards first. Read support effects at the owned level, not max level. A support card can't go in the deck of its own character, and a deck holds one card per character plus one borrowed friend card.\n\
-             - Label claims as data (from the tools), simulation (from a plan's Simulation section), or opinion. Check insights.md and results/ for the account's real results before giving an opinion, and say how confident you are.\n\
-             - You can't run race simulations yourself. When a question needs one, say so and suggest the app's Career tab: build the plan on its Plan page and press ▶ Simulate, which races it on the Race sim page.\n\
+             - Label every claim as data (game data from the tools), simulation (simulator output, or a plan's Simulation section), community meta (the meta sheet, get_cm_meta) or opinion. Check insights.md and results/ for the account's real results before giving an opinion, and say how confident you are.\n\n\
+             Building and testing a career, when the user asks for a plan, a deck, skills or a simulation:\n\
+             1. Understand the goal: the event, the trainee or style, what matters to them. Ask only if it's genuinely unclear; otherwise say what you assumed.\n\
+             2. For a Champions Meeting: list_upcoming_events, then get_cm_meta for its style ranking, decks and skills. Say whether the CM is announced or estimated, and name the skills it turns off.\n\
+             3. Draft: new_plan (with the CM), recommend_trainees or the user's pick, set_plan (trainee, style, target stats: the meta sheet's recommended stats are a fair start), then recommend_deck or set_deck.\n\
+             4. Skills: auto_pick_skills, which simulates and optimises within the SP budget.\n\
+             5. Verify: run_compare with builds \"plan\" races the trainee without and with her skills to buy; run_stamina when stamina is in doubt.\n\
+             6. Present: the result first, then the plan as a short list, each claim labelled, with the course, conditions, races and seed the simulations used. Offer to save it.\n\
+             - Draft tools change the Planner and the Race sim at once, and the user can undo each from the chat. new_plan replaces the plan open in the Planner: if one is open (get_plan), say so.\n\
+             - save_plan, log_result and update_owned show the user an approval card. Call them only when the user asked for that or agreed to it.\n\
+             - Run at most 4 simulations (auto_pick_skills, simulate_skills, run_compare, run_skill_chart, run_stamina, stat_sensitivity) per question unless the user asks for more.\n\
              - Be concise: lead with the answer, then the reasons. Use short markdown lists or tables.\n\n\
-             The account's roster ({} umas, {} support cards):\n{roster}",
+             The account's roster when this conversation started ({} umas, {} support cards; get_account_summary has the current one):\n{roster}",
             self.roster.umas.len(),
-            self.roster.cards.len()
+            self.roster.cards.len(),
+            today = crate::ui_util::today(),
         )
     }
 
-    fn find_uma_id(&self, q: &str) -> Result<u32, String> {
-        let ql = q.trim().to_lowercase();
-        if let Ok(id) = ql.parse::<u32>()
-            && self.kb.umas.contains_key(&id)
-        {
-            return Ok(id);
-        }
-        let mut hits: Vec<u32> = self
-            .kb
-            .umas
-            .values()
-            .filter(|u| format!("{} [{}]", u.name, u.outfit).to_lowercase().contains(&ql) || u.name.to_lowercase() == ql)
-            .map(|u| u.id)
-            .collect();
-        if hits.is_empty() {
-            hits = self.kb.umas.values().filter(|u| ql.contains(&u.name.to_lowercase())).map(|u| u.id).collect();
-        }
-        hits.sort_by_key(|id| (self.owned_uma(*id).is_none(), *id));
-        match hits.as_slice() {
-            [] => Err(format!("No uma matches '{q}'.")),
-            [one] => Ok(*one),
-            many if self.owned_uma(many[0]).is_some() && many.iter().filter(|i| self.owned_uma(**i).is_some()).count() == 1 => Ok(many[0]),
-            many => Err(format!(
-                "Several match '{q}': {}. Ask again with the outfit.",
-                many.iter().map(|i| { let u = &self.kb.umas[i]; format!("{} [{}]{}", u.name, u.outfit, if self.owned_uma(*i).is_some() { " (owned)" } else { "" }) }).collect::<Vec<_>>().join("; ")
-            )),
-        }
-    }
-
-    fn find_card_id(&self, q: &str) -> Result<u32, String> {
-        let ql = q.trim().to_lowercase();
-        if let Ok(id) = ql.parse::<u32>()
-            && self.kb.cards.contains_key(&id)
-        {
-            return Ok(id);
-        }
-        let mut hits: Vec<u32> = self
-            .kb
-            .cards
-            .values()
-            .filter(|c| format!("{} [{}] {} {}", c.uma, c.title, c.rarity, c.kind).to_lowercase().contains(&ql))
-            .map(|c| c.id)
-            .collect();
-        hits.sort_by_key(|id| (self.owned_card(*id).is_none(), std::cmp::Reverse(*id)));
-        let owned: Vec<u32> = hits.iter().copied().filter(|i| self.owned_card(*i).is_some()).collect();
-        match (hits.as_slice(), owned.as_slice()) {
-            ([], _) => Err(format!("No card matches '{q}'.")),
-            ([one], _) | (_, [one]) => Ok(*one),
-            (many, _) => Err(format!(
-                "Several match '{q}': {}. Ask again with the title.",
-                many.iter().take(15).map(|i| { let c = &self.kb.cards[i]; format!("{} {} {} [{}]{}", c.rarity, c.kind, c.uma, c.title, self.owned_card(*i).map_or(String::new(), |o| format!(" (owned LB{})", o.lb))) }).collect::<Vec<_>>().join("; ")
-            )),
-        }
-    }
-
-    fn find_skill_id(&self, q: &str) -> Result<u32, String> {
-        let ql = q.trim().to_lowercase();
-        if let Ok(id) = ql.parse::<u32>()
-            && self.kb.skills.contains_key(&id)
-        {
-            return Ok(id);
-        }
-        if let Some(id) = self.kb.skill_order.iter().find(|i| self.kb.skills[i].name.to_lowercase() == ql) {
-            return Ok(*id);
-        }
-        let hits: Vec<u32> = self.kb.skill_order.iter().copied().filter(|i| self.kb.skills[i].name.to_lowercase().contains(&ql)).collect();
-        match hits.as_slice() {
-            [] => Err(format!("No skill matches '{q}'.")),
-            [one] => Ok(*one),
-            many => Err(format!("Several match '{q}': {}.", many.iter().take(20).map(|i| self.kb.skills[i].name.clone()).collect::<Vec<_>>().join("; "))),
-        }
-    }
-
-    fn skill_line(&self, id: u32) -> String {
-        let Some(s) = self.kb.skills.get(&id) else { return format!("skill {id}") };
-        let tags = self.kb.tag_line(&s.tags());
-        format!(
-            "{} ({}, {} SP{}): {}{}",
-            s.name,
-            s.tier(),
-            s.sp,
-            if tags.is_empty() { String::new() } else { format!(", only {tags}") },
-            if s.summary.is_empty() { s.effect_text() } else { s.summary.clone() },
-            if self.skill_available(id) { " [available to you]" } else { "" }
-        )
-    }
-
-    pub(crate) fn run_tool(&self, name: &str, input: &Value) -> Result<String, String> {
-        match name {
-            "find_umas" => {
-                let (d, s, st) = (parse_distance(&input["distance"]), parse_surface(&input["surface"]), parse_style(&input["style"]));
-                let min = input["min_grade"].as_str().map_or(7, grade_rank);
-                let mut rows: Vec<(u32, String)> = Vec::new();
-                for u in &self.roster.umas {
-                    let Some(info) = self.kb.umas.get(&u.id) else { continue };
-                    let a = &info.aptitude;
-                    let grades = [d.map(|x| a.distance(x)), s.map(|x| a.surface(x)), st.map(|x| a.style(x))];
-                    if grades.iter().flatten().any(|g| grade_rank(g) < min) {
-                        continue;
-                    }
-                    let score: u32 = grades.iter().flatten().map(|g| u32::from(grade_rank(g))).sum::<u32>() * 10 + u32::from(u.stars);
-                    rows.push((score, format!(
-                        "{} [{}] {}★ P{} | turf {} dirt {} | sprint {} mile {} medium {} long {} | front {} pace {} late {} end {}",
-                        u.name, u.outfit, u.stars, u.potential, a.turf, a.dirt, a.sprint, a.mile, a.medium, a.long, a.front, a.pace, a.late, a.end
-                    )));
-                }
-                rows.sort_by(|a, b| b.0.cmp(&a.0));
-                Ok(if rows.is_empty() { "No owned uma fits.".into() } else { rows.into_iter().map(|r| r.1).collect::<Vec<_>>().join("\n") })
-            }
-            "get_uma" => {
-                let id = self.find_uma_id(input["query"].as_str().unwrap_or_default())?;
-                let i = &self.kb.umas[&id];
-                let owned = self.owned_uma(id);
-                let a = &i.aptitude;
-                let mut out = format!(
-                    "{} [{}] (id {id}), released {}\nOwned: {}\nAptitude: turf {} dirt {} | sprint {} mile {} medium {} long {} | front {} pace {} late {} end {}\nBase stats (spd/sta/pow/guts/wit): {:?}\nGrowth %: {:?}\n",
-                    i.name, i.outfit, i.release,
-                    owned.map_or("no".to_string(), |o| format!("yes, {}★, potential {}", o.stars, o.potential)),
-                    a.turf, a.dirt, a.sprint, a.mile, a.medium, a.long, a.front, a.pace, a.late, a.end, i.base, i.growth
-                );
-                if let Some(u) = i.unique_skill {
-                    out += &format!("Unique: {}\n", self.skill_line(u));
-                }
-                for s in &i.skills {
-                    let locked = owned.is_some_and(|o| o.potential < s.potential);
-                    out += &format!("{}{}: {}\n", if s.potential <= 1 { "Innate".to_string() } else { format!("Potential {}", s.potential) }, if locked { " (LOCKED for this account)" } else { "" }, self.skill_line(s.id));
-                }
-                for e in &i.evolved {
-                    out += &format!("Evolves {} -> {} when: {}\n", self.kb.skill_name(e.base), self.skill_line(e.evolved), e.conditions.iter().map(|c| c.join(" + ")).collect::<Vec<_>>().join(" OR "));
-                }
-                if !i.event_skills.is_empty() {
-                    out += &format!("Event skills: {}\n", i.event_skills.iter().map(|s| self.kb.skill_name(*s)).collect::<Vec<_>>().join(", "));
-                }
-                out += "Career objectives:\n";
-                for o in &i.objectives {
-                    out += &format!("- {}: {} ({})\n", o.when, o.race, o.goal);
-                }
-                out += &format!("{} career events (ask get_uma only for summary; event outcomes are in the Umas tab).\n", i.events.len());
-                Ok(out)
-            }
-            "get_card" => {
-                let id = self.find_card_id(input["query"].as_str().unwrap_or_default())?;
-                let c = &self.kb.cards[&id];
-                let owned = self.owned_card(id);
-                let max = match c.rarity.as_str() { "SSR" => 50, "SR" => 45, _ => 40 };
-                let level = owned.map_or(max, |o| u32::from(o.level));
-                let mut out = format!(
-                    "{} {} {} [{}] (id {id}), released {}\nOwned: {}\nEffects (at owned Lv{level} / at Lv{max}):\n",
-                    c.rarity, c.kind, c.uma, c.title, c.release,
-                    owned.map_or("no".to_string(), |o| format!("yes, LB{} Lv{}", o.lb, o.level))
-                );
-                for e in &c.effects {
-                    let now = crate::knowledge::effect_at(&e.points, level);
-                    let top = crate::knowledge::effect_at(&e.points, max);
-                    if now.unwrap_or(0) != 0 || top.unwrap_or(0) != 0 {
-                        out += &format!("- {}: {} / {}\n", e.name, now.unwrap_or(0), top.unwrap_or(0));
-                    }
-                }
-                if let Some(u) = &c.unique {
-                    out += &format!("Unique effect (from Lv{}{}): {} {}\n", u.level, if level >= u.level { ", active" } else { ", NOT active at owned level" }, u.condition, u.effects.iter().map(|e| format!("{} {}", e.name, e.value)).collect::<Vec<_>>().join(", "));
-                }
-                out += "Skill hints:\n";
-                for s in &c.hints {
-                    out += &format!("- {}\n", self.skill_line(*s));
-                }
-                if !c.event_skills.is_empty() {
-                    out += &format!("Skills from events: {}\n", c.event_skills.iter().map(|s| self.kb.skill_name(*s)).collect::<Vec<_>>().join(", "));
-                }
-                out += "Events (options; '|' separates random alternative outcomes, odds unknown):\n";
-                for e in &c.events {
-                    let opts: Vec<String> = e.options.iter().map(|alts| alts.iter().map(|l| l.join(", ")).collect::<Vec<_>>().join(" | ")).collect();
-                    out += &format!("- {} ({}): {}\n", e.title, e.kind, opts.join(" // "));
-                }
-                Ok(clip(out, 12_000))
-            }
-            "search_skills" => {
-                let q = input["query"].as_str().unwrap_or_default().to_lowercase();
-                let owned_only = input["owned_only"].as_bool().unwrap_or(true);
-                let cat = input["category"].as_str();
-                let (d, s, st) = (parse_distance(&input["distance"]), parse_surface(&input["surface"]), parse_style(&input["style"]));
-                let hits: Vec<String> = self
-                    .kb
-                    .skill_order
-                    .iter()
-                    .filter(|id| {
-                        let k = &self.kb.skills[id];
-                        (q.is_empty() || k.name.to_lowercase().contains(&q) || k.summary.to_lowercase().contains(&q))
-                            && cat.is_none_or(|c| k.category == c || k.tier() == c)
-                            && k.tags().fits(st, d, s)
-                            && (!owned_only || self.skill_available(**id))
-                    })
-                    .take(40)
-                    .map(|id| self.skill_line(*id))
-                    .collect();
-                Ok(if hits.is_empty() { "No skills match.".into() } else { hits.join("\n") })
-            }
-            "get_skill" => {
-                let id = self.find_skill_id(input["query"].as_str().unwrap_or_default())?;
-                let k = &self.kb.skills[&id];
-                let mut out = format!(
-                    "{} ({}, {}, {} SP, wit check: {})\nEffect: {}\nTrigger (uma.guide): {}\nDescription: {}\nRaw conditions: {} | pre: {}\nBase duration {}s, cooldown {}s\nSources:\n",
-                    k.name, k.tier(), k.category, k.sp, k.wit_check, k.effect_text(), k.summary, k.desc, k.conditions, k.pre, k.duration, k.cooldown
-                );
-                for src in self.kb.sources.get(&id).into_iter().flatten() {
-                    let who = src
-                        .uma()
-                        .and_then(|u| self.kb.umas.get(&u).map(|i| format!("uma {} [{}]", i.name, i.outfit)))
-                        .or_else(|| src.card().and_then(|c| self.kb.cards.get(&c).map(|i| format!("card {} {} [{}]", i.rarity, i.uma, i.title))))
-                        .unwrap_or_default();
-                    out += &format!("- {:?} {who}{}\n", src, if self.source_available(*src) { " (available to you)" } else { "" });
-                }
-                Ok(out)
-            }
-            "find_races" => {
-                let q = input["query"].as_str().unwrap_or_default().to_lowercase();
-                let mut seen = std::collections::HashSet::new();
-                let hits: Vec<String> = self
-                    .kb
-                    .races
-                    .iter()
-                    .filter(|r| r.name.to_lowercase().contains(&q) || r.track.to_lowercase().contains(&q))
-                    .filter(|r| seen.insert((r.name.clone(), r.distance)))
-                    .take(25)
-                    .map(|r| format!("{} ({}): {} {} {}m {} [{}]", r.name, r.grade, r.track, r.surface, r.distance, r.direction, r.category))
-                    .collect();
-                Ok(if hits.is_empty() { "No race matches.".into() } else { hits.join("\n") })
-            }
-            "list_notes" => {
-                let root = self.root.as_ref().ok_or("umaLord folder not found")?;
-                let mut files = vec!["insights.md".to_string(), "sources.md".to_string()];
-                for dir in ["plans", "results", "account"] {
-                    for e in std::fs::read_dir(root.join(dir)).into_iter().flatten().flatten() {
-                        let n = e.file_name().to_string_lossy().to_string();
-                        if n.ends_with(".md") && !n.starts_with('_') {
-                            files.push(format!("{dir}/{n}"));
-                        }
-                    }
-                }
-                Ok(files.join("\n"))
-            }
-            "read_note" => {
-                let root = self.root.as_ref().ok_or("umaLord folder not found")?;
-                let rel = input["path"].as_str().unwrap_or_default().replace('\\', "/");
-                let allowed = rel.ends_with(".md")
-                    && !rel.contains("..")
-                    && (["insights.md", "sources.md", "CLAUDE.md"].contains(&rel.as_str()) || ["plans/", "results/", "account/", "knowledge/"].iter().any(|d| rel.starts_with(d)));
-                if !allowed {
-                    return Err(format!("Not a readable note: {rel}"));
-                }
-                let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-                Ok(clip(text.split("<!-- umalord-plan").next().unwrap_or("").to_string(), 20_000))
-            }
-            "glossary" => {
-                let q = input["term"].as_str().unwrap_or_default().to_lowercase();
-                let hits: Vec<String> = self
-                    .kb
-                    .glossary
-                    .iter()
-                    .filter(|g| g.term.to_lowercase().contains(&q) || g.aliases.iter().any(|a| a.to_lowercase().contains(&q)))
-                    .take(8)
-                    .map(|g| format!("{}: {}", g.term, g.description))
-                    .collect();
-                Ok(if hits.is_empty() { "Not in the glossary.".into() } else { hits.join("\n") })
-            }
-            other => Err(format!("Unknown tool {other}")),
-        }
+    /// Where the user is in the app, sent with each question (appended, so the cache and the
+    /// thinking blocks stay valid).
+    fn app_state_note(&self) -> String {
+        let page = match self.tab {
+            crate::Tab::Career => format!("Career → {}", self.career_tab.info().1),
+            crate::Tab::Collection => "Collection".to_string(),
+            t => t.info().1.to_string(),
+        };
+        let p = &self.planner.plan;
+        let plan = match p.trainee.and_then(|t| self.kb.umas.get(&t)) {
+            Some(u) => format!("'{}' ({} [{}], {})", if p.title.is_empty() { "untitled" } else { &p.title }, u.name, u.outfit, p.purpose.label()),
+            None if p.title.is_empty() => "empty".to_string(),
+            None => format!("'{}' (no trainee yet)", p.title),
+        };
+        format!("<app_state>Page before the question: {page}. Working plan in the Planner: {plan}. Today: {}.</app_state>", crate::ui_util::today())
     }
 
     fn send_request(&mut self, ctx: &egui::Context) {
+        // Tests drive the loop by hand; they never call the API (a key in the environment would bill it).
+        if cfg!(test) {
+            self.ask.status = Some(("Tests don't call the API.".into(), false));
+            return;
+        }
         let Some(auth) = self.ask.auth() else {
-            self.ask.status = Some(("No API key. Set ANTHROPIC_API_KEY, enter a key below, or log in with the ant CLI.".into(), true));
+            self.ask.status = Some(("No API key. Set ANTHROPIC_API_KEY, enter one in ⚙ Settings → AI assistant, or log in with the ant CLI.".into(), true));
             return;
         };
-        let (model, _, fallbacks) = MODELS[self.ask.model];
+        if self.ask.system.is_none() {
+            self.ask.system = Some(self.system_prompt());
+        }
+        let (model, _, fallbacks, updates) = MODELS[self.ask.model];
         let mut body = json!({
             "model": model,
-            "max_tokens": 16000,
-            "system": self.system_prompt(),
-            "tools": tools(),
+            "max_tokens": 64000,
+            "stream": true,
+            // The tools render first, so this breakpoint caches tools and system together.
+            "system": [{"type": "text", "text": self.ask.system.clone().unwrap_or_default(), "cache_control": {"type": "ephemeral"}}],
+            "tools": crate::agent::api_tools(true),
             "messages": self.ask.messages,
             "output_config": {"effort": EFFORTS[self.ask.effort]},
+            // And the growing conversation.
             "cache_control": {"type": "ephemeral"},
         });
         let mut betas = Vec::new();
+        if updates {
+            // The model's notes between tool calls come back as thinking blocks: ask for their text.
+            body["thinking"] = json!({"type": "adaptive", "display": "updates"});
+            betas.push("thinking-display-updates-2026-08-18");
+        }
         if fallbacks {
             // Server-side refusal fallback: a declined request is re-run on Anthropic's recommended model.
             body["fallbacks"] = json!("default");
             betas.push("server-side-fallback-2026-07-01");
         }
         let (tx, rx) = channel();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let _ = tx.send(post(&body, &auth, &betas));
-            ctx.request_repaint();
-        });
-        self.ask.pending = Some(rx);
+        let child: Arc<Mutex<Option<Child>>> = Default::default();
+        let wake = ctx.clone();
+        stream_request(body, auth, betas, child.clone(), tx, move || wake.request_repaint());
+        self.ask.stream = Some(Stream { rx, child, turns: HashMap::new() });
         self.ask.status = None;
     }
 
-    pub(crate) fn ask_busy(&self) -> bool {
-        self.ask.pending.is_some() || self.ask.oc.rx.is_some()
+    /// An approval card is waiting for the user.
+    pub(crate) fn approval_showing(&self) -> bool {
+        self.ask.turns.iter().any(|t| matches!(t, Turn::Tool(x) if matches!(x.state, ToolState::Asking(..))))
     }
+
+    pub(crate) fn ask_busy(&self) -> bool {
+        self.ask.stream.is_some() || !self.ask.calls.is_empty() || self.ask.oc.rx.is_some()
+    }
+
+    /// What's running now, for the line under the chat.
+    fn busy_line(&self) -> (String, Option<f32>) {
+        for c in &self.ask.calls {
+            let label = crate::agent::find(&c.name).map_or(c.name.clone(), |s| s.label.to_string());
+            match &c.state {
+                CallState::Waiting(w) => {
+                    let frac = match w {
+                        Wait::Pick { .. } => self.planner.pick_job.as_ref().map(|j| j.fraction()),
+                        Wait::SkillValues { .. } => self.planner.skill_job.as_ref().map(|j| j.fraction()),
+                        _ => self.sim_job_fraction(),
+                    };
+                    return (format!("{label}…"), frac);
+                }
+                CallState::Asking => return ("Waiting for your answer on the card above.".into(), None),
+                _ => {}
+            }
+        }
+        if self.approval_showing() {
+            return ("Waiting for your answer on the card above.".into(), None);
+        }
+        if self.ask.stream.is_some() {
+            return (self.ask.activity.last().map_or("Thinking…".to_string(), |a| truncate(a, 80)), None);
+        }
+        let line = match self.ask.activity.last() {
+            // OpenCode reports umaLord's tools by name: say what they do.
+            Some(a) if a.starts_with("umalord_") => crate::agent::find(a.split(' ').next().unwrap_or_default()).map_or(a.clone(), |s| format!("Done: {}", s.label)),
+            Some(a) => format!("Looking up: {}", truncate(a, 80)),
+            None => "Working…".to_string(),
+        };
+        (line, None)
+    }
+
+    pub(crate) fn ask_poll(&mut self, ctx: &egui::Context) {
+        self.opencode_poll(ctx);
+        self.stream_poll(ctx);
+        self.advance_calls(ctx);
+    }
+
+    fn stream_poll(&mut self, ctx: &egui::Context) {
+        let Some(s) = &self.ask.stream else { return };
+        let events: Vec<StreamEvent> = s.rx.try_iter().collect();
+        for e in events {
+            match e {
+                StreamEvent::Text(idx, t) => self.stream_text(idx, &t, false),
+                StreamEvent::Note(idx, t) => self.stream_text(idx, &t, true),
+                StreamEvent::Tool(name) => {
+                    let label = crate::agent::find(&name).map_or(name, |s| s.label.to_string());
+                    self.ask.activity.push(format!("Preparing: {label}"));
+                }
+                StreamEvent::Done(result) => {
+                    self.ask.stream = None;
+                    match result {
+                        Ok(msg) => self.handle_message(ctx, msg),
+                        Err(e) => {
+                            self.ask.status = Some((e, true));
+                            self.finish_question(ctx);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Streamed text goes into its block's turn; a note's into a note turn.
+    fn stream_text(&mut self, idx: usize, t: &str, note: bool) {
+        let Some(s) = &mut self.ask.stream else { return };
+        match s.turns.get(&idx).copied() {
+            Some(i) => match &mut self.ask.turns[i] {
+                Turn::Assistant(text) | Turn::Note(text) => text.push_str(t),
+                _ => {}
+            },
+            None => {
+                s.turns.insert(idx, self.ask.turns.len());
+                self.ask.turns.push(if note { Turn::Note(t.to_string()) } else { Turn::Assistant(t.to_string()) });
+            }
+        }
+    }
+
+    fn handle_message(&mut self, ctx: &egui::Context, resp: Value) {
+        let u = &resp["usage"];
+        self.ask.tokens_in += u["input_tokens"].as_u64().unwrap_or(0) + u["cache_read_input_tokens"].as_u64().unwrap_or(0) + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+        self.ask.cache_read += u["cache_read_input_tokens"].as_u64().unwrap_or(0);
+        self.ask.tokens_out += u["output_tokens"].as_u64().unwrap_or(0);
+        let stop = resp["stop_reason"].as_str().unwrap_or_default().to_string();
+        if stop == "refusal" {
+            // The whole chain declined: nothing of this turn runs, and it isn't echoed (the
+            // transcript still ends with the user's message, which the next question joins).
+            let why = resp["stop_details"]["explanation"].as_str().unwrap_or("The model declined this request.");
+            self.ask.status = Some((format!("Declined: {why}"), true));
+            self.finish_question(ctx);
+            return;
+        }
+        let content = resp["content"].as_array().cloned().unwrap_or_default();
+        // Echo the assistant turn back unchanged, except blocks before a fallback boundary that
+        // the API says to omit, and the fallback marker itself.
+        let boundary = content.iter().rposition(|b| b["type"] == "fallback");
+        let echoed: Vec<Value> = content
+            .iter()
+            .enumerate()
+            .filter(|(i, b)| {
+                let t = b["type"].as_str().unwrap_or_default();
+                t != "fallback" && !(boundary.is_some_and(|f| *i < f) && matches!(t, "thinking" | "redacted_thinking" | "tool_use"))
+            })
+            .map(|(_, b)| b.clone())
+            .collect();
+        if !echoed.is_empty() {
+            self.ask.messages.push(json!({"role": "assistant", "content": echoed}));
+        }
+        let calls: Vec<Value> = echoed.iter().filter(|b| b["type"] == "tool_use").cloned().collect();
+        if calls.is_empty() {
+            if stop == "max_tokens" {
+                self.ask.status = Some(("The answer hit the length limit and is cut off.".into(), true));
+            } else {
+                let served = resp["model"].as_str().unwrap_or_default();
+                if served != MODELS[self.ask.model].0 && !served.is_empty() {
+                    self.ask.status = Some((format!("Answered by {served} (fallback)."), false));
+                }
+            }
+            self.finish_question(ctx);
+            return;
+        }
+        for c in calls {
+            let id = c["id"].as_str().unwrap_or_default().to_string();
+            let name = c["name"].as_str().unwrap_or_default().to_string();
+            let spec = crate::agent::find(&name);
+            let turn = self.ask.turns.len();
+            self.ask.turns.push(Turn::Tool(ToolTurn { icon: spec.map_or("🔧", |s| s.icon), label: spec.map_or(name.clone(), |s| s.label.to_string()), state: ToolState::Running }));
+            let state = if stop == "max_tokens" {
+                // A cut-off input often still parses: don't run it.
+                CallState::Ready(json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": "Your output hit the length limit before this tool's input was complete, so it didn't run. Call it again with a shorter input."}))
+            } else if let Some(raw) = resp["invalid_inputs"].get(&id) {
+                CallState::Ready(json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": json!({"INVALID_JSON": raw}).to_string()}))
+            } else {
+                CallState::Queued
+            };
+            if let CallState::Ready(_) = state
+                && let Turn::Tool(t) = &mut self.ask.turns[turn]
+            {
+                t.state = ToolState::Failed(Card { summary: "Its input was cut off or not valid JSON; the model was told to try again.".into(), ..Default::default() });
+            }
+            self.ask.activity.push(format!("{name} {}", c["input"]));
+            self.ask.calls.push(Call { id, name, input: c["input"].clone(), turn, state });
+        }
+        self.ask.rounds += 1;
+        self.advance_calls(ctx);
+    }
+
+    fn set_tool_turn(&mut self, turn: usize, out: &ToolOut) {
+        if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(turn) {
+            t.state = if out.is_error { ToolState::Failed(out.card.clone()) } else { ToolState::Done(out.card.clone()) };
+        }
+    }
+
+    /// Run the round's tool calls in order (a later call may need an earlier one's result), then
+    /// send all their results together.
+    fn advance_calls(&mut self, ctx: &egui::Context) {
+        if self.ask.calls.is_empty() {
+            return;
+        }
+        let mut calls = std::mem::take(&mut self.ask.calls);
+        let answer = self.ask.answer.take();
+        for i in 0..calls.len() {
+            let result = |c: &Call, out: &ToolOut| json!({"type": "tool_result", "tool_use_id": c.id, "is_error": out.is_error, "content": out.text});
+            loop {
+                let next = match &calls[i].state {
+                    CallState::Ready(_) => break,
+                    CallState::Queued => match self.agent_call(ctx, &calls[i].name, &calls[i].input) {
+                        Exec::Done(out) => {
+                            self.set_tool_turn(calls[i].turn, &out);
+                            CallState::Ready(result(&calls[i], &out))
+                        }
+                        Exec::Wait(w) => CallState::Waiting(w),
+                        Exec::Ask(a) if self.ask.auto_approved(&calls[i].name, &a) => {
+                            let out = self.agent_write(&calls[i].name, &calls[i].input);
+                            self.set_tool_turn(calls[i].turn, &out);
+                            CallState::Ready(result(&calls[i], &out))
+                        }
+                        Exec::Ask(a) => {
+                            if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(calls[i].turn) {
+                                t.state = ToolState::Asking(a.question, None);
+                            }
+                            CallState::Asking
+                        }
+                    },
+                    CallState::Waiting(w) => match self.agent_wait(*w) {
+                        Some(out) => {
+                            self.set_tool_turn(calls[i].turn, &out);
+                            CallState::Ready(result(&calls[i], &out))
+                        }
+                        None => {
+                            ctx.request_repaint_after(Duration::from_millis(150));
+                            self.ask.calls = calls;
+                            return;
+                        }
+                    },
+                    CallState::Asking => match answer {
+                        Some((turn, yes)) if turn == calls[i].turn => {
+                            let out = if yes { self.agent_write(&calls[i].name, &calls[i].input) } else { ToolOut::err("The user declined.") };
+                            self.set_tool_turn(calls[i].turn, &out);
+                            CallState::Ready(result(&calls[i], &out))
+                        }
+                        _ => {
+                            self.ask.calls = calls;
+                            return;
+                        }
+                    },
+                };
+                calls[i].state = next;
+            }
+        }
+        let results: Vec<Value> = calls.into_iter().filter_map(|c| if let CallState::Ready(v) = c.state { Some(v) } else { None }).collect();
+        self.ask.messages.push(json!({"role": "user", "content": results}));
+        let over_time = self.ask.started.is_some_and(|s| s.elapsed() > QUESTION_LIMIT);
+        if self.ask.rounds >= MAX_TOOL_ROUNDS || over_time {
+            // The transcript stays valid: the next question joins these tool results.
+            self.ask.status = Some(("Stopped after many steps. Ask it to carry on, or ask something narrower.".into(), true));
+            self.finish_question(ctx);
+            return;
+        }
+        self.send_request(ctx);
+    }
+
+    /// The answer is done: open the page the assistant asked for.
+    fn finish_question(&mut self, ctx: &egui::Context) {
+        self.ask.started = None;
+        if let Some(at) = self.agent.open_after.take()
+            // A screenshot of a question (UMALORD_ASK) shows the chat.
+            && !self.debug_asked
+        {
+            self.open_at(ctx, &at);
+        }
+    }
+
+    /// Stop the answer: the stream, the running jobs, and the tool calls left (they get "Stopped"
+    /// results, so the transcript stays valid).
+    fn stop_answer(&mut self, ctx: &egui::Context) {
+        if let Some(s) = self.ask.stream.take() {
+            if let Some(mut c) = s.child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                let _ = c.kill();
+            }
+            // Drop what streamed of the unfinished turn: it never reached the transcript.
+            let mut gone: Vec<usize> = s.turns.values().copied().collect();
+            gone.sort_unstable();
+            for i in gone.into_iter().rev() {
+                if i < self.ask.turns.len() {
+                    self.ask.turns.remove(i);
+                }
+            }
+        }
+        let calls = std::mem::take(&mut self.ask.calls);
+        if !calls.is_empty() {
+            let mut results = Vec::new();
+            for c in calls {
+                if let CallState::Waiting(w) = c.state {
+                    self.agent_cancel(w);
+                }
+                let v = match c.state {
+                    CallState::Ready(v) => v,
+                    _ => {
+                        if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(c.turn) {
+                            t.state = ToolState::Failed(Card { summary: "Stopped.".into(), ..Default::default() });
+                        }
+                        json!({"type": "tool_result", "tool_use_id": c.id, "is_error": true, "content": "Stopped by the user."})
+                    }
+                };
+                results.push(v);
+            }
+            self.ask.messages.push(json!({"role": "user", "content": results}));
+        }
+        if let Some(mut child) = self.ask.oc.child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            let _ = child.kill();
+        }
+        self.ask.status = Some(("Stopped.".into(), true));
+        self.finish_question(ctx);
+    }
+
+    /// Kill the request and OpenCode, if running (the window is closing).
+    pub(crate) fn stop_ask_processes(&mut self) {
+        let children = [self.ask.stream.as_ref().map(|s| s.child.clone()), Some(self.ask.oc.child.clone())];
+        for child in children.into_iter().flatten() {
+            if let Some(mut c) = child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                let _ = c.kill();
+            }
+        }
+    }
+
+    pub(crate) fn submit_question(&mut self, ctx: &egui::Context, q: String) {
+        self.ask.turns.push(Turn::User(q.clone()));
+        self.ask.activity.clear();
+        self.ask.status = None;
+        self.agent.sims = 0;
+        self.agent.open_after = None;
+        if self.ask.backend == Backend::OpenCode {
+            self.send_opencode(ctx, q);
+            return;
+        }
+        let blocks = [json!({"type": "text", "text": q}), json!({"type": "text", "text": self.app_state_note()})];
+        // After a refusal or a stopped tool loop the transcript already ends with a user message;
+        // add the question to it rather than starting a second one.
+        match self.ask.messages.last_mut() {
+            Some(last) if last["role"] == "user" => {
+                if let Some(content) = last["content"].as_array_mut() {
+                    content.extend(blocks);
+                }
+            }
+            _ => self.ask.messages.push(json!({"role": "user", "content": blocks})),
+        }
+        self.ask.rounds = 0;
+        self.ask.started = Some(Instant::now());
+        self.send_request(ctx);
+    }
+
+    /// Open a page from a chat card or `open_page`.
+    pub(crate) fn open_at(&mut self, ctx: &egui::Context, at: &OpenAt) {
+        use crate::{CareerTab, CollectionTab, Jump, Tab};
+        match at {
+            OpenAt::Home => self.tab = Tab::Home,
+            OpenAt::Plan => self.go_career(CareerTab::Plan),
+            OpenAt::Race => self.go_career(CareerTab::Race),
+            OpenAt::Results(i) => {
+                self.show_results_log(*i);
+                self.go_career(CareerTab::Results);
+            }
+            OpenAt::Uma(id) => self.jump.set(Some(Jump::Uma(*id))),
+            OpenAt::Card(id) => self.jump.set(Some(Jump::Card(*id))),
+            OpenAt::Skill(id) => self.jump.set(Some(Jump::Skill(*id))),
+            OpenAt::Umas | OpenAt::Cards | OpenAt::Skills => {
+                self.tab = Tab::Collection;
+                self.collection_tab = match at {
+                    OpenAt::Umas => CollectionTab::Umas,
+                    OpenAt::Cards => CollectionTab::Cards,
+                    _ => CollectionTab::Skills,
+                };
+            }
+            OpenAt::DraftPlan | OpenAt::DraftRace => {
+                let r = self.open_bridge_draft(ctx, *at == OpenAt::DraftRace);
+                self.toast_result(r);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // OpenCode
 
     fn send_opencode(&mut self, ctx: &egui::Context, q: String) {
         let (Some(exe), Some(root)) = (self.ask.oc.exe.clone(), self.root.clone()) else {
@@ -622,18 +964,112 @@ impl App {
             return;
         };
         self.write_digest();
+        let bridge = crate::agent::bridge::dir();
+        if let Some(dir) = &bridge {
+            if self.ask.oc.session.is_none() {
+                // A new conversation starts without the last one's draft.
+                crate::agent::bridge::clear(dir);
+            }
+            let _ = std::fs::create_dir_all(dir);
+        }
+        self.ask.oc.draft_seen = bridge.as_deref().and_then(crate::agent::bridge::draft_time);
+        self.ask.oc.plans_before = self.plan_times();
         let ctx = ctx.clone();
         self.ask.oc.answer_open = false;
+        let mcp = std::env::current_exe().ok().map(|exe| crate::ask_opencode::mcp_config(&exe, &root, bridge.as_deref()));
         self.ask.oc.rx = Some(crate::ask_opencode::ask(
             exe,
             root,
             self.ask.oc.model.clone(),
             self.ask.oc.session.clone(),
             q,
+            mcp,
             self.ask.oc.child.clone(),
             move || ctx.request_repaint(),
         ));
         self.ask.status = None;
+    }
+
+    /// When each plan in plans/ was last written.
+    fn plan_times(&self) -> HashMap<PathBuf, SystemTime> {
+        let Some(root) = &self.root else { return HashMap::new() };
+        std::fs::read_dir(root.join("plans"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
+            .filter(|(p, _)| p.extension().is_some_and(|x| x == "md") && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('_')))
+            .collect()
+    }
+
+    /// Plans the assistant saved since the question started: a toast with Open for each.
+    fn check_saved_plans(&mut self) {
+        let now = self.plan_times();
+        let mut changed: Vec<PathBuf> = now.iter().filter(|(p, t)| self.ask.oc.plans_before.get(*p) != Some(*t)).map(|(p, _)| p.clone()).collect();
+        if changed.is_empty() {
+            return;
+        }
+        changed.sort();
+        for path in changed {
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            let title = text.lines().find_map(|l| l.strip_prefix("# ")).unwrap_or_default().to_string();
+            self.toast_action(format!("The assistant saved '{title}'"), crate::ui_util::ToastKind::Success, "Open", crate::ui_util::ToastAction::OpenPlan(path));
+        }
+        self.ask.oc.plans_before = now;
+        self.planner.refresh_files(self.root.as_deref());
+        self.home_dirty();
+    }
+
+    /// While OpenCode answers: show the server's approval questions, collect its page requests,
+    /// note a new draft, and toast plans it saved.
+    fn bridge_poll(&mut self, ctx: &egui::Context, done: bool) {
+        let Some(dir) = crate::agent::bridge::dir() else { return };
+        if !done && self.ask.oc.scanned.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
+            return;
+        }
+        self.ask.oc.scanned = Some(Instant::now());
+        for p in crate::agent::bridge::pending_approvals(&dir) {
+            if !self.ask.oc.shown.insert(p.id) {
+                continue;
+            }
+            let spec = crate::agent::find(&p.tool);
+            let auto = (p.tool == "save_plan" && self.ask.auto_save) || (p.tool == "log_result" && self.ask.auto_log);
+            let state = if auto {
+                crate::agent::bridge::answer(&dir, p.id, true);
+                ToolState::Done(Card { summary: format!("{} (allowed in Settings)", p.question.trim_end_matches('?')), ..Default::default() })
+            } else {
+                ToolState::Asking(p.question.clone(), Some(p.id))
+            };
+            self.ask.turns.push(Turn::Tool(ToolTurn { icon: spec.map_or("✏", |s| s.icon), label: spec.map_or(p.tool.clone(), |s| s.label.to_string()), state }));
+        }
+        for at in crate::agent::bridge::take_ui_requests(&dir) {
+            self.agent.open_after = Some(at);
+        }
+        let draft = crate::agent::bridge::draft_time(&dir);
+        if draft.is_some() && draft != self.ask.oc.draft_seen {
+            self.ask.oc.draft_seen = draft;
+            if let Some(d) = crate::agent::bridge::read_draft(&dir) {
+                let trainee = d.plan.trainee.and_then(|t| self.kb.umas.get(&t)).map_or("no trainee yet".to_string(), |u| format!("{} [{}]", u.name, u.outfit));
+                let title = if d.plan.title.is_empty() { d.plan.purpose.label().to_string() } else { d.plan.title.clone() };
+                let mut card = Card { summary: format!("{title} · {trainee} · {} cards · {} skills", d.plan.deck.iter().flatten().count() + usize::from(d.plan.friend.is_some()), d.plan.skills.len()), ..Default::default() };
+                card.visual = Visual::Deck { cards: d.plan.deck.iter().flatten().copied().collect(), friend: d.plan.friend };
+                card.open.push(OpenAt::DraftPlan);
+                if d.compared {
+                    card.open.push(OpenAt::DraftRace);
+                }
+                // One card for the draft in this answer, kept last: the newest replaces it.
+                let since = self.ask.turns.iter().rposition(|t| matches!(t, Turn::User(_))).map_or(0, |i| i + 1);
+                if let Some(old) = self.ask.turns[since..].iter().position(|t| matches!(t, Turn::Tool(x) if x.label == DRAFT_CARD)) {
+                    self.ask.turns.remove(since + old);
+                }
+                self.ask.turns.push(Turn::Tool(ToolTurn { icon: "📋", label: DRAFT_CARD.into(), state: ToolState::Done(card) }));
+            }
+        }
+        if done || self.ask.oc.plans_scanned.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+            self.ask.oc.plans_scanned = Some(Instant::now());
+            self.check_saved_plans();
+        }
+        ctx.request_repaint_after(Duration::from_millis(300));
     }
 
     pub(crate) fn start_opencode_install(&mut self, ctx: &egui::Context) {
@@ -659,8 +1095,7 @@ impl App {
                 .desired_width(ui.available_width().min(420.0));
             ui.add(bar);
         } else {
-            let button = crate::ui_util::primary_button(ui, format!("⬇ Download OpenCode ({:.0} MB)", mb(ZIP_SIZE)), 14.0)
-                .min_size(vec2(240.0, 36.0));
+            let button = crate::ui_util::primary_button(ui, format!("⬇ Download OpenCode ({:.0} MB)", mb(ZIP_SIZE)), 14.0).min_size(vec2(240.0, 36.0));
             if ui.add_enabled(self.root.is_some(), button).clicked() {
                 let ctx = ui.ctx().clone();
                 self.start_opencode_install(&ctx);
@@ -671,11 +1106,9 @@ impl App {
         }
         ui.add_space(4.0);
         ui.label(
-            RichText::new(format!(
-                "Official release {RELEASE} from github.com/anomalyco/opencode. The app checks its SHA-256 against the published one before installing it to tools\\opencode."
-            ))
-            .size(11.5)
-            .color(p.weak),
+            RichText::new(format!("Official release {RELEASE} from github.com/anomalyco/opencode. The app checks its SHA-256 against the published one before installing it to tools\\opencode."))
+                .size(11.5)
+                .color(p.weak),
         );
     }
 
@@ -718,133 +1151,59 @@ impl App {
         for e in events {
             match e {
                 OcEvent::Session(s) => self.ask.oc.session = Some(s),
-                OcEvent::Tool(t) => self.ask.activity.push(t),
+                OcEvent::Tool(t) => {
+                    self.ask.activity.push(format!("{} {}", t.tool, t.target).trim().to_string());
+                    // The app's own tools get a card; file reads stay in the Lookups list.
+                    if let Some(spec) = crate::agent::find(&t.tool).filter(|_| t.tool.starts_with("umalord_")) {
+                        let summary = t.output.lines().find(|l| !l.trim().is_empty()).map(|l| truncate(l, 110)).unwrap_or_default();
+                        let card = Card { summary, ..Default::default() };
+                        let state = if t.error { ToolState::Failed(card) } else { ToolState::Done(card) };
+                        self.ask.turns.push(Turn::Tool(ToolTurn { icon: spec.icon, label: spec.label.to_string(), state }));
+                        self.ask.oc.answer_open = false;
+                    }
+                }
                 OcEvent::Tokens(i, o) => {
                     self.ask.tokens_in += i;
                     self.ask.tokens_out += o;
                 }
                 OcEvent::Text(t) => match self.ask.turns.last_mut() {
-                    Some(last) if self.ask.oc.answer_open && last.role == "assistant" => {
-                        last.text.push_str("\n\n");
-                        last.text.push_str(&t);
+                    Some(Turn::Assistant(last)) if self.ask.oc.answer_open => {
+                        last.push_str("\n\n");
+                        last.push_str(&t);
                     }
                     _ => {
-                        self.ask.turns.push(Turn { role: "assistant", text: t });
+                        self.ask.turns.push(Turn::Assistant(t));
                         self.ask.oc.answer_open = true;
                     }
                 },
                 OcEvent::Error(msg) => self.ask.status = Some((format!("OpenCode: {msg}"), true)),
                 OcEvent::Done(result) => {
                     self.ask.oc.rx = None;
+                    self.bridge_poll(ctx, true);
                     if let Err(msg) = result {
                         self.ask.status = Some((msg, true));
-                    } else if !self.ask.oc.answer_open && self.ask.status.is_none() {
+                    } else if !self.ask.turns.iter().rev().take_while(|t| !matches!(t, Turn::User(_))).any(|t| matches!(t, Turn::Assistant(_))) && self.ask.status.is_none() {
                         self.ask.status = Some(("OpenCode finished without an answer. Try again or pick another model.".into(), true));
                     }
+                    // Questions the server asked and nobody answered are moot now.
+                    for t in &mut self.ask.turns {
+                        if let Turn::Tool(x) = t
+                            && matches!(x.state, ToolState::Asking(..))
+                        {
+                            x.state = ToolState::Failed(Card { summary: "Not answered in time.".into(), ..Default::default() });
+                        }
+                    }
+                    self.finish_question(ctx);
                     ctx.request_repaint();
                     return;
                 }
             }
         }
+        self.bridge_poll(ctx, false);
     }
 
-    pub(crate) fn ask_poll(&mut self, ctx: &egui::Context) {
-        self.opencode_poll(ctx);
-        let Some(rx) = &self.ask.pending else { return };
-        let Ok(result) = rx.try_recv() else { return };
-        self.ask.pending = None;
-        let resp = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.ask.status = Some((e, true));
-                return;
-            }
-        };
-        self.ask.tokens_in += resp["usage"]["input_tokens"].as_u64().unwrap_or(0)
-            + resp["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0)
-            + resp["usage"]["cache_creation_input_tokens"].as_u64().unwrap_or(0);
-        self.ask.tokens_out += resp["usage"]["output_tokens"].as_u64().unwrap_or(0);
-
-        let content = resp["content"].as_array().cloned().unwrap_or_default();
-        // Echo the assistant turn back unchanged, except blocks before a fallback boundary that
-        // the API says to omit, and the fallback marker itself.
-        let boundary = content.iter().rposition(|b| b["type"] == "fallback");
-        let echoed: Vec<Value> = content
-            .iter()
-            .enumerate()
-            .filter(|(i, b)| {
-                let t = b["type"].as_str().unwrap_or_default();
-                t != "fallback" && !(boundary.is_some_and(|f| *i < f) && matches!(t, "thinking" | "redacted_thinking" | "tool_use"))
-            })
-            .map(|(_, b)| b.clone())
-            .collect();
-        let text: String = echoed.iter().filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("\n\n");
-        if !text.trim().is_empty() {
-            self.ask.turns.push(Turn { role: "assistant", text });
-        }
-        if !echoed.is_empty() {
-            self.ask.messages.push(json!({"role": "assistant", "content": echoed}));
-        }
-
-        match resp["stop_reason"].as_str().unwrap_or_default() {
-            "tool_use" => {
-                let calls: Vec<Value> = echoed.iter().filter(|b| b["type"] == "tool_use").cloned().collect();
-                let mut results = Vec::new();
-                for call in calls {
-                    let name = call["name"].as_str().unwrap_or_default();
-                    self.ask.activity.push(format!("{name} {}", call["input"]));
-                    let (text, is_error) = match self.run_tool(name, &call["input"]) {
-                        Ok(t) => (t, false),
-                        Err(e) => (e, true),
-                    };
-                    results.push(json!({"type": "tool_result", "tool_use_id": call["id"], "content": text, "is_error": is_error}));
-                }
-                self.ask.messages.push(json!({"role": "user", "content": results}));
-                self.ask.rounds += 1;
-                if self.ask.rounds > MAX_TOOL_ROUNDS {
-                    self.ask.status = Some(("Stopped after many tool calls. Ask a narrower question.".into(), true));
-                    // Keep the transcript valid: the next user message follows the tool results.
-                    return;
-                }
-                self.send_request(ctx);
-            }
-            "refusal" => {
-                let why = resp["stop_details"]["explanation"].as_str().unwrap_or("The model declined this request.");
-                self.ask.status = Some((format!("Declined: {why}"), true));
-            }
-            "max_tokens" => {
-                self.ask.status = Some(("The answer hit the length limit and is cut off.".into(), true));
-            }
-            _ => {
-                let served = resp["model"].as_str().unwrap_or_default();
-                if served != MODELS[self.ask.model].0 && !served.is_empty() {
-                    self.ask.status = Some((format!("Answered by {served} (fallback)."), false));
-                }
-            }
-        }
-    }
-
-    pub(crate) fn submit_question(&mut self, ctx: &egui::Context, q: String) {
-        self.ask.turns.push(Turn { role: "user", text: q.clone() });
-        if self.ask.backend == Backend::OpenCode {
-            self.ask.activity.clear();
-            self.send_opencode(ctx, q);
-            return;
-        }
-        // After a refusal or a stopped tool loop the transcript already ends with a
-        // user message; add the question to it rather than starting a second one.
-        match self.ask.messages.last_mut() {
-            Some(last) if last["role"] == "user" => {
-                if let Some(blocks) = last["content"].as_array_mut() {
-                    blocks.push(json!({"type": "text", "text": q}));
-                }
-            }
-            _ => self.ask.messages.push(json!({"role": "user", "content": [{"type": "text", "text": q}]})),
-        }
-        self.ask.rounds = 0;
-        self.ask.activity.clear();
-        self.send_request(ctx);
-    }
+    // -----------------------------------------------------------------------
+    // The tab
 
     pub(crate) fn ask_tab(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
@@ -857,22 +1216,19 @@ impl App {
                 ui.horizontal(|ui| {
                     let edit = ui.add_sized(
                         [ui.available_width() - 96.0, 56.0],
-                        egui::TextEdit::multiline(&mut self.ask.input)
-                            .hint_text("Ask about your account…  (Enter to send, Shift+Enter for a new line)")
-                            .frame(egui::Frame::new()),
+                        egui::TextEdit::multiline(&mut self.ask.input).hint_text("Ask about your account, or ask it to plan and simulate a career…  (Enter to send, Shift+Enter for a new line)").frame(egui::Frame::new()),
                     );
                     let enter = edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-                    if self.ask.oc.rx.is_some() {
+                    if busy {
                         let stop = egui::Button::new(semibold("■ Stop", 14.0)).min_size(vec2(84.0, 40.0));
-                        if ui.add(stop).clicked()
-                            && let Some(mut child) = self.ask.oc.child.lock().unwrap_or_else(|p| p.into_inner()).take()
-                        {
-                            let _ = child.kill();
+                        if ui.add(stop).on_hover_text("Stop the answer and any simulation it started").clicked() {
+                            let ctx = ui.ctx().clone();
+                            self.stop_answer(&ctx);
                         }
                         return;
                     }
                     let send = crate::ui_util::primary_button(ui, "Send ➤", 14.0).min_size(vec2(84.0, 40.0));
-                    if (ui.add_enabled(!busy, send).clicked() || (enter && !busy)) && !self.ask.input.trim().is_empty() {
+                    if (ui.add(send).clicked() || enter) && !self.ask.input.trim().is_empty() {
                         let q = self.ask.input.trim().to_string();
                         self.ask.input.clear();
                         let ctx = ui.ctx().clone();
@@ -881,25 +1237,31 @@ impl App {
                 });
             });
         });
-        let mut suggestion = None;
+        let mut actions: Vec<ChatAction> = Vec::new();
         egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
             crate::ui_util::page_header(
                 ui,
                 "💬 Ask",
-                "Ask in plain English, like you'd ask a friend who knows the game. Answers come from your own roster and the game data.",
+                "Ask in plain English, like you'd ask a friend who knows the game. It answers from your roster and the game data, and can plan and simulate careers for you.",
                 |_| {},
             );
-            egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-                ui.set_max_width(920.0);
+            // An empty chat starts at the top; a conversation follows its newest line.
+            egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(!self.ask.turns.is_empty()).show(ui, |ui| {
+                // Cap, never widen: set_max_width alone can make the column wider than the
+                // panel, and everything centred or wrapped in it then runs off screen.
+                ui.set_max_width(ui.available_width().min(920.0));
                 let needs_install = self.ask.backend == Backend::OpenCode && self.ask.oc.exe.is_none();
                 if self.ask.turns.is_empty() && needs_install {
                     ui.add_space(40.0);
                     ui.vertical_centered(|ui| {
-                        ui.set_max_width(520.0);
+                        ui.set_max_width(ui.available_width().min(520.0));
                         crate::ui_util::card(ui, |ui| self.opencode_install_ui(ui));
                     });
                 } else if self.ask.turns.is_empty() {
+                    // Fit the visible width: a long suggestion would widen the column off screen.
+                    let w = (ui.clip_rect().width() - 24.0).clamp(280.0, 620.0);
                     ui.vertical_centered(|ui| {
+                        ui.set_max_width(w);
                         ui.add_space(24.0);
                         if crate::theme::chibi() == crate::theme::Chibi::Off {
                             ui.label(RichText::new("💬").size(44.0).color(p.weak));
@@ -909,54 +1271,69 @@ impl App {
                         ui.label(semibold("What do you want to know?", 20.0));
                         let who = if self.ask.backend == Backend::OpenCode { "A free model (via OpenCode)" } else { "Claude" };
                         ui.label(
-                            RichText::new(format!("{who} looks things up in your roster, the uma.guide data, your plans and results, and labels what is data and what is opinion."))
-                                .color(p.weak),
+                            RichText::new(format!(
+                                "{who} looks things up in your roster, the uma.guide data, your plans and results, labels what is data and what is opinion, and can build a plan and race it in the simulator. You can undo every change it makes."
+                            ))
+                            .color(p.weak),
                         );
                         ui.add_space(16.0);
                         ui.label(RichText::new("Try one of these:").size(12.5).color(p.weak));
                         for s in SUGGESTIONS {
-                            let b = egui::Button::new(RichText::new(s).size(13.5)).corner_radius(CornerRadius::same(12)).min_size(vec2(560.0, 34.0));
+                            let b = egui::Button::new(RichText::new(s).size(13.5)).wrap().corner_radius(CornerRadius::same(12)).min_size(vec2(w, 34.0));
                             if ui.add(b).clicked() {
-                                suggestion = Some(s.to_string());
+                                actions.push(ChatAction::Ask(s.to_string()));
                             }
                         }
                     });
                 }
-                for turn in &self.ask.turns {
-                    ui.add_space(10.0);
-                    if turn.role == "user" {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            egui::Frame::new()
-                                .fill(p.accent.gamma_multiply(0.18))
-                                .stroke(Stroke::new(1.0, p.accent.gamma_multiply(0.45)))
-                                .corner_radius(CornerRadius { nw: 14, ne: 4, sw: 14, se: 14 })
-                                .inner_margin(Margin::symmetric(14, 10))
-                                .show(ui, |ui| {
-                                    ui.set_max_width(620.0);
-                                    ui.label(&turn.text);
-                                });
-                        });
-                    } else {
-                        ui.horizontal_top(|ui| {
-                            ui.label(RichText::new("✳").size(20.0).color(Color32::from_rgb(217, 119, 87)));
-                            egui::Frame::new()
-                                .fill(p.surface)
-                                .stroke(Stroke::new(1.0, p.border))
-                                .corner_radius(CornerRadius { nw: 4, ne: 14, sw: 14, se: 14 })
-                                .inner_margin(Margin::symmetric(16, 12))
-                                .show(ui, |ui| {
-                                    ui.set_max_width(780.0);
-                                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, &turn.text);
-                                });
-                        });
+                for (i, turn) in self.ask.turns.iter().enumerate() {
+                    ui.add_space(if matches!(turn, Turn::Tool(_) | Turn::Note(_)) { 4.0 } else { 10.0 });
+                    match turn {
+                        Turn::User(text) => {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                                egui::Frame::new()
+                                    .fill(p.accent.gamma_multiply(0.18))
+                                    .stroke(Stroke::new(1.0, p.accent.gamma_multiply(0.45)))
+                                    .corner_radius(CornerRadius { nw: 14, ne: 4, sw: 14, se: 14 })
+                                    .inner_margin(Margin::symmetric(14, 10))
+                                    .show(ui, |ui| {
+                                        ui.set_max_width(visible(ui, 620.0));
+                                        ui.label(text);
+                                    });
+                            });
+                        }
+                        Turn::Assistant(text) => {
+                            ui.horizontal_top(|ui| {
+                                ui.label(RichText::new("✳").size(20.0).color(Color32::from_rgb(217, 119, 87)));
+                                egui::Frame::new()
+                                    .fill(p.surface)
+                                    .stroke(Stroke::new(1.0, p.border))
+                                    .corner_radius(CornerRadius { nw: 4, ne: 14, sw: 14, se: 14 })
+                                    .inner_margin(Margin::symmetric(16, 12))
+                                    .show(ui, |ui| {
+                                        ui.set_max_width(visible(ui, 780.0));
+                                        egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, text);
+                                    });
+                            });
+                        }
+                        Turn::Note(text) => {
+                            ui.horizontal_top(|ui| {
+                                ui.add_space(30.0);
+                                ui.add(egui::Label::new(RichText::new(format!("💭 {}", text.trim())).size(size::SM).italics().color(p.weak)).wrap());
+                            });
+                        }
+                        Turn::Tool(t) => self.tool_card(ui, i, t, &mut actions),
                     }
                 }
-                if self.ask_busy() {
+                if self.ask_busy() && !self.ask.calls.iter().any(|c| matches!(c.state, CallState::Asking)) {
                     ui.add_space(10.0);
+                    let (line, frac) = self.busy_line();
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        let text = self.ask.activity.last().map_or("Thinking…".to_string(), |a| format!("Looking up: {}", truncate(a, 80)));
-                        ui.label(RichText::new(text).color(p.weak));
+                        ui.label(RichText::new(line).color(p.weak));
+                        if let Some(f) = frac {
+                            ui.add(egui::ProgressBar::new(f).desired_width(160.0).show_percentage());
+                        }
                     });
                 }
                 if let Some((msg, err)) = &self.ask.status {
@@ -966,9 +1343,154 @@ impl App {
                 ui.add_space(8.0);
             });
         });
-        if let Some(q) = suggestion {
-            let ctx = ui.ctx().clone();
-            self.submit_question(&ctx, q);
+        let ctx = ui.ctx().clone();
+        for a in actions {
+            self.chat_action(&ctx, a);
+        }
+    }
+
+    /// One tool call in the chat: what ran, a small picture of the result, and its buttons.
+    fn tool_card(&self, ui: &mut egui::Ui, i: usize, t: &ToolTurn, actions: &mut Vec<ChatAction>) {
+        let p = pal(ui);
+        let (border, fill) = match &t.state {
+            ToolState::Asking(..) => (p.accent, p.accent.gamma_multiply(0.10)),
+            ToolState::Failed(_) => (p.warn.gamma_multiply(0.6), p.surface),
+            _ => (p.border, p.surface),
+        };
+        ui.horizontal_top(|ui| {
+            ui.add_space(30.0);
+            egui::Frame::new().fill(fill).stroke(Stroke::new(1.0, border)).corner_radius(CornerRadius::same(10)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+                // A set width: inside a row, a frame shrinks to its content, and the summary
+                // (which truncates) and the buttons (which wrap) would squeeze to nothing.
+                ui.set_width(visible(ui, 740.0));
+                // The frame sits in a row: stack its contents.
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t.icon).size(15.0));
+                        ui.label(semibold(&t.label, size::BODY));
+                        match &t.state {
+                            ToolState::Running => {
+                                ui.spinner();
+                            }
+                            ToolState::Done(c) | ToolState::Failed(c) => {
+                                let color = if matches!(t.state, ToolState::Failed(_)) { p.warn } else { p.weak };
+                                ui.add(egui::Label::new(RichText::new(&c.summary).size(size::SM).color(color)).truncate());
+                            }
+                            ToolState::Asking(..) => {}
+                        }
+                    });
+                    match &t.state {
+                        ToolState::Asking(question, _) => {
+                            ui.add(egui::Label::new(RichText::new(question).size(size::BODY)).wrap());
+                            ui.horizontal(|ui| {
+                                if ui.add(crate::ui_util::primary_button(ui, "✔ Approve", 13.5)).clicked() {
+                                    actions.push(ChatAction::Answer(i, true));
+                                }
+                                if ui.button("✖ Deny").clicked() {
+                                    actions.push(ChatAction::Answer(i, false));
+                                }
+                                ui.label(RichText::new("Settings → AI assistant can allow plan saves and result logs without asking.").size(size::XS).color(p.weak));
+                            });
+                        }
+                        ToolState::Done(c) | ToolState::Failed(c) => {
+                            self.card_visual(ui, &c.visual);
+                            let undo = c.undo.filter(|u| *u < self.agent.undo.len());
+                            if !c.open.is_empty() || undo.is_some() {
+                                ui.horizontal_wrapped(|ui| {
+                                    for at in &c.open {
+                                        if ui.small_button(at.label()).clicked() {
+                                            actions.push(ChatAction::Open(at.clone()));
+                                        }
+                                    }
+                                    if let Some(u) = undo
+                                        && ui.small_button("↶ Undo").on_hover_text("Put back the plan and Race sim as they were before this step (and every later step)").clicked()
+                                    {
+                                        actions.push(ChatAction::Undo(u));
+                                    }
+                                });
+                            }
+                        }
+                        ToolState::Running => {}
+                    }
+                });
+            });
+        });
+    }
+
+    fn card_visual(&self, ui: &mut egui::Ui, v: &Visual) {
+        let p = pal(ui);
+        match v {
+            Visual::None => {}
+            Visual::Deck { cards, friend } => {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    for (id, borrowed) in cards.iter().map(|c| (*c, false)).chain(friend.map(|f| (f, true))) {
+                        let name = self.kb.cards.get(&id).map_or(format!("Card {id}"), |c| format!("{} [{}]", c.uma, c.title));
+                        let size = vec2(40.0, 40.0 * 346.0 / 260.0);
+                        let r = match self.art_uri("cards", id) {
+                            Some(uri) => ui.add(egui::Image::new(uri).fit_to_exact_size(size).corner_radius(CornerRadius::same(5))),
+                            None => ui.add_sized(size, egui::Label::new(RichText::new("?").color(p.weak))),
+                        };
+                        r.on_hover_text(if borrowed { format!("{name} (borrowed friend card)") } else { name });
+                        if borrowed {
+                            ui.label(RichText::new("+ friend").size(size::XS).color(p.weak));
+                        }
+                    }
+                });
+            }
+            Visual::Verdict { line, gaps } => {
+                ui.label(semibold(line, size::MD));
+                let mut sorted = gaps.clone();
+                sorted.sort_by(f64::total_cmp);
+                ui.allocate_ui(vec2(360.0, 40.0), |ui| {
+                    crate::charts::mini_hist(ui, &sorted, crate::charts::uma_color(1, ui.visuals().dark_mode), "L", 36.0).on_hover_text("Uma 2's lead in every race, in lengths (simulation)");
+                });
+            }
+            Visual::Skills(ids) => {
+                ui.horizontal_wrapped(|ui| {
+                    for id in ids.iter().take(14) {
+                        self.skill_link(ui, *id, false);
+                    }
+                    if ids.len() > 14 {
+                        ui.label(RichText::new(format!("+{} more", ids.len() - 14)).size(size::SM).color(p.weak));
+                    }
+                });
+            }
+            Visual::Bars(items) => {
+                let items: Vec<(String, f64)> = items.iter().take(8).cloned().collect();
+                ui.allocate_ui(vec2(520.0, 22.0 * items.len() as f32 + 6.0), |ui| {
+                    crate::charts::hbars(ui, &items, "L", p.good, p.bad);
+                });
+            }
+        }
+    }
+
+    fn chat_action(&mut self, ctx: &egui::Context, a: ChatAction) {
+        match a {
+            ChatAction::Ask(q) => self.submit_question(ctx, q),
+            ChatAction::Open(at) => self.open_at(ctx, &at),
+            ChatAction::Undo(u) => {
+                let r = self.agent_undo(u);
+                self.toast_result(r);
+            }
+            ChatAction::Answer(turn, yes) => {
+                if let Some(Turn::Tool(t)) = self.ask.turns.get(turn)
+                    && let ToolState::Asking(question, bridge) = &t.state
+                {
+                    if let (Some(id), Some(dir)) = (*bridge, crate::agent::bridge::dir()) {
+                        // OpenCode's server waits for this file.
+                        crate::agent::bridge::answer(&dir, id, yes);
+                        let summary = if yes { format!("Approved: {}", question.trim_end_matches('?')) } else { "You declined.".to_string() };
+                        let card = Card { summary, ..Default::default() };
+                        if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(turn) {
+                            t.state = if yes { ToolState::Done(card) } else { ToolState::Failed(card) };
+                        }
+                    } else {
+                        self.ask.answer = Some((turn, yes));
+                        self.advance_calls(ctx);
+                    }
+                }
+            }
         }
     }
 
@@ -987,29 +1509,38 @@ impl App {
         if self.ask.backend == Backend::OpenCode && self.ask.oc.exe.is_none() {
             ui.label(RichText::new("OpenCode isn't installed yet: the download is in the chat area.").size(12.5).color(p.warn));
         }
-        if ui.add(egui::Button::new("⚙ Change model or key").min_size(vec2(0.0, 28.0))).on_hover_text("Settings → AI assistant").clicked() {
+        if ui.add(egui::Button::new("⚙ Change model, key or permissions").min_size(vec2(0.0, 28.0))).on_hover_text("Settings → AI assistant").clicked() {
             self.open_settings(crate::settings_page::SettingsPage::Ai);
         }
+        filter_heading(ui, "What it can do");
+        for line in [
+            "📋 Draft plans, decks and skills: undo each from the chat",
+            "🏁 Run the race simulator: at most 4 runs a question unless you ask",
+            "💾 Save plans and log results: asks first",
+            "✏ Change your roster: always asks",
+        ] {
+            ui.label(RichText::new(line).size(12.5).color(p.weak));
+        }
         let s = &mut self.ask;
-
         filter_heading(ui, "This conversation");
         ui.label(RichText::new(format!("{} tokens in · {} out", s.tokens_in, s.tokens_out)).size(12.5).color(p.weak));
+        if s.cache_read > 0 {
+            ui.label(RichText::new(format!("{} read from the prompt cache (cheaper)", s.cache_read)).size(11.5).color(p.weak));
+        }
         if s.backend == Backend::OpenCode {
             ui.label(RichText::new("Free models cost nothing; the count is for interest.").size(11.5).color(p.weak));
         }
         if ui.add_enabled(!busy, egui::Button::new("🗑 New conversation")).clicked() {
-            s.messages.clear();
-            s.turns.clear();
-            s.activity.clear();
-            s.status = None;
-            s.tokens_in = 0;
-            s.tokens_out = 0;
-            s.oc.session = None;
+            s.clear();
+            self.agent.undo.clear();
+            if let Some(dir) = crate::agent::bridge::dir() {
+                crate::agent::bridge::clear(&dir);
+            }
         }
-        if !s.activity.is_empty() {
+        if !self.ask.activity.is_empty() {
             ui.add_space(10.0);
-            egui::CollapsingHeader::new(format!("Lookups ({})", s.activity.len())).show(ui, |ui| {
-                for a in &s.activity {
+            egui::CollapsingHeader::new(format!("Lookups ({})", self.ask.activity.len())).show(ui, |ui| {
+                for a in &self.ask.activity {
                     ui.label(RichText::new(truncate(a, 120)).small().monospace());
                 }
             });
@@ -1058,8 +1589,8 @@ impl App {
         ui.add_space(6.0);
         ui.label(
             RichText::new(
-                "OpenCode (opencode.ai) answers from your files: the roster digest, uma.guide data, plans and results. It is read-only: \
-                 it can't edit files or run commands. Free models are offered for a limited time and are weaker than Claude.",
+                "OpenCode (opencode.ai) reads your files (the roster digest, uma.guide data, plans and results) and uses umaLord's own tools to draft plans and run the simulator. \
+                 It can't edit files or run commands; plans and results it saves go through the approval cards. Free models are offered for a limited time and are weaker than Claude.",
             )
             .size(11.5)
             .color(p.weak),
@@ -1069,7 +1600,7 @@ impl App {
     pub(crate) fn claude_api_settings(ui: &mut egui::Ui, s: &mut AskState) {
         let p = pal(ui);
         filter_heading(ui, "Model");
-        for (i, (_, label, _)) in MODELS.iter().enumerate() {
+        for (i, (_, label, _, _)) in MODELS.iter().enumerate() {
             ui.radio_value(&mut s.model, i, *label);
         }
         filter_heading(ui, "Effort");
@@ -1098,5 +1629,178 @@ impl App {
             s.saved_key = None;
         }
         ui.label(RichText::new("Get a key at console.anthropic.com. Saved keys are stored in plain text under %APPDATA%\\umaLord.").size(11.5).color(p.weak));
+    }
+
+    /// Settings → AI assistant: which writes may happen without the approval card.
+    pub(crate) fn agent_permissions(ui: &mut egui::Ui, s: &mut AskState) {
+        let p = pal(ui);
+        filter_heading(ui, "What the assistant may do without asking");
+        ui.label(RichText::new("Drafts (the working plan, the Race sim's builds) always change at once and can be undone from the chat. Writing files asks first, unless you allow it here.").size(12.0).color(p.weak));
+        if ui.checkbox(&mut s.auto_save, "Save plans to the plans folder").changed() {
+            crate::settings::set("agent_auto_save_plan", json!(s.auto_save));
+        }
+        if ui.checkbox(&mut s.auto_log, "Add entries to the results logs").changed() {
+            crate::settings::set("agent_auto_log_result", json!(s.auto_log));
+        }
+        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Change your roster (limit breaks, stars, potential)"));
+        ui.label(RichText::new("Roster changes always ask.").size(11.5).color(p.weak));
+    }
+}
+
+/// The width left to the right edge of what's visible, at most `max`: a vertical scroll area lets
+/// one wide line widen everything, and the rest would then run under the side panel.
+fn visible(ui: &egui::Ui, max: f32) -> f32 {
+    (ui.clip_rect().right() - ui.cursor().min.x - 14.0).clamp(160.0, max)
+}
+
+/// A click in the chat, carried out after drawing.
+enum ChatAction {
+    Ask(String),
+    Open(OpenAt),
+    Undo(usize),
+    Answer(usize, bool),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A streamed answer with a progress note, text and a tool call builds the same message the
+    /// non-streaming API returns; bad tool input is caught.
+    #[test]
+    fn sse_events_build_the_message() {
+        let events = [
+            json!({"type": "message_start", "message": {"model": "claude-opus-5-5", "usage": {"input_tokens": 10, "cache_read_input_tokens": 500}}}),
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "thinking", "thinking": "", "signature": ""}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "thinking_delta", "thinking": "Checking the schedule."}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig"}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Let me "}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "look."}}),
+            json!({"type": "content_block_stop", "index": 1}),
+            json!({"type": "content_block_start", "index": 2, "content_block": {"type": "tool_use", "id": "toolu_1", "name": "find_umas", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "{\"distance\": "}}),
+            json!({"type": "content_block_delta", "index": 2, "delta": {"type": "input_json_delta", "partial_json": "\"Long\"}"}}),
+            json!({"type": "content_block_stop", "index": 2}),
+            json!({"type": "content_block_start", "index": 3, "content_block": {"type": "tool_use", "id": "toolu_2", "name": "get_uma", "input": {}}}),
+            json!({"type": "content_block_delta", "index": 3, "delta": {"type": "input_json_delta", "partial_json": "{\"query\": \"Oguri"}}),
+            json!({"type": "content_block_stop", "index": 3}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 42}}),
+            json!({"type": "message_stop"}),
+        ];
+        let mut acc = Acc::default();
+        let mut text = String::new();
+        let mut notes = String::new();
+        for e in &events {
+            for ev in acc.apply(e) {
+                match ev {
+                    StreamEvent::Text(_, t) => text += &t,
+                    StreamEvent::Note(_, t) => notes += &t,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!((text.as_str(), notes.as_str()), ("Let me look.", "Checking the schedule."));
+        let m = acc.finish().unwrap();
+        let c = m["content"].as_array().unwrap();
+        assert_eq!(c.len(), 4);
+        assert_eq!(c[0], json!({"type": "thinking", "thinking": "Checking the schedule.", "signature": "sig"}));
+        assert_eq!(c[1]["text"], "Let me look.");
+        assert_eq!(c[2]["input"], json!({"distance": "Long"}));
+        assert_eq!(c[3]["input"], json!({}), "an unparseable input is echoed as an empty object");
+        assert_eq!(m["invalid_inputs"]["toolu_2"], "{\"query\": \"Oguri");
+        assert_eq!((m["stop_reason"].as_str(), m["usage"]["output_tokens"].as_u64(), m["usage"]["cache_read_input_tokens"].as_u64()), (Some("tool_use"), Some(42), Some(500)));
+        let mut err = Acc::default();
+        err.apply(&json!({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}));
+        assert!(err.finish().unwrap_err().contains("Overloaded"));
+    }
+
+    /// Every kind of chat line draws, in both modes and at both window sizes.
+    #[test]
+    fn chat_draws_every_card() {
+        let ctx = egui::Context::default();
+        let mut a = App::for_tests();
+        a.tab = crate::Tab::Ask;
+        a.agent_snapshot("test");
+        let card = |visual: Visual| Card { summary: "A result line".into(), visual, open: vec![OpenAt::Plan, OpenAt::Race], undo: Some(0) };
+        let tool = |label: &str, state: ToolState| Turn::Tool(ToolTurn { icon: "🏁", label: label.into(), state });
+        a.ask.turns = vec![
+            Turn::User("Plan the next CM and simulate it.".into()),
+            Turn::Note("Checking the schedule, then the meta sheet.".into()),
+            tool("Recommended a deck", ToolState::Done(card(Visual::Deck { cards: vec![30028, 30052], friend: Some(30076) }))),
+            tool("Raced two builds", ToolState::Done(card(Visual::Verdict { line: "Uma 2 wins 99% of 1000 races, by 3.29 L on average".into(), gaps: (0..200).map(|i| f64::from(i) / 40.0 - 1.0).collect() }))),
+            tool("Auto-picked skills", ToolState::Done(card(Visual::Skills(vec![200512, 200532])))),
+            tool("Tested what matters", ToolState::Done(card(Visual::Bars(vec![("+50 Power".into(), 0.22), ("+50 Wit".into(), -0.05)])))),
+            tool("Loaded the plan", ToolState::Failed(Card { summary: "Enter target stats first.".into(), ..Default::default() })),
+            tool("Simulated the skills on offer", ToolState::Running),
+            Turn::Assistant("**Done.** A table:\n\n| a | b |\n|---|---|\n| 1 | 2 |".into()),
+            tool("Saved the plan", ToolState::Asking("Save plan 'X' to a new file in plans/?".into(), None)),
+        ];
+        for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
+            crate::theme::install(&ctx, mode);
+            for size in [egui::vec2(1400.0, 900.0), egui::vec2(960.0, 600.0)] {
+                let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
+                let _ = ctx.run_ui(input, |ui| a.frame(ui));
+            }
+        }
+        assert!(a.approval_showing());
+    }
+
+    /// A model turn with a Draft, a Long and a Write call: the Draft runs at once, the turn holds
+    /// while the simulation runs, the Write waits for Approve, and then all three results go back
+    /// together in order. Deny returns "The user declined".
+    #[test]
+    fn tool_rounds_hold_for_jobs_and_approvals() {
+        let ctx = egui::Context::default();
+        let (mut a, dir) = crate::onboarding::tests::scratch_app("agent-round");
+        a.roster = crate::data::Roster::sample();
+        a.ask.backend = Backend::ClaudeApi;
+        let msg = json!({
+            "content": [
+                {"type": "tool_use", "id": "t1", "name": "new_plan", "input": {"goal": "Champions Meeting", "cm": "next", "trainee": "Oguri Cap [Starlight Beat]"}},
+                {"type": "tool_use", "id": "t2", "name": "run_stamina", "input": {"runs": 100, "race": {"course": "Nakayama Turf 2500m"}}},
+                {"type": "tool_use", "id": "t3", "name": "save_plan", "input": {"title": "Agent test"}},
+            ],
+            "stop_reason": "tool_use", "usage": {}, "model": "claude-opus-5-5", "invalid_inputs": {},
+        });
+        a.handle_message(&ctx, msg);
+        assert_eq!(a.ask.calls.len(), 3);
+        assert!(matches!(a.ask.calls[0].state, CallState::Ready(_)), "the Draft ran at once");
+        assert!(matches!(a.ask.calls[1].state, CallState::Waiting(_)), "the Long tool waits for its job");
+        let start = Instant::now();
+        while matches!(a.ask.calls.get(1).map(|c| &c.state), Some(CallState::Waiting(_))) {
+            assert!(start.elapsed().as_secs() < 60, "the stamina run never finished");
+            a.agent_poll_jobs(&ctx);
+            a.advance_calls(&ctx);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(matches!(a.ask.calls[2].state, CallState::Asking), "the Write tool waits for the user");
+        for _ in 0..5 {
+            a.advance_calls(&ctx);
+        }
+        assert!(matches!(a.ask.calls[2].state, CallState::Asking), "still waiting: nothing is written without Approve");
+        assert!(a.plan_times().is_empty(), "no plan file yet");
+        let turn = a.ask.calls[2].turn;
+        // Deny: the call gets an error result and nothing is written.
+        a.chat_action(&ctx, ChatAction::Answer(turn, false));
+        assert!(a.ask.calls.is_empty(), "all three results went back");
+        let results = a.ask.messages.last().unwrap()["content"].as_array().unwrap().clone();
+        let ids: Vec<&str> = results.iter().map(|r| r["tool_use_id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["t1", "t2", "t3"]);
+        assert_eq!(results[2]["is_error"], true);
+        assert_eq!(results[2]["content"], "The user declined.");
+        assert!(results[1]["content"].as_str().unwrap().contains("full spurt"), "{}", results[1]["content"]);
+        assert!(a.plan_times().is_empty());
+        // Approve a save this time.
+        let msg = json!({"content": [{"type": "tool_use", "id": "t4", "name": "save_plan", "input": {"title": "Agent test"}}], "stop_reason": "tool_use", "usage": {}, "model": "m", "invalid_inputs": {}});
+        a.handle_message(&ctx, msg);
+        let turn = a.ask.calls[0].turn;
+        a.chat_action(&ctx, ChatAction::Answer(turn, true));
+        let saved = a.plan_times();
+        assert_eq!(saved.len(), 1, "approved: the plan is saved");
+        let text = std::fs::read_to_string(saved.keys().next().unwrap()).unwrap();
+        assert!(text.starts_with("# Agent test"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

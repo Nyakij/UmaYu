@@ -140,14 +140,25 @@ the steps to plan a career, and the game words the app uses.
   Settings > Data and updates ("Browse notes and data files").
 - Long dropdowns (trainees, courses, skills, models) have a search box: type to filter,
   and delete the text to see the whole list again.
-- Ask: ask questions about your account in plain English. There are two ways to answer:
+- Ask: ask questions about your account in plain English, or ask it to do things: "Plan
+  the next Champions Meeting for my best Pace uma and simulate it." It builds the plan
+  (trainee, deck, skills) in the Planner, races it in the Race sim, and shows each step in
+  the chat as a card with "Open in Planner" or "Open in Race sim" and an Undo button.
+  - It changes the plan and the Race sim at once (Undo puts them back). Saving a plan,
+    adding a result or changing your roster shows a card with Approve and Deny first.
+    Settings > AI assistant can let it save plans and log results without asking; roster
+    changes always ask.
+  - It runs at most four simulations a question unless you ask for more. ■ Stop ends the
+    answer and any simulation it started.
+  There are two ways to answer:
   - OpenCode, the default, is free, with no key and no account needed.
     - It uses OpenCode (opencode.ai), which runs one of OpenCode's free AI models to read
       your roster and the game data.
     - The first time you open Ask, click "Download OpenCode" (about 59 MB). The app fetches
       the official release, checks it against its published checksum, and installs it in
       tools\opencode.
-    - It is read-only: it can read your files but can't change anything.
+    - It can read your files but can't edit them or run commands; it works only through
+      umaLord's own tools, and file changes go through the Approve cards.
     - Free models are only offered for a limited time and are weaker than Claude. Pick one
       in Settings > AI assistant. The note under the model says whether your questions are
       kept.
@@ -165,7 +176,8 @@ you change it.
   each page title; on Home and empty pages only; or nowhere: she never covers your data),
   the size of everything, and comfortable or compact spacing.
 - Data and updates: how old the game data and the meta sheet are, and how to refresh them.
-- AI assistant: who answers on the Ask tab, the model, and your API key.
+- AI assistant: who answers on the Ask tab, the model, your API key, and what the assistant
+  may do without asking.
 - About: the version, credits, license and keyboard shortcuts.
 
 Messages such as "Saved" pop up at the bottom of the window for a few seconds.

@@ -663,7 +663,7 @@ impl App {
         });
         ui.separator();
         ui.add_space(6.0);
-        ui.set_max_width(560.0);
+        ui.set_max_width(ui.available_width().min(560.0));
         if self.ask.backend == crate::ask::Backend::OpenCode && self.ask.oc.exe.is_none() {
             self.opencode_install_ui(ui);
         } else if self.ask.backend == crate::ask::Backend::OpenCode {
@@ -671,6 +671,8 @@ impl App {
         } else {
             App::claude_api_settings(ui, &mut self.ask);
         }
+        ui.add_space(8.0);
+        App::agent_permissions(ui, &mut self.ask);
     }
 
     fn settings_about(&mut self, ui: &mut egui::Ui) {

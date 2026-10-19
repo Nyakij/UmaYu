@@ -173,7 +173,7 @@ impl Plan {
 }
 
 /// Whether a race runs on an Umalator course (same track, distance and surface).
-fn runs_on(race: &RaceInfo, course: &UmalatorCourse) -> bool {
+pub(crate) fn runs_on(race: &RaceInfo, course: &UmalatorCourse) -> bool {
     race.track_id == Some(course.track_id) && race.distance == course.distance && race.surface == course.surface
 }
 
@@ -434,21 +434,21 @@ impl PlannerState {
     }
 }
 
-const GROUNDS: [&str; 4] = ["Firm", "Good", "Soft", "Heavy"];
-const WEATHERS: [&str; 4] = ["Sunny", "Cloudy", "Rainy", "Snowy"];
-const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
+pub(crate) const GROUNDS: [&str; 4] = ["Firm", "Good", "Soft", "Heavy"];
+pub(crate) const WEATHERS: [&str; 4] = ["Sunny", "Cloudy", "Rainy", "Snowy"];
+pub(crate) const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
 
 fn condition_parts(conditions: &str) -> Vec<String> {
     conditions.split(['·', ',', '/']).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
 }
 
-fn has_condition(conditions: &str, value: &str) -> bool {
+pub(crate) fn has_condition(conditions: &str, value: &str) -> bool {
     condition_parts(conditions).iter().any(|p| p.eq_ignore_ascii_case(value))
 }
 
 /// Set one ground, weather or season in a "Firm · Sunny · Winter" string, replacing the other
 /// value from the same group, or removing it if it is already set. Free text is kept.
-fn set_condition(conditions: &str, group: &[&str], value: &str) -> String {
+pub(crate) fn set_condition(conditions: &str, group: &[&str], value: &str) -> String {
     let in_group = |p: &str, g: &[&str]| g.iter().any(|x| p.eq_ignore_ascii_case(x));
     let mut parts = condition_parts(conditions);
     match parts.iter().position(|p| in_group(p, group)) {
@@ -516,7 +516,7 @@ fn slugify(s: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn race_distance(category: &str, metres: u32) -> Distance {
+pub(crate) fn race_distance(category: &str, metres: u32) -> Distance {
     match category {
         "Short" | "Sprint" => Distance::Sprint,
         "Mile" => Distance::Mile,
@@ -1726,7 +1726,7 @@ impl App {
     }
 
     /// "Recommended 6 cards: 4 from the meta sheet's …, 2 from simulated careers."
-    fn deck_fill_message(&self, picks: &[crate::recommend::CardPick], verb: &str) -> String {
+    pub(crate) fn deck_fill_message(&self, picks: &[crate::recommend::CardPick], verb: &str) -> String {
         let n = picks.len();
         let from_meta = picks.iter().filter(|c| c.meta > 0.0).count();
         let cards = format!("{n} card{}", if n == 1 { "" } else { "s" });
@@ -1767,7 +1767,9 @@ impl App {
                 let full = self.skill_cost(*id, career);
                 if lower_chosen { full - self.skill_cost(self.lower_version(*id).unwrap_or(*id), career) } else { full }
             })
-            .sum()
+            // An empty sum is -0.0, which prints as "-0".
+            .sum::<f64>()
+            + 0.0
     }
 
     /// The plan's scenario name: its own, else the one current for the next Champions Meeting.
