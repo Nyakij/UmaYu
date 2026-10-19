@@ -2,7 +2,10 @@
 name = "umalord"
 version = "0.2.0"
 edition = "2024"
-description = "Account-aware Uma Musume knowledge base, career planner and results log (reads ../account, ../knowledge/data, ../plans, ../results)"
+description = "A desktop companion for an Uma Musume: Pretty Derby (Global) account: collection, career planner on the community meta, and a port of Moomoolator's race simulator"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/brickc4/umaLord"
+publish = false
 
 [dependencies]
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts", "clipboard"] }

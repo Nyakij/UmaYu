@@ -690,7 +690,7 @@ impl App {
             ui.vertical(|ui| {
                 ui.add_space(10.0);
                 ui.label(semibold(format!("umaLord {}", env!("CARGO_PKG_VERSION")), size::XL));
-                ui.label(RichText::new("An advisor for one Uma Musume: Pretty Derby account: your collection, career plans, a race simulator, results and questions.").color(p.weak));
+                ui.label(RichText::new("Your Uma Musume: Pretty Derby (Global) companion. Plan careers on the community meta, race them in a real simulator, and keep your whole collection at hand.").color(p.weak));
             });
         });
         ui.add_space(6.0);
