@@ -1006,7 +1006,8 @@ impl App {
                 ui.set_width(LABEL_W);
                 ui.label(RichText::new("Upcoming CM").color(p.weak));
                 if shown.iter().any(|e| !e.announced) {
-                    let legend = if shown.iter().any(|e| e.announced) { "✔ announced · ? estimated" } else { "? estimated" };
+                    // One mark per line: the label column is too narrow for both on one.
+                    let legend = if shown.iter().any(|e| e.announced) { "✔ announced\n? estimated" } else { "? estimated" };
                     ui.label(RichText::new(legend).size(11.0).color(p.weak))
                         .on_hover_text("✔: announced in the game's news. ?: not announced yet, so Umalator's guess at the date, course and conditions.");
                 }

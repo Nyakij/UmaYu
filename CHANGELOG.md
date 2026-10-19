@@ -4,6 +4,10 @@ What changed in each release. Releases are built from the tagged source by GitHu
 
 ## [Unreleased]
 
+### Fixed
+
+- The planner's Upcoming CM legend puts ✔ announced and ? estimated on their own lines instead of wrapping mid-phrase.
+
 ## [0.2.0] - 2026-10-18
 
 A big overhaul. Home becomes the hub for the next Champions Meeting, with its live schedule from the game's news; auto-pick races skills to find the set that gains the most together; the Race sim gets real charts; the assistant can plan, pick and simulate a career for you; and the collection, setup and settings are redesigned, with notes from the community's guides throughout.
