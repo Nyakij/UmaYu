@@ -3,7 +3,7 @@
   Screenshots of every page of the app, in each theme and window size, for checking the UI.
 
 .DESCRIPTION
-  Runs app\target\release\umalord.exe once per page x theme x size with the UMALORD_* screenshot
+  Runs app\target\release\umayu.exe once per page x theme x size with the UMALORD_* screenshot
   variables (see CLAUDE.md) and saves <page>-<theme>-<size>.png into -Out, which must be outside
   the repo. Pages that need a roster show the friend's profile in memory (UMALORD_PROFILE), so
   your own account files are never read into a screenshot or changed.
@@ -37,7 +37,7 @@ $Pages = & $split $Pages
 $Themes = & $split $Themes
 $Sizes = & $split $Sizes
 $repo = Split-Path -Parent $PSScriptRoot
-if (-not $Exe) { $Exe = Join-Path $repo 'app\target\release\umalord.exe' }
+if (-not $Exe) { $Exe = Join-Path $repo 'app\target\release\umayu.exe' }
 if (-not (Test-Path $Exe)) { throw "Build the app first (cargo build --release in app\): $Exe is missing." }
 
 $outFull = [System.IO.Path]::GetFullPath($Out)

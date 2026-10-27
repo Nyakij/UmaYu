@@ -36,8 +36,23 @@ pub const ACTIVATE_RANDOM_GOLD: i32 = 37;
 pub const EXTEND_EVOLVED_DURATION: i32 = 42;
 
 pub const KNOWN_EFFECTS: [i32; 17] = [
-    NOOP, SPEED_UP, STAMINA_UP, POWER_UP, GUTS_UP, WISDOM_UP, RECOVERY, MULTIPLY_START_DELAY, SET_START_DELAY, CURRENT_SPEED,
-    CURRENT_SPEED_DECEL, TARGET_SPEED, LANE_MOVEMENT_SPEED, ACCEL, CHANGE_LANE, ACTIVATE_RANDOM_GOLD, EXTEND_EVOLVED_DURATION,
+    NOOP,
+    SPEED_UP,
+    STAMINA_UP,
+    POWER_UP,
+    GUTS_UP,
+    WISDOM_UP,
+    RECOVERY,
+    MULTIPLY_START_DELAY,
+    SET_START_DELAY,
+    CURRENT_SPEED,
+    CURRENT_SPEED_DECEL,
+    TARGET_SPEED,
+    LANE_MOVEMENT_SPEED,
+    ACCEL,
+    CHANGE_LANE,
+    ACTIVATE_RANDOM_GOLD,
+    EXTEND_EVOLVED_DURATION,
 ];
 
 // Skill rarities as the solver sees them (white, gold, unique, evolved).
@@ -140,11 +155,23 @@ impl Compensated {
     }
 }
 
-const STRATEGY_PHASE_SPEED: [[f64; 3]; 6] =
-    [[0.0; 3], [1.0, 0.98, 0.962], [0.978, 0.991, 0.975], [0.938, 0.998, 0.994], [0.931, 1.0, 1.0], [1.063, 0.962, 0.95]];
+const STRATEGY_PHASE_SPEED: [[f64; 3]; 6] = [
+    [0.0; 3],
+    [1.0, 0.98, 0.962],
+    [0.978, 0.991, 0.975],
+    [0.938, 0.998, 0.994],
+    [0.931, 1.0, 1.0],
+    [1.063, 0.962, 0.95],
+];
 const DISTANCE_SPEED: [f64; 8] = [1.05, 1.0, 0.9, 0.8, 0.6, 0.4, 0.2, 0.1];
-const STRATEGY_PHASE_ACCEL: [[f64; 3]; 6] =
-    [[0.0; 3], [1.0, 1.0, 0.996], [0.985, 1.0, 0.996], [0.975, 1.0, 1.0], [0.945, 1.0, 0.997], [1.17, 0.94, 0.956]];
+const STRATEGY_PHASE_ACCEL: [[f64; 3]; 6] = [
+    [0.0; 3],
+    [1.0, 1.0, 0.996],
+    [0.985, 1.0, 0.996],
+    [0.975, 1.0, 1.0],
+    [0.945, 1.0, 0.997],
+    [1.17, 0.94, 0.956],
+];
 const SURFACE_ACCEL: [f64; 8] = [1.05, 1.0, 0.9, 0.8, 0.7, 0.5, 0.3, 0.1];
 const DISTANCE_ACCEL: [f64; 8] = [1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.5, 0.4];
 const PHASE_DECEL: [f64; 3] = [-1.2, -0.8, -1.0];
@@ -153,7 +180,11 @@ const PK_MAX: [f64; 6] = [0.0, 0.0, 5.0, 7.0, 8.0, 0.0];
 
 fn base_target_speed(h: &Horse, c: &Course, phase: usize) -> f64 {
     base_speed(c.distance) * STRATEGY_PHASE_SPEED[h.strategy.clamp(1, 5) as usize][phase]
-        + if phase == 2 { (500.0 * h.speed).sqrt() * DISTANCE_SPEED[h.distance_apt.min(7)] * 0.002 } else { 0.0 }
+        + if phase == 2 {
+            (500.0 * h.speed).sqrt() * DISTANCE_SPEED[h.distance_apt.min(7)] * 0.002
+        } else {
+            0.0
+        }
 }
 
 fn last_spurt_speed(h: &Horse, c: &Course) -> f64 {
@@ -166,21 +197,32 @@ fn last_spurt_speed(h: &Horse, c: &Course) -> f64 {
 /// coefficients: the share of last-spurt speed lost to a distance grade below A on a race of
 /// `distance` metres, the share of acceleration lost to a surface grade, and the share of Wit a
 /// style grade takes away. Each is 0 at A.
-pub fn aptitude_losses(desc: &super::params::HorseDesc, distance: f64, distance_apt: usize, surface_apt: usize, style_apt: usize) -> [f64; 3] {
+pub fn aptitude_losses(
+    desc: &super::params::HorseDesc,
+    distance: f64,
+    distance_apt: usize,
+    surface_apt: usize,
+    style_apt: usize,
+) -> [f64; 3] {
     let spurt = |apt: usize| {
         let mut d = desc.clone();
         d.distance_apt = apt;
         let h = super::params::base_stats(&d);
         // As last_spurt_speed: the speed term is in the phase's target speed and added again.
         let from_speed = (500.0 * h.speed).sqrt() * DISTANCE_SPEED[apt.min(7)] * 0.002;
-        let v = (base_speed(distance) * STRATEGY_PHASE_SPEED[h.strategy.clamp(1, 5) as usize][2] + from_speed + 0.01 * base_speed(distance)) * 1.05;
+        let v = (base_speed(distance) * STRATEGY_PHASE_SPEED[h.strategy.clamp(1, 5) as usize][2]
+            + from_speed
+            + 0.01 * base_speed(distance))
+            * 1.05;
         v + from_speed + (450.0 * h.guts).powf(0.597) * 0.0001
     };
     let a = 1usize;
     [
         (1.0 - spurt(distance_apt) / spurt(a)).max(0.0),
         (1.0 - SURFACE_ACCEL[surface_apt.min(7)] / SURFACE_ACCEL[a]).max(0.0),
-        (1.0 - super::params::strategy_proficiency(style_apt) / super::params::strategy_proficiency(a)).max(0.0),
+        (1.0 - super::params::strategy_proficiency(style_apt)
+            / super::params::strategy_proficiency(a))
+        .max(0.0),
     ]
 }
 
@@ -364,8 +406,16 @@ impl Solver {
         let mut rng = p.rng;
         let course = p.course;
         let mut sub = || Rng::new(rng.int32());
-        let (sync_rng, gorosi_rng, rushed_rng, wisdom_rng, pos_keep_rng, lane_rng, special_rng, compete_rng) =
-            (sub(), sub(), sub(), sub(), sub(), sub(), sub(), sub());
+        let (
+            sync_rng,
+            gorosi_rng,
+            rushed_rng,
+            wisdom_rng,
+            pos_keep_rng,
+            lane_rng,
+            special_rng,
+            compete_rng,
+        ) = (sub(), sub(), sub(), sub(), sub(), sub(), sub(), sub());
         let gate_roll = rng.uniform(12_252_240.0);
         let random_lot = rng.uniform(100.0);
         let d = course.distance;
@@ -374,7 +424,11 @@ impl Solver {
         let course_factor = 0.0008 * (d - 1000.0) + 1.0;
         let s_idx = strategy.clamp(0, 5) as usize;
         let gate_raw = (gate_roll as i64) % 9;
-        let gate = if gate_raw < 9 { gate_raw } else { 1 + (24 - gate_raw) % 8 };
+        let gate = if gate_raw < 9 {
+            gate_raw
+        } else {
+            1 + (24 - gate_raw) % 8
+        };
         let lane = gate as f64 * course.horse_lane;
         let mut s = Solver {
             horse: p.horse,
@@ -428,7 +482,12 @@ impl Solver {
             pacer: None,
             is_pacer: p.is_pacer,
             pacer_override: false,
-            pk_min: PK_MIN[s_idx] * if strategy == SENKOU { 1.0 } else { course_factor },
+            pk_min: PK_MIN[s_idx]
+                * if strategy == SENKOU {
+                    1.0
+                } else {
+                    course_factor
+                },
             pk_max: PK_MAX[s_idx] * course_factor,
             pk_exit_position: 0.0,
             pk_exit_distance: 0.0,
@@ -552,7 +611,11 @@ impl Solver {
     }
 
     fn update_rushed(&mut self) {
-        if self.rushed_section >= 0 && !self.is_rushed && !self.has_been_rushed && self.pos >= self.rushed_enter {
+        if self.rushed_section >= 0
+            && !self.is_rushed
+            && !self.has_been_rushed
+            && self.pos >= self.rushed_enter
+        {
             self.is_rushed = true;
             self.has_been_rushed = true;
             self.timers[T_RUSHED] = 0.0;
@@ -561,7 +624,10 @@ impl Solver {
         if self.is_rushed {
             let t = self.timers[T_RUSHED];
             // A 55% chance to calm down every 3 seconds, and 12 s at most.
-            if t > 0.0 && (t / 3.0).floor() > ((t - 0.017) / 3.0).floor() && self.rushed_rng.random() < 0.55 {
+            if t > 0.0
+                && (t / 3.0).floor() > ((t - 0.017) / 3.0).floor()
+                && self.rushed_rng.random() < 0.55
+            {
                 self.end_rushed();
                 return;
             }
@@ -579,23 +645,31 @@ impl Solver {
     }
 
     fn max_start_dash_speed(&self) -> f64 {
-        self.target_speed.min(0.85 * base_speed(self.course.distance))
+        self.target_speed
+            .min(0.85 * base_speed(self.course.distance))
     }
 
     fn tick_conditions(&mut self) {
         // blocked_side: outer lane in sections 1–3 never blocks; otherwise phase-based odds.
         let section = (self.pos / self.section_length).floor();
-        let (start, cont) = if (1.0..=3.0).contains(&section) && self.current_lane > 3.0 * self.course.horse_lane {
-            (0.0, 0.0)
-        } else if self.phase == 0 {
-            (0.1, 0.85)
-        } else if self.phase == 1 {
-            (0.08, 0.75)
-        } else {
-            (0.07, 0.50)
-        };
+        let (start, cont) =
+            if (1.0..=3.0).contains(&section) && self.current_lane > 3.0 * self.course.horse_lane {
+                (0.0, 0.0)
+            } else if self.phase == 0 {
+                (0.1, 0.85)
+            } else if self.phase == 1 {
+                (0.08, 0.75)
+            } else {
+                (0.07, 0.50)
+            };
         let r = self.special_rng.random();
-        self.cond_blocked_side = i32::from(r < if self.cond_blocked_side == 0 { start } else { cont });
+        self.cond_blocked_side = i32::from(
+            r < if self.cond_blocked_side == 0 {
+                start
+            } else {
+                cont
+            },
+        );
         let (start, cont) = match self.horse.strategy {
             NIGE => (0.05, 0.50),
             SENKOU => (0.15, 0.55),
@@ -624,7 +698,8 @@ impl Solver {
         let overtake = self.cond_overtake == 1;
         let c = self.course.clone();
         if self.extra_move_lane < 0.0 && self.after_final_corner_or_in_final_straight() {
-            self.extra_move_lane = (lane / 0.1).min(c.max_lane_distance) * 0.5 + self.lane_rng.random() * 0.1;
+            self.extra_move_lane =
+                (lane / 0.1).min(c.max_lane_distance) * 0.5 + self.lane_rng.random() * 0.1;
         }
         self.target_lane = if !self.active_change_lane.is_empty() {
             9.5 * c.horse_lane
@@ -648,7 +723,8 @@ impl Solver {
             if self.pos < c.move_lane_point {
                 target *= 1.0 + lane / c.max_lane_distance * 0.05;
             }
-            self.lane_change_speed = (self.lane_change_speed + c.lane_change_acceleration_per_frame).min(target);
+            self.lane_change_speed =
+                (self.lane_change_speed + c.lane_change_acceleration_per_frame).min(target);
             let skill: f64 = self.active_lane.iter().map(|s| s.modifier).sum();
             let actual = (self.lane_change_speed + skill).min(0.6);
             if self.target_lane > lane {
@@ -660,11 +736,18 @@ impl Solver {
     }
 
     fn on_final_straight(&self) -> bool {
-        self.course.straights.last().is_some_and(|s| self.pos >= s.start && self.pos <= s.end)
+        self.course
+            .straights
+            .last()
+            .is_some_and(|s| self.pos >= s.start && self.pos <= s.end)
     }
 
     fn after_final_corner_or_in_final_straight(&self) -> bool {
-        self.course.corners.last().is_some_and(|c| self.pos >= c.start) || self.on_final_straight()
+        self.course
+            .corners
+            .last()
+            .is_some_and(|c| self.pos >= c.start)
+            || self.on_final_straight()
     }
 
     fn speed_up_wit_check(&mut self) -> bool {
@@ -717,11 +800,16 @@ impl Solver {
                 } else if behind > self.pk_max {
                     if self.pace_up_wit_check() {
                         self.position_keep = PK_PACE_UP;
-                        self.pk_exit_distance = self.pos_keep_rng.random() * (self.pk_max - self.pk_min) + self.pk_min;
+                        self.pk_exit_distance =
+                            self.pos_keep_rng.random() * (self.pk_max - self.pk_min) + self.pk_min;
                     }
-                } else if behind < self.pk_min && self.active_target.is_empty() && self.active_current.is_empty() {
+                } else if behind < self.pk_min
+                    && self.active_target.is_empty()
+                    && self.active_current.is_empty()
+                {
                     self.position_keep = PK_PACE_DOWN;
-                    self.pk_exit_distance = self.pos_keep_rng.random() * (self.pk_max - self.pk_min) + self.pk_min;
+                    self.pk_exit_distance =
+                        self.pos_keep_rng.random() * (self.pk_max - self.pk_min) + self.pk_min;
                 }
                 if self.position_keep == PK_NONE {
                     self.timers[T_PK_NEXT] = -2.0;
@@ -828,7 +916,8 @@ impl Solver {
         }
         if self.lead_competition {
             let duration = (700.0 * self.horse.guts).sqrt() * 0.012;
-            if self.timers[T_LEAD] >= duration || self.pos >= self.lead_end.unwrap_or(f64::INFINITY) {
+            if self.timers[T_LEAD] >= duration || self.pos >= self.lead_end.unwrap_or(f64::INFINITY)
+            {
                 self.lead_competition = false;
                 self.lead_end = Some(self.pos);
             }
@@ -836,10 +925,23 @@ impl Solver {
         if self.lead_start.is_some() {
             return Vec::new();
         }
-        if self.pos >= 150.0 && self.pos <= (self.section_length * 5.0).floor() && strategy_matches(self.pos_keep_strategy, NIGE) {
-            let gap = if self.pos_keep_strategy == NIGE { 3.75 } else { 5.0 };
-            let within: Vec<usize> =
-                self.umas.iter().copied().filter(|&u| snap[u].1 == self.pos_keep_strategy && (snap[u].0 - self.pos).abs() <= gap).collect();
+        if self.pos >= 150.0
+            && self.pos <= (self.section_length * 5.0).floor()
+            && strategy_matches(self.pos_keep_strategy, NIGE)
+        {
+            let gap = if self.pos_keep_strategy == NIGE {
+                3.75
+            } else {
+                5.0
+            };
+            let within: Vec<usize> = self
+                .umas
+                .iter()
+                .copied()
+                .filter(|&u| {
+                    snap[u].1 == self.pos_keep_strategy && (snap[u].0 - self.pos).abs() <= gap
+                })
+                .collect();
             if within.len() >= 2 {
                 if within.contains(&me) {
                     self.start_lead_competition(self.section_length);
@@ -864,14 +966,17 @@ impl Solver {
         if self.last_spurt_transition == -1.0 || force {
             let initial = self.last_spurt_speed;
             let st = self.hp_state();
-            let (transition, speed) = self.hp.last_spurt_pair(&st, self.last_spurt_speed, self.base_target[2]);
+            let (transition, speed) =
+                self.hp
+                    .last_spurt_pair(&st, self.last_spurt_speed, self.base_target[2]);
             self.last_spurt_transition = transition;
             self.last_spurt_speed = speed;
             if self.hp.max_spurt() {
                 self.full_spurt = true;
             } else {
                 self.non_full_velocity_diff = Some(self.last_spurt_speed - initial);
-                self.non_full_delay = (transition >= 0.0).then(|| transition - self.course.distance * 2.0 / 3.0);
+                self.non_full_delay =
+                    (transition >= 0.0).then(|| transition - self.course.distance * 2.0 / 3.0);
             }
         }
         if self.pos >= self.last_spurt_transition {
@@ -886,7 +991,8 @@ impl Solver {
             self.target_speed = self.last_spurt_speed;
         } else {
             self.target_speed = self.base_target[self.phase as usize] * self.pk_speed_coef;
-            let section = ((self.pos / self.section_length).floor() as usize).min(self.section_modifier.len() - 1);
+            let section = ((self.pos / self.section_length).floor() as usize)
+                .min(self.section_modifier.len() - 1);
             self.target_speed += self.section_modifier[section];
         }
         self.target_speed += self.mod_target.value();
@@ -913,7 +1019,11 @@ impl Solver {
             return;
         }
         if self.current_speed > self.target_speed {
-            self.accel = if self.position_keep == PK_PACE_DOWN { -0.5 } else { PHASE_DECEL[self.phase as usize] };
+            self.accel = if self.position_keep == PK_PACE_DOWN {
+                -0.5
+            } else {
+                PHASE_DECEL[self.phase as usize]
+            };
             return;
         }
         self.accel = self.base_accel[usize::from(self.slope_per > 0.0) * 3 + self.phase as usize];
@@ -967,7 +1077,11 @@ impl Solver {
             return;
         }
         let (pos, t, d) = (self.pos, self.time(), self.course.distance);
-        if let Some(a) = self.activations.iter_mut().find(|a| a.id == id && a.end == -1.0) {
+        if let Some(a) = self
+            .activations
+            .iter_mut()
+            .find(|a| a.id == id && a.end == -1.0)
+        {
             a.end = pos.min(d);
             a.duration = t - a.time;
         }
@@ -1039,7 +1153,9 @@ impl Solver {
 
     fn skip_wit_check(&self, s: &PendingSkill) -> bool {
         !self.wit_check
-            || s.effects.first().is_some_and(|e| (SPEED_UP..=WISDOM_UP).contains(&e.kind))
+            || s.effects
+                .first()
+                .is_some_and(|e| (SPEED_UP..=WISDOM_UP).contains(&e.kind))
             || s.rarity == RARITY_UNIQUE
     }
 
@@ -1047,14 +1163,25 @@ impl Solver {
         match scaling {
             3 => {
                 let hp = self.hp.current().unwrap_or(f64::INFINITY);
-                [(3500.0, 4.0), (3200.0, 3.5), (3000.0, 3.0), (2800.0, 2.5), (2600.0, 2.2), (2400.0, 2.0), (2000.0, 1.5)]
-                    .iter()
-                    .find(|(t, _)| hp >= *t)
-                    .map_or(1.0, |(_, m)| *m)
+                [
+                    (3500.0, 4.0),
+                    (3200.0, 3.5),
+                    (3000.0, 3.0),
+                    (2800.0, 2.5),
+                    (2600.0, 2.2),
+                    (2400.0, 2.0),
+                    (2000.0, 1.5),
+                ]
+                .iter()
+                .find(|(t, _)| hp >= *t)
+                .map_or(1.0, |(_, m)| *m)
             }
             7 => {
                 let hp = self.hp.current().unwrap_or(f64::INFINITY);
-                [(2100.0, 3.0), (2000.0, 2.5), (1800.0, 2.0), (1500.0, 1.5)].iter().find(|(t, _)| hp >= *t).map_or(1.0, |(_, m)| *m)
+                [(2100.0, 3.0), (2000.0, 2.5), (1800.0, 2.0), (1500.0, 1.5)]
+                    .iter()
+                    .find(|(t, _)| hp >= *t)
+                    .map_or(1.0, |(_, m)| *m)
             }
             // Distance from the leader isn't tracked; assume mid-pack (~5 lengths).
             2 => (0.8f64 + 12.5 / 62.5).min(1.6),
@@ -1065,8 +1192,19 @@ impl Solver {
     fn activate(&mut self, s: &PendingSkill) {
         let d = self.course.distance;
         for ef in s.effects.iter() {
-            let mult = if ef.duration_scaling != 1 { self.duration_multiplier(ef.duration_scaling) } else { 1.0 };
-            let dur = ef.base_duration * (d / 1000.0) * mult * if s.rarity == RARITY_EVOLUTION { self.special_duration_scaling } else { 1.0 };
+            let mult = if ef.duration_scaling != 1 {
+                self.duration_multiplier(ef.duration_scaling)
+            } else {
+                1.0
+            };
+            let dur = ef.base_duration
+                * (d / 1000.0)
+                * mult
+                * if s.rarity == RARITY_EVOLUTION {
+                    self.special_duration_scaling
+                } else {
+                    1.0
+                };
             let mut modifier = ef.modifier;
             if matches!(ef.value_scaling, Some(8 | 9)) {
                 let roll = self.rng.random();
@@ -1092,21 +1230,37 @@ impl Solver {
                 TARGET_SPEED => {
                     self.mod_target.add(modifier);
                     let timer = self.new_timer(-dur);
-                    self.active_target.push(Active { id: s.id, timer, modifier });
+                    self.active_target.push(Active {
+                        id: s.id,
+                        timer,
+                        modifier,
+                    });
                 }
                 ACCEL => {
                     self.mod_accel.add(modifier);
                     let timer = self.new_timer(-dur);
-                    self.active_accel.push(Active { id: s.id, timer, modifier });
+                    self.active_accel.push(Active {
+                        id: s.id,
+                        timer,
+                        modifier,
+                    });
                 }
                 LANE_MOVEMENT_SPEED => {
                     let timer = self.new_timer(-dur);
-                    self.active_lane.push(Active { id: s.id, timer, modifier });
+                    self.active_lane.push(Active {
+                        id: s.id,
+                        timer,
+                        modifier,
+                    });
                 }
                 CURRENT_SPEED | CURRENT_SPEED_DECEL => {
                     self.mod_current.add(modifier);
                     let timer = self.new_timer(-dur);
-                    self.active_current.push(Active { id: s.id, timer, modifier });
+                    self.active_current.push(Active {
+                        id: s.id,
+                        timer,
+                        modifier,
+                    });
                 }
                 RECOVERY => {
                     // Only real heals count toward activate_count_heal; negative ones are stamina costs.
@@ -1122,7 +1276,11 @@ impl Solver {
                 EXTEND_EVOLVED_DURATION => self.special_duration_scaling = modifier,
                 CHANGE_LANE => {
                     let timer = self.new_timer(-dur);
-                    self.active_change_lane.push(Active { id: s.id, timer, modifier });
+                    self.active_change_lane.push(Active {
+                        id: s.id,
+                        timer,
+                        modifier,
+                    });
                 }
                 _ => {}
             }
@@ -1133,7 +1291,13 @@ impl Solver {
                 self.activate_count_later_half += 1.0;
             }
             if self.record && s.id != ASITAME && s.id != STAMINA_SYOUBU {
-                self.activations.push(Activation { id: s.id, start: self.pos, end: -1.0, time: self.time(), duration: 0.0 });
+                self.activations.push(Activation {
+                    id: s.id,
+                    start: self.pos,
+                    end: -1.0,
+                    time: self.time(),
+                    duration: 0.0,
+                });
             }
         }
         self.used.insert(s.id);
@@ -1143,7 +1307,8 @@ impl Solver {
         let mut golds: Vec<usize> = (0..self.pending.len())
             .filter(|&i| {
                 let p = &self.pending[i];
-                (p.rarity == RARITY_GOLD || p.rarity == RARITY_EVOLUTION) && p.effects.iter().all(|e| e.kind > WISDOM_UP)
+                (p.rarity == RARITY_GOLD || p.rarity == RARITY_EVOLUTION)
+                    && p.effects.iter().all(|e| e.kind > WISDOM_UP)
             })
             .collect();
         let mut i = golds.len();
@@ -1179,7 +1344,10 @@ impl Solver {
 
 /// Advance solver `i` by `dt` seconds.
 pub fn step(solvers: &mut [Solver], i: usize, dt: f64) {
-    let snap: Vec<(f64, Strategy)> = solvers.iter().map(|s| (s.pos, s.pos_keep_strategy)).collect();
+    let snap: Vec<(f64, Strategy)> = solvers
+        .iter()
+        .map(|s| (s.pos, s.pos_keep_strategy))
+        .collect();
     let started = step_one(&mut solvers[i], i, dt, &snap);
     for j in started {
         let len = solvers[j].section_length;
@@ -1269,7 +1437,9 @@ pub fn get_pacer(solvers: &mut [Solver], caller: usize) -> Option<usize> {
         return Some(u);
     }
     for strategy in [SENKOU, SASI, OIKOMI] {
-        if let Some(u) = farthest(solvers, &|s: &Solver| strategy_matches(s.pos_keep_strategy, strategy)) {
+        if let Some(u) = farthest(solvers, &|s: &Solver| {
+            strategy_matches(s.pos_keep_strategy, strategy)
+        }) {
             solvers[u].pacer_override = true;
             solvers[u].pos_keep_strategy = NIGE;
             return Some(u);
@@ -1286,7 +1456,10 @@ pub fn update_first_in_late_race(solvers: &mut [Solver], caller: usize) {
     if umas.iter().any(|&u| solvers[u].first_in_late_race) {
         return;
     }
-    let snap: Vec<(f64, Strategy)> = solvers.iter().map(|s| (s.pos, s.pos_keep_strategy)).collect();
+    let snap: Vec<(f64, Strategy)> = solvers
+        .iter()
+        .map(|s| (s.pos, s.pos_keep_strategy))
+        .collect();
     solvers[caller].sort_umas(&snap);
     let sorted = solvers[caller].umas.clone();
     let Some(&first) = sorted.first() else { return };
@@ -1295,7 +1468,11 @@ pub fn update_first_in_late_race(solvers: &mut [Solver], caller: usize) {
     }
     let round = |p: f64| (p * 100.0 + 0.5).floor() / 100.0;
     let lead = round(solvers[first].pos);
-    let tied: Vec<usize> = sorted.iter().copied().take_while(|&u| round(solvers[u].pos) == lead).collect();
+    let tied: Vec<usize> = sorted
+        .iter()
+        .copied()
+        .take_while(|&u| round(solvers[u].pos) == lead)
+        .collect();
     let pick = solvers[caller].sync_rng.uniform(tied.len() as f64) as usize;
     let chosen = tied[pick.min(tied.len() - 1)];
     solvers[chosen].first_in_late_race = true;

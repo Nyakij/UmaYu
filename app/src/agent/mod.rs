@@ -3,7 +3,7 @@
 //! and write files once the user approves.
 //!
 //! Both Ask backends use this one registry: the Claude API calls it from `ask.rs`, and OpenCode
-//! reaches it over MCP (`mcp.rs`, `umalord.exe --mcp`). `exec.rs` holds the handlers; `bridge.rs`
+//! reaches it over MCP (`mcp.rs`, `umayu.exe --mcp`). `exec.rs` holds the handlers; `bridge.rs`
 //! the files the MCP process and the window share (approvals, page requests, the draft).
 
 pub(crate) mod bridge;
@@ -98,9 +98,15 @@ pub(crate) enum Visual {
     #[default]
     None,
     /// Five own cards and the friend card.
-    Deck { cards: Vec<u32>, friend: Option<u32> },
+    Deck {
+        cards: Vec<u32>,
+        friend: Option<u32>,
+    },
     /// Who won, and every race's gap for a tiny histogram.
-    Verdict { line: String, gaps: Vec<f64> },
+    Verdict {
+        line: String,
+        gaps: Vec<f64>,
+    },
     Skills(Vec<u32>),
     /// Labelled values in lengths, best first.
     Bars(Vec<(String, f64)>),
@@ -126,12 +132,26 @@ pub(crate) struct ToolOut {
 
 impl ToolOut {
     pub fn ok(text: impl Into<String>, summary: impl Into<String>) -> Self {
-        ToolOut { text: text.into(), is_error: false, card: Card { summary: summary.into(), ..Default::default() } }
+        ToolOut {
+            text: text.into(),
+            is_error: false,
+            card: Card {
+                summary: summary.into(),
+                ..Default::default()
+            },
+        }
     }
     pub fn err(text: impl Into<String>) -> Self {
         let text = text.into();
         let summary = text.lines().next().unwrap_or_default().to_string();
-        ToolOut { text, is_error: true, card: Card { summary, ..Default::default() } }
+        ToolOut {
+            text,
+            is_error: true,
+            card: Card {
+                summary,
+                ..Default::default()
+            },
+        }
     }
     pub fn visual(mut self, v: Visual) -> Self {
         self.card.visual = v;
@@ -151,13 +171,24 @@ impl ToolOut {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Wait {
     /// The auto-pick optimiser (`planner.pick_job`).
-    Pick { undo: Option<usize> },
+    Pick {
+        undo: Option<usize>,
+    },
     /// The planner's skill simulation (`planner.skill_job`).
-    SkillValues { top_n: usize },
+    SkillValues {
+        top_n: usize,
+    },
     /// The Race sim's run (`sim.job`).
-    Compare { undo: Option<usize> },
-    Chart { top_n: usize, undo: Option<usize> },
-    Stamina { undo: Option<usize> },
+    Compare {
+        undo: Option<usize>,
+    },
+    Chart {
+        top_n: usize,
+        undo: Option<usize>,
+    },
+    Stamina {
+        undo: Option<usize>,
+    },
     Extra(ExtraKind),
 }
 
@@ -238,8 +269,22 @@ fn stats_arg(what: &str) -> Value {
     json!({"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 2000}, "minItems": 5, "maxItems": 5, "description": format!("{what}: Speed, Stamina, Power, Guts, Wit")})
 }
 
-fn spec(name: &'static str, kind: Kind, icon: &'static str, label: &'static str, description: &'static str, schema: Value) -> ToolSpec {
-    ToolSpec { name, kind, icon, label, description, schema }
+fn spec(
+    name: &'static str,
+    kind: Kind,
+    icon: &'static str,
+    label: &'static str,
+    description: &'static str,
+    schema: Value,
+) -> ToolSpec {
+    ToolSpec {
+        name,
+        kind,
+        icon,
+        label,
+        description,
+        schema,
+    }
 }
 
 fn build_registry() -> Vec<ToolSpec> {
@@ -259,95 +304,413 @@ fn build_registry() -> Vec<ToolSpec> {
     let purposes = json!({"type": "string", "enum": ["Champions Meeting", "Team Trials", "Parent run", "League of Heroes", "Other"]});
     vec![
         // --- Read
-        spec("get_account_summary", Read, "👤", "Read the account", "The account at a glance: profile, server, umas by stars and potential, cards by type and limit break, maxed SSRs, saved parents and plans, and the working plan in one line.", obj(json!({}), &[])),
-        spec("find_umas", Read, "🔎", "Searched the umas", "List the account's owned umas whose aptitudes fit a distance, surface and/or style, best fit first, with stars, potential and aptitude grades.", obj(find_umas, &[])),
-        spec("get_uma", Read, "🐴", "Read a trainee", "Full knowledge for one trainee outfit: base stats, growth rates, aptitudes, unique/innate/potential skills (with which are locked at the owned potential), evolved skills and their conditions, event skills, career objectives, and whether the account owns it. Query by name, outfit or id.", query()),
-        spec("get_card", Read, "🃏", "Read a card", "Full knowledge for one support card: support effects at the owned level and at max level, unique effect, skill hints, event skills, and every event with its outcomes. Query by uma name, card title or id.", query()),
-        spec("search_skills", Read, "🔎", "Searched skills", "Search skills. Returns name, rarity, SP cost, effect, what it is restricted to, uma.guide's trigger summary, and where this account can get it.", obj(search, &[])),
-        spec("get_skill", Read, "✨", "Read a skill", "Full detail for one skill: effects, trigger conditions, cooldown, and every source (owned or not).", query()),
-        spec("find_races", Read, "🏟", "Searched races", "Find races/courses by race name or racecourse: track, surface, distance, direction, grade.", query()),
-        spec("list_upcoming_events", Read, "🏆", "Read the CM schedule", "The next Champions Meetings from the app's live schedule (official news first, then Umalator's estimates): cup, number, date, announced or estimated, course, conditions, the training scenario, the skills it turns off, and whether the meta sheet covers it.", obj(json!({"count": {"type": "integer", "minimum": 1, "maximum": 8, "description": "How many (default 4)"}}), &[])),
-        spec("get_cm_meta", Read, "📈", "Read the meta sheet", "The community PvP meta sheet for a Champions Meeting: style ranking, recommended stats, recommended trainees (owned marked), decks by tier with which cards the account owns and at what LB, honorable mentions, skill advice and parents to look for. Community opinion, not game data.", obj(json!({"cm": {"type": "string", "description": "Cup name, number or 'next' (default: the working plan's CM, else the next one)"}, "style": style}), &[])),
-        spec("list_plans", Read, "📋", "Listed saved plans", "The saved career plans in plans/, newest first, with their titles.", obj(json!({}), &[])),
-        spec("get_plan", Read, "📋", "Read a plan", "The working plan in the Planner ('current', the default): goal, CM, scenario, trainee and aptitudes, target stats, deck, skills to buy, SP budget, pins and bans. Or a saved plan's file by name.", obj(json!({"name": {"type": "string", "description": "'current' or part of a saved plan's file name or title"}}), &[])),
-        spec("get_slot_ranking", Read, "🏅", "Ranked cards for a slot", "Rank the cards for one deck slot of the working plan, given the rest of the deck: the meta sheet's backing (★), the simulated score in stat points, and why. Slot 1–5 are your own cards, 6 the borrowed friend card. Model output: suggestions, not game data.", obj(json!({"slot": {"type": "integer", "minimum": 1, "maximum": 6}, "top_n": {"type": "integer", "minimum": 1, "maximum": 15}}), &["slot"])),
-        spec("explain_card", Read, "🃏", "Explained a card", "Why a card is or isn't a good pick for the working plan: its rank and score for the slot it would fill, the meta sheet's backing, and the reasons.", query()),
-        spec("recommend_trainees", Read, "🐴", "Suggested trainees", "The owned trainees that fit the working plan best: the meta sheet's picks you own first (★), then the best aptitude fits, with stars, potential and aptitudes for the goal.", obj(json!({"top_n": {"type": "integer", "minimum": 1, "maximum": 12}}), &[])),
-        spec("list_notes", Read, "📝", "Listed notes", "List the project's markdown notes: insights.md (Claude's evidence-backed opinions), sources.md, plans/*.md (career plans), results/*.md (real results logs), account/*.md.", obj(json!({}), &[])),
-        spec("read_note", Read, "📝", "Read a note", "Read one note file by its path from list_notes, e.g. insights.md, results/careers.md, or the sourced knowledge notes: knowledge/mechanics.md (race mechanics, Team Trials scoring, the CM format, sparks, Grand Concert), knowledge/racecourses.md (every CM course's layout and stamina by style) and knowledge/skills.md (skill advice, debuffs, post-race hints).", obj(json!({"path": {"type": "string"}}), &["path"])),
-        spec("glossary", Read, "📖", "Looked up a term", "Look up a community term (e.g. 'MLB', 'spark', 'CM').", obj(json!({"term": {"type": "string"}}), &["term"])),
+        spec(
+            "get_account_summary",
+            Read,
+            "👤",
+            "Read the account",
+            "The account at a glance: profile, server, umas by stars and potential, cards by type and limit break, maxed SSRs, saved parents and plans, and the working plan in one line.",
+            obj(json!({}), &[]),
+        ),
+        spec(
+            "find_umas",
+            Read,
+            "🔎",
+            "Searched the umas",
+            "List the account's owned umas whose aptitudes fit a distance, surface and/or style, best fit first, with stars, potential and aptitude grades.",
+            obj(find_umas, &[]),
+        ),
+        spec(
+            "get_uma",
+            Read,
+            "🐴",
+            "Read a trainee",
+            "Full knowledge for one trainee outfit: base stats, growth rates, aptitudes, unique/innate/potential skills (with which are locked at the owned potential), evolved skills and their conditions, event skills, career objectives, and whether the account owns it. Query by name, outfit or id.",
+            query(),
+        ),
+        spec(
+            "get_card",
+            Read,
+            "🃏",
+            "Read a card",
+            "Full knowledge for one support card: support effects at the owned level and at max level, unique effect, skill hints, event skills, and every event with its outcomes. Query by uma name, card title or id.",
+            query(),
+        ),
+        spec(
+            "search_skills",
+            Read,
+            "🔎",
+            "Searched skills",
+            "Search skills. Returns name, rarity, SP cost, effect, what it is restricted to, uma.guide's trigger summary, and where this account can get it.",
+            obj(search, &[]),
+        ),
+        spec(
+            "get_skill",
+            Read,
+            "✨",
+            "Read a skill",
+            "Full detail for one skill: effects, trigger conditions, cooldown, and every source (owned or not).",
+            query(),
+        ),
+        spec(
+            "find_races",
+            Read,
+            "🏟",
+            "Searched races",
+            "Find races/courses by race name or racecourse: track, surface, distance, direction, grade.",
+            query(),
+        ),
+        spec(
+            "list_upcoming_events",
+            Read,
+            "🏆",
+            "Read the CM schedule",
+            "The next Champions Meetings from the app's live schedule (official news first, then Umalator's estimates): cup, number, date, announced or estimated, course, conditions, the training scenario, the skills it turns off, and whether the meta sheet covers it.",
+            obj(
+                json!({"count": {"type": "integer", "minimum": 1, "maximum": 8, "description": "How many (default 4)"}}),
+                &[],
+            ),
+        ),
+        spec(
+            "get_cm_meta",
+            Read,
+            "📈",
+            "Read the meta sheet",
+            "The community PvP meta sheet for a Champions Meeting: style ranking, recommended stats, recommended trainees (owned marked), decks by tier with which cards the account owns and at what LB, honorable mentions, skill advice and parents to look for. Community opinion, not game data.",
+            obj(
+                json!({"cm": {"type": "string", "description": "Cup name, number or 'next' (default: the working plan's CM, else the next one)"}, "style": style}),
+                &[],
+            ),
+        ),
+        spec(
+            "list_plans",
+            Read,
+            "📋",
+            "Listed saved plans",
+            "The saved career plans in plans/, newest first, with their titles.",
+            obj(json!({}), &[]),
+        ),
+        spec(
+            "get_plan",
+            Read,
+            "📋",
+            "Read a plan",
+            "The working plan in the Planner ('current', the default): goal, CM, scenario, trainee and aptitudes, target stats, deck, skills to buy, SP budget, pins and bans. Or a saved plan's file by name.",
+            obj(
+                json!({"name": {"type": "string", "description": "'current' or part of a saved plan's file name or title"}}),
+                &[],
+            ),
+        ),
+        spec(
+            "get_slot_ranking",
+            Read,
+            "🏅",
+            "Ranked cards for a slot",
+            "Rank the cards for one deck slot of the working plan, given the rest of the deck: the meta sheet's backing (★), the simulated score in stat points, and why. Slot 1–5 are your own cards, 6 the borrowed friend card. Model output: suggestions, not game data.",
+            obj(
+                json!({"slot": {"type": "integer", "minimum": 1, "maximum": 6}, "top_n": {"type": "integer", "minimum": 1, "maximum": 15}}),
+                &["slot"],
+            ),
+        ),
+        spec(
+            "explain_card",
+            Read,
+            "🃏",
+            "Explained a card",
+            "Why a card is or isn't a good pick for the working plan: its rank and score for the slot it would fill, the meta sheet's backing, and the reasons.",
+            query(),
+        ),
+        spec(
+            "recommend_trainees",
+            Read,
+            "🐴",
+            "Suggested trainees",
+            "The owned trainees that fit the working plan best: the meta sheet's picks you own first (★), then the best aptitude fits, with stars, potential and aptitudes for the goal.",
+            obj(
+                json!({"top_n": {"type": "integer", "minimum": 1, "maximum": 12}}),
+                &[],
+            ),
+        ),
+        spec(
+            "list_notes",
+            Read,
+            "📝",
+            "Listed notes",
+            "List the project's markdown notes: insights.md (Claude's evidence-backed opinions), sources.md, plans/*.md (career plans), results/*.md (real results logs), account/*.md.",
+            obj(json!({}), &[]),
+        ),
+        spec(
+            "read_note",
+            Read,
+            "📝",
+            "Read a note",
+            "Read one note file by its path from list_notes, e.g. insights.md, results/careers.md, or the sourced knowledge notes: knowledge/mechanics.md (race mechanics, Team Trials scoring, the CM format, sparks, Grand Concert), knowledge/racecourses.md (every CM course's layout and stamina by style) and knowledge/skills.md (skill advice, debuffs, post-race hints).",
+            obj(json!({"path": {"type": "string"}}), &["path"]),
+        ),
+        spec(
+            "glossary",
+            Read,
+            "📖",
+            "Looked up a term",
+            "Look up a community term (e.g. 'MLB', 'spark', 'CM').",
+            obj(json!({"term": {"type": "string"}}), &["term"]),
+        ),
         // --- Draft
-        spec("new_plan", Draft, "📋", "Started a plan", "Start a new working plan in the Planner, replacing the one open there (undoable). For a Champions Meeting this sets its course, conditions, scenario and disabled skills.", obj(json!({
-            "goal": purposes, "cm": {"type": "string", "description": "Cup name, number or 'next' (Champions Meeting goal; default 'next')"},
-            "style": style, "trainee": {"type": "string", "description": "An owned uma's name and outfit, or id"},
-            "scenario": {"type": "string"}, "title": {"type": "string"}
-        }), &[])),
-        spec("set_plan", Draft, "✏", "Changed the plan", "Change fields of the working plan (undoable). Give only what changes.", obj(json!({
-            "trainee": {"type": "string", "description": "An owned uma's name and outfit, or id"},
-            "style": style, "distance": distance, "surface": surface,
-            "course": {"type": "string", "description": "A race name ('Arima Kinen') or race id; 'none' clears it"},
-            "cm": {"type": "string", "description": "Link a Champions Meeting (cup name, number or 'next'); 'none' unlinks it"},
-            "ground": {"type": "string", "enum": ["Firm", "Good", "Soft", "Heavy"]},
-            "weather": {"type": "string", "enum": ["Sunny", "Cloudy", "Rainy", "Snowy"]},
-            "season": {"type": "string", "enum": ["Spring", "Summer", "Autumn", "Winter"]},
-            "target_stats": stats_arg("Target stats"),
-            "parents": {"type": "array", "items": {"type": "string"}, "maxItems": 2, "description": "Parent names as account/parents.md has them"},
-            "notes": {"type": "string"}, "title": {"type": "string"}, "scenario": {"type": "string"},
-            "sp_budget": {"type": "integer", "minimum": 0, "maximum": 6000, "description": "SP to spend; 0 goes back to the career simulation's estimate"},
-            "meta_influence": {"type": "string", "enum": ["off", "tie-break", "strong"], "description": "How much the meta sheet's skill advice counts in auto-pick"},
-            "pin_skills": skills(), "ban_skills": skills(),
-            "friend_lb": {"type": "integer", "minimum": 0, "maximum": 4},
-            "fast_learner": {"type": "boolean"}
-        }), &[])),
-        spec("recommend_deck", Draft, "🃏", "Recommended a deck", "Fill the working plan's deck with the best cards for its goal (undoable): the meta sheet's picks first (★), then simulated careers. Model output: suggestions.", obj(json!({"replace_all": {"type": "boolean", "description": "Replace every slot (default true), or only fill empty ones"}}), &[])),
-        spec("set_deck", Draft, "🃏", "Set the deck", "Set the working plan's deck (undoable): up to five owned cards, one per character and not the trainee's own, plus the borrowed friend card.", obj(json!({
-            "cards": {"type": "array", "items": {"type": "string"}, "maxItems": 5, "description": "Owned cards by uma name and title, or id"},
-            "friend": {"type": "string", "description": "The borrowed card; 'none' leaves the slot empty"},
-            "friend_lb": {"type": "integer", "minimum": 0, "maximum": 4}
-        }), &["cards"])),
-        spec("set_skills", Draft, "✨", "Set the skills", "Set the working plan's skills to buy (undoable).", obj(json!({"skills": skills(), "mode": {"type": "string", "enum": ["replace", "add", "remove"]}}), &["skills"])),
-        spec("load_plan_into_sim", Draft, "🏁", "Loaded the plan into the Race sim", "Put the working plan into the Race sim (undoable): its course and conditions, the trainee without her skills to buy as Uma 1 and with them as Uma 2.", obj(json!({}), &[])),
-        spec("set_sim_build", Draft, "🏁", "Changed a Race sim build", "Change Uma 1 or Uma 2 in the Race sim (undoable). Give only what changes.", obj(json!({
-            "uma": {"type": "integer", "enum": [1, 2]},
-            "from_plan": {"type": "string", "enum": ["with_skills", "without_skills"], "description": "Start from the working plan's trainee"},
-            "outfit": {"type": "string", "description": "Any uma outfit by name or id (owned or not)"},
-            "stats": stats_arg("Stats"),
-            "style": style,
-            "mood": {"type": "string", "enum": ["Awful", "Bad", "Normal", "Good", "Great"]},
-            "skills": {"type": "array", "items": {"type": "string"}, "description": "Replace her skills (the unique stays)"},
-            "add_skills": skills(), "remove_skills": skills()
-        }), &["uma"])),
+        spec(
+            "new_plan",
+            Draft,
+            "📋",
+            "Started a plan",
+            "Start a new working plan in the Planner, replacing the one open there (undoable). For a Champions Meeting this sets its course, conditions, scenario and disabled skills.",
+            obj(
+                json!({
+                    "goal": purposes, "cm": {"type": "string", "description": "Cup name, number or 'next' (Champions Meeting goal; default 'next')"},
+                    "style": style, "trainee": {"type": "string", "description": "An owned uma's name and outfit, or id"},
+                    "scenario": {"type": "string"}, "title": {"type": "string"}
+                }),
+                &[],
+            ),
+        ),
+        spec(
+            "set_plan",
+            Draft,
+            "✏",
+            "Changed the plan",
+            "Change fields of the working plan (undoable). Give only what changes.",
+            obj(
+                json!({
+                    "trainee": {"type": "string", "description": "An owned uma's name and outfit, or id"},
+                    "style": style, "distance": distance, "surface": surface,
+                    "course": {"type": "string", "description": "A race name ('Arima Kinen') or race id; 'none' clears it"},
+                    "cm": {"type": "string", "description": "Link a Champions Meeting (cup name, number or 'next'); 'none' unlinks it"},
+                    "ground": {"type": "string", "enum": ["Firm", "Good", "Soft", "Heavy"]},
+                    "weather": {"type": "string", "enum": ["Sunny", "Cloudy", "Rainy", "Snowy"]},
+                    "season": {"type": "string", "enum": ["Spring", "Summer", "Autumn", "Winter"]},
+                    "target_stats": stats_arg("Target stats"),
+                    "parents": {"type": "array", "items": {"type": "string"}, "maxItems": 2, "description": "Parent names as account/parents.md has them"},
+                    "notes": {"type": "string"}, "title": {"type": "string"}, "scenario": {"type": "string"},
+                    "sp_budget": {"type": "integer", "minimum": 0, "maximum": 6000, "description": "SP to spend; 0 goes back to the career simulation's estimate"},
+                    "meta_influence": {"type": "string", "enum": ["off", "tie-break", "strong"], "description": "How much the meta sheet's skill advice counts in auto-pick"},
+                    "pin_skills": skills(), "ban_skills": skills(),
+                    "friend_lb": {"type": "integer", "minimum": 0, "maximum": 4},
+                    "fast_learner": {"type": "boolean"}
+                }),
+                &[],
+            ),
+        ),
+        spec(
+            "recommend_deck",
+            Draft,
+            "🃏",
+            "Recommended a deck",
+            "Fill the working plan's deck with the best cards for its goal (undoable): the meta sheet's picks first (★), then simulated careers. Model output: suggestions.",
+            obj(
+                json!({"replace_all": {"type": "boolean", "description": "Replace every slot (default true), or only fill empty ones"}}),
+                &[],
+            ),
+        ),
+        spec(
+            "set_deck",
+            Draft,
+            "🃏",
+            "Set the deck",
+            "Set the working plan's deck (undoable): up to five owned cards, one per character and not the trainee's own, plus the borrowed friend card.",
+            obj(
+                json!({
+                    "cards": {"type": "array", "items": {"type": "string"}, "maxItems": 5, "description": "Owned cards by uma name and title, or id"},
+                    "friend": {"type": "string", "description": "The borrowed card; 'none' leaves the slot empty"},
+                    "friend_lb": {"type": "integer", "minimum": 0, "maximum": 4}
+                }),
+                &["cards"],
+            ),
+        ),
+        spec(
+            "set_skills",
+            Draft,
+            "✨",
+            "Set the skills",
+            "Set the working plan's skills to buy (undoable).",
+            obj(
+                json!({"skills": skills(), "mode": {"type": "string", "enum": ["replace", "add", "remove"]}}),
+                &["skills"],
+            ),
+        ),
+        spec(
+            "load_plan_into_sim",
+            Draft,
+            "🏁",
+            "Loaded the plan into the Race sim",
+            "Put the working plan into the Race sim (undoable): its course and conditions, the trainee without her skills to buy as Uma 1 and with them as Uma 2.",
+            obj(json!({}), &[]),
+        ),
+        spec(
+            "set_sim_build",
+            Draft,
+            "🏁",
+            "Changed a Race sim build",
+            "Change Uma 1 or Uma 2 in the Race sim (undoable). Give only what changes.",
+            obj(
+                json!({
+                    "uma": {"type": "integer", "enum": [1, 2]},
+                    "from_plan": {"type": "string", "enum": ["with_skills", "without_skills"], "description": "Start from the working plan's trainee"},
+                    "outfit": {"type": "string", "description": "Any uma outfit by name or id (owned or not)"},
+                    "stats": stats_arg("Stats"),
+                    "style": style,
+                    "mood": {"type": "string", "enum": ["Awful", "Bad", "Normal", "Good", "Great"]},
+                    "skills": {"type": "array", "items": {"type": "string"}, "description": "Replace her skills (the unique stays)"},
+                    "add_skills": skills(), "remove_skills": skills()
+                }),
+                &["uma"],
+            ),
+        ),
         // --- Long
-        spec("auto_pick_skills", Long, "✨", "Auto-picked skills", "Choose the working plan's skills to buy: a quick pick, then the optimiser races sets of skills within the SP budget and verifies the result over 1000 races (about 20 s). Needs a trainee, target stats and a course or CM. Simulation output.", obj(json!({"objective": {"type": "string", "enum": ["lengths", "consistency", "rating"], "description": "Most lengths on average (default); Team Trials consistency; or rating: the most skill evaluation points (for a parent's rank), no racing"}}), &[])),
-        spec("simulate_skills", Long, "📊", "Simulated the skills on offer", "Race every skill the trainee, the owned cards and the friend card can teach on the plan's course (the skill chart), so the deck ranking and auto-pick use simulated gains. Returns the best. Simulation output.", obj(json!({"top_n": {"type": "integer", "minimum": 1, "maximum": 30}}), &[])),
-        spec("run_compare", Long, "🏁", "Raced two builds", "Race Uma 1 against Uma 2 many times in the Race sim (Moomoolator's engine) and report who wins, by how much, how often, full-spurt, HP-survival and rushed rates, and Uma 2's skill activations. builds 'plan' (default) loads the working plan first: the trainee without vs with her skills to buy. Simulation output.", obj(json!({
-            "builds": {"type": "string", "enum": ["plan", "current"], "description": "'plan' loads the working plan; 'current' races the builds as they are"},
-            "runs": {"type": "integer", "minimum": 100, "maximum": 2000, "description": "Races (default 1000)"},
-            "seed": {"type": "integer", "minimum": 1, "maximum": 2147483646, "description": "Default 12345, so results can be reproduced"},
-            "race": race_arg()
-        }), &[])),
-        spec("run_skill_chart", Long, "📊", "Charted skills", "How many lengths each skill adds to Uma 1 on the sim's course (Moomoolator's skill chart). Put the build you want in Uma 1 first. Simulation output.", obj(json!({
-            "pool": {"type": "string", "enum": ["account", "all"], "description": "Skills this account can get (default), or every Global skill"},
-            "top_n": {"type": "integer", "minimum": 1, "maximum": 30}, "race": race_arg()
-        }), &[])),
-        spec("run_stamina", Long, "❤", "Checked stamina", "Whether Uma 1 has the HP for a full spurt on the sim's course: HP left at the finish across races, the full-spurt rate, and the closed-form estimate of the Stamina needed. Simulation output.", obj(json!({"runs": {"type": "integer", "minimum": 100, "maximum": 2000}, "race": race_arg()}), &[])),
-        spec("stat_sensitivity", Long, "📈", "Tested what matters", "On the last run_compare: 'stats' races Uma 2 with +50 in each stat (where her next training points matter), 'skills' races her without each skill in turn (what each is worth). Simulation output.", obj(json!({"what": {"type": "string", "enum": ["stats", "skills"]}}), &[])),
-        spec("career_sim", Long, "🎓", "Simulated the career", "The working plan's career simulation (400 careers in its scenario with its deck): expected skill points with the 10–90% range and sources, and final stats. Model output built on knowledge/scenarios.json's assumptions.", obj(json!({}), &[])),
+        spec(
+            "auto_pick_skills",
+            Long,
+            "✨",
+            "Auto-picked skills",
+            "Choose the working plan's skills to buy: a quick pick, then the optimiser races sets of skills within the SP budget and verifies the result over 1000 races (about 20 s). Needs a trainee, target stats and a course or CM. Simulation output.",
+            obj(
+                json!({"objective": {"type": "string", "enum": ["lengths", "consistency", "rating"], "description": "Most lengths on average (default); Team Trials consistency; or rating: the most skill evaluation points (for a parent's rank), no racing"}}),
+                &[],
+            ),
+        ),
+        spec(
+            "simulate_skills",
+            Long,
+            "📊",
+            "Simulated the skills on offer",
+            "Race every skill the trainee, the owned cards and the friend card can teach on the plan's course (the skill chart), so the deck ranking and auto-pick use simulated gains. Returns the best. Simulation output.",
+            obj(
+                json!({"top_n": {"type": "integer", "minimum": 1, "maximum": 30}}),
+                &[],
+            ),
+        ),
+        spec(
+            "run_compare",
+            Long,
+            "🏁",
+            "Raced two builds",
+            "Race Uma 1 against Uma 2 many times in the Race sim (Moomoolator's engine) and report who wins, by how much, how often, full-spurt, HP-survival and rushed rates, and Uma 2's skill activations. builds 'plan' (default) loads the working plan first: the trainee without vs with her skills to buy. Simulation output.",
+            obj(
+                json!({
+                    "builds": {"type": "string", "enum": ["plan", "current"], "description": "'plan' loads the working plan; 'current' races the builds as they are"},
+                    "runs": {"type": "integer", "minimum": 100, "maximum": 2000, "description": "Races (default 1000)"},
+                    "seed": {"type": "integer", "minimum": 1, "maximum": 2147483646, "description": "Default 12345, so results can be reproduced"},
+                    "race": race_arg()
+                }),
+                &[],
+            ),
+        ),
+        spec(
+            "run_skill_chart",
+            Long,
+            "📊",
+            "Charted skills",
+            "How many lengths each skill adds to Uma 1 on the sim's course (Moomoolator's skill chart). Put the build you want in Uma 1 first. Simulation output.",
+            obj(
+                json!({
+                    "pool": {"type": "string", "enum": ["account", "all"], "description": "Skills this account can get (default), or every Global skill"},
+                    "top_n": {"type": "integer", "minimum": 1, "maximum": 30}, "race": race_arg()
+                }),
+                &[],
+            ),
+        ),
+        spec(
+            "run_stamina",
+            Long,
+            "❤",
+            "Checked stamina",
+            "Whether Uma 1 has the HP for a full spurt on the sim's course: HP left at the finish across races, the full-spurt rate, and the closed-form estimate of the Stamina needed. Simulation output.",
+            obj(
+                json!({"runs": {"type": "integer", "minimum": 100, "maximum": 2000}, "race": race_arg()}),
+                &[],
+            ),
+        ),
+        spec(
+            "stat_sensitivity",
+            Long,
+            "📈",
+            "Tested what matters",
+            "On the last run_compare: 'stats' races Uma 2 with +50 in each stat (where her next training points matter), 'skills' races her without each skill in turn (what each is worth). Simulation output.",
+            obj(
+                json!({"what": {"type": "string", "enum": ["stats", "skills"]}}),
+                &[],
+            ),
+        ),
+        spec(
+            "career_sim",
+            Long,
+            "🎓",
+            "Simulated the career",
+            "The working plan's career simulation (400 careers in its scenario with its deck): expected skill points with the 10–90% range and sources, and final stats. Model output built on knowledge/scenarios.json's assumptions.",
+            obj(json!({}), &[]),
+        ),
         // --- UI
-        spec("open_page", Ui, "📌", "Opened a page", "Open a page of the app when this answer finishes, so the user sees what you did.", obj(json!({"page": {"type": "string", "enum": ["home", "umas", "cards", "skills", "plan", "race", "results"]}}), &["page"])),
-        spec("select", Ui, "📌", "Selected", "Show one uma, card or skill in the Collection when this answer finishes, or open a saved plan as the working plan now (undoable).", obj(json!({"kind": {"type": "string", "enum": ["uma", "card", "skill", "plan"]}, "query": {"type": "string"}}), &["kind", "query"])),
+        spec(
+            "open_page",
+            Ui,
+            "📌",
+            "Opened a page",
+            "Open a page of the app when this answer finishes, so the user sees what you did.",
+            obj(
+                json!({"page": {"type": "string", "enum": ["home", "umas", "cards", "skills", "plan", "race", "results"]}}),
+                &["page"],
+            ),
+        ),
+        spec(
+            "select",
+            Ui,
+            "📌",
+            "Selected",
+            "Show one uma, card or skill in the Collection when this answer finishes, or open a saved plan as the working plan now (undoable).",
+            obj(
+                json!({"kind": {"type": "string", "enum": ["uma", "card", "skill", "plan"]}, "query": {"type": "string"}}),
+                &["kind", "query"],
+            ),
+        ),
         // --- Write
-        spec("save_plan", Write, "💾", "Saved the plan", "Save the working plan to plans/ (asks the user first). With with_simulation (default true) the last run_compare of the plan goes into its ## Simulation section.", obj(json!({"title": {"type": "string"}, "with_simulation": {"type": "boolean"}}), &[])),
-        spec("log_result", Write, "🏆", "Logged a result", "Add a real result to a results log, newest first (asks the user first). fields maps the log's column names to values; read the log with read_note to see its columns.", obj(json!({
-            "log": {"type": "string", "enum": ["careers", "team_trials", "champions_meeting", "league_of_heroes", "sparks"]},
-            "fields": {"type": "object", "additionalProperties": {"type": "string"}}
-        }), &["log", "fields"])),
-        spec("update_owned", Write, "✏", "Changed the roster", "Change the account's roster (always asks the user): a card's limit break and level, an uma's stars and potential, add one, or remove one.", obj(json!({
-            "kind": {"type": "string", "enum": ["uma", "card"]}, "query": {"type": "string"},
-            "lb": {"type": "integer", "minimum": 0, "maximum": 4}, "level": {"type": "integer", "minimum": 1, "maximum": 50},
-            "stars": {"type": "integer", "minimum": 1, "maximum": 5}, "potential": {"type": "integer", "minimum": 1, "maximum": 5},
-            "remove": {"type": "boolean"}
-        }), &["kind", "query"])),
+        spec(
+            "save_plan",
+            Write,
+            "💾",
+            "Saved the plan",
+            "Save the working plan to plans/ (asks the user first). With with_simulation (default true) the last run_compare of the plan goes into its ## Simulation section.",
+            obj(
+                json!({"title": {"type": "string"}, "with_simulation": {"type": "boolean"}}),
+                &[],
+            ),
+        ),
+        spec(
+            "log_result",
+            Write,
+            "🏆",
+            "Logged a result",
+            "Add a real result to a results log, newest first (asks the user first). fields maps the log's column names to values; read the log with read_note to see its columns.",
+            obj(
+                json!({
+                    "log": {"type": "string", "enum": ["careers", "team_trials", "champions_meeting", "league_of_heroes", "sparks"]},
+                    "fields": {"type": "object", "additionalProperties": {"type": "string"}}
+                }),
+                &["log", "fields"],
+            ),
+        ),
+        spec(
+            "update_owned",
+            Write,
+            "✏",
+            "Changed the roster",
+            "Change the account's roster (always asks the user): a card's limit break and level, an uma's stars and potential, add one, or remove one.",
+            obj(
+                json!({
+                    "kind": {"type": "string", "enum": ["uma", "card"]}, "query": {"type": "string"},
+                    "lb": {"type": "integer", "minimum": 0, "maximum": 4}, "level": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "stars": {"type": "integer", "minimum": 1, "maximum": 5}, "potential": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "remove": {"type": "boolean"}
+                }),
+                &["kind", "query"],
+            ),
+        ),
     ]
 }
 
@@ -369,7 +732,8 @@ pub(crate) fn api_tools(eager: bool) -> Value {
     let mut tools: Vec<Value> = registry()
         .iter()
         .map(|s| {
-            let mut t = json!({"name": s.name, "description": s.description, "input_schema": s.schema});
+            let mut t =
+                json!({"name": s.name, "description": s.description, "input_schema": s.schema});
             if eager {
                 t["eager_input_streaming"] = json!(true);
             }
@@ -403,7 +767,11 @@ pub(crate) fn mcp_tools() -> Value {
 /// properties, required, additionalProperties, types, enums, array items and lengths, integer
 /// bounds). Streamed input isn't validated by the API, so every call goes through this first.
 pub(crate) fn validate(schema: &Value, v: &Value, at: &str) -> Result<(), String> {
-    let here = if at.is_empty() { "input".to_string() } else { at.to_string() };
+    let here = if at.is_empty() {
+        "input".to_string()
+    } else {
+        at.to_string()
+    };
     if let Some(t) = schema["type"].as_str() {
         let ok = match t {
             "object" => v.is_object(),
@@ -421,7 +789,10 @@ pub(crate) fn validate(schema: &Value, v: &Value, at: &str) -> Result<(), String
     if let Some(options) = schema["enum"].as_array()
         && !options.contains(v)
     {
-        return Err(format!("{here} must be one of {}", Value::Array(options.clone())));
+        return Err(format!(
+            "{here} must be one of {}",
+            Value::Array(options.clone())
+        ));
     }
     if let Some(n) = v.as_f64() {
         if let Some(min) = schema["minimum"].as_f64()
@@ -454,7 +825,12 @@ pub(crate) fn validate(schema: &Value, v: &Value, at: &str) -> Result<(), String
     }
     if let Some(map) = v.as_object() {
         let props = schema["properties"].as_object();
-        for key in schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        for key in schema["required"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
             if map.get(key).is_none_or(Value::is_null) {
                 return Err(format!("{here} is missing \"{key}\""));
             }
@@ -470,7 +846,9 @@ pub(crate) fn validate(schema: &Value, v: &Value, at: &str) -> Result<(), String
                     let known: Vec<&String> = props.map(|p| p.keys().collect()).unwrap_or_default();
                     return Err(format!("{here} has no field \"{k}\"; it takes {known:?}"));
                 }
-                None if schema["additionalProperties"].is_object() => validate(&schema["additionalProperties"], val, &format!("{here}.{k}"))?,
+                None if schema["additionalProperties"].is_object() => {
+                    validate(&schema["additionalProperties"], val, &format!("{here}.{k}"))?
+                }
                 None => {}
             }
         }
@@ -495,7 +873,12 @@ mod tests {
         let (mut a, dir) = crate::onboarding::tests::scratch_app("agent-tools");
         a.roster = crate::data::Roster::sample();
         let headers = a.result_headers(0);
-        let log_fields: serde_json::Map<String, Value> = headers.iter().filter(|h| !h.starts_with("Date")).take(2).map(|h| (h.clone(), json!("from the agent test"))).collect();
+        let log_fields: serde_json::Map<String, Value> = headers
+            .iter()
+            .filter(|h| !h.starts_with("Date"))
+            .take(2)
+            .map(|h| (h.clone(), json!("from the agent test")))
+            .collect();
         let calls: Vec<(&str, Value)> = vec![
             ("get_account_summary", json!({})),
             ("find_umas", json!({"distance": "Long", "style": "Pace"})),
@@ -509,46 +892,82 @@ mod tests {
             ("list_notes", json!({})),
             ("read_note", json!({"path": "insights.md"})),
             ("glossary", json!({"term": "spark"})),
-            ("new_plan", json!({"goal": "Champions Meeting", "cm": "next", "trainee": "Oguri Cap [Starlight Beat]"})),
+            (
+                "new_plan",
+                json!({"goal": "Champions Meeting", "cm": "next", "trainee": "Oguri Cap [Starlight Beat]"}),
+            ),
             ("recommend_trainees", json!({"top_n": 3})),
-            ("set_plan", json!({"style": "Pace", "target_stats": [1200, 1000, 1000, 600, 1000], "ground": "Good", "meta_influence": "tie-break"})),
+            (
+                "set_plan",
+                json!({"style": "Pace", "target_stats": [1200, 1000, 1000, 600, 1000], "ground": "Good", "meta_influence": "tie-break"}),
+            ),
             ("get_plan", json!({})),
-            ("set_deck", json!({"cards": ["Kitasan Black"], "friend": "none"})),
+            (
+                "set_deck",
+                json!({"cards": ["Kitasan Black"], "friend": "none"}),
+            ),
             ("recommend_deck", json!({"replace_all": false})),
             ("get_slot_ranking", json!({"slot": 1, "top_n": 3})),
             ("explain_card", json!({"query": "Kitasan Black"})),
             ("career_sim", json!({})),
             ("simulate_skills", json!({"top_n": 5})),
             ("auto_pick_skills", json!({})),
-            ("set_skills", json!({"skills": ["Homestretch Haste"], "mode": "add"})),
+            (
+                "set_skills",
+                json!({"skills": ["Homestretch Haste"], "mode": "add"}),
+            ),
             ("load_plan_into_sim", json!({})),
             ("run_compare", json!({"runs": 200})),
             ("stat_sensitivity", json!({"what": "stats"})),
-            ("set_sim_build", json!({"uma": 1, "from_plan": "without_skills", "mood": "Good"})),
+            (
+                "set_sim_build",
+                json!({"uma": 1, "from_plan": "without_skills", "mood": "Good"}),
+            ),
             ("run_skill_chart", json!({"top_n": 5})),
             ("run_stamina", json!({"runs": 100})),
             ("open_page", json!({"page": "race"})),
             ("save_plan", json!({"title": "Agent tools test"})),
             ("list_plans", json!({})),
-            ("select", json!({"kind": "plan", "query": "Agent tools test"})),
+            (
+                "select",
+                json!({"kind": "plan", "query": "Agent tools test"}),
+            ),
             ("select", json!({"kind": "card", "query": "Kitasan Black"})),
-            ("log_result", json!({"log": "careers", "fields": log_fields})),
-            ("update_owned", json!({"kind": "card", "query": "Kitasan Black", "lb": 3})),
+            (
+                "log_result",
+                json!({"log": "careers", "fields": log_fields}),
+            ),
+            (
+                "update_owned",
+                json!({"kind": "card", "query": "Kitasan Black", "lb": 3}),
+            ),
         ];
         let mut seen = BTreeSet::new();
         for (name, input) in calls {
             seen.insert(name);
-            let out = match a.agent_call_blocking(&ctx, name, &input, std::time::Duration::from_secs(180)) {
+            let out = match a.agent_call_blocking(
+                &ctx,
+                name,
+                &input,
+                std::time::Duration::from_secs(180),
+            ) {
                 Exec::Done(out) => out,
                 Exec::Ask(q) => {
-                    assert_eq!(find(name).unwrap().kind, Kind::Write, "{name} asked for approval");
+                    assert_eq!(
+                        find(name).unwrap().kind,
+                        Kind::Write,
+                        "{name} asked for approval"
+                    );
                     assert!(!q.question.is_empty());
                     a.agent_write(name, &input)
                 }
                 Exec::Wait(_) => panic!("{name} still running"),
             };
             assert!(!out.is_error, "{name}: {}", out.text);
-            assert!(!out.text.trim().is_empty() && !out.card.summary.is_empty(), "{name} said nothing");
+            assert!(
+                !out.text.trim().is_empty() && !out.card.summary.is_empty(),
+                "{name} said nothing"
+            );
             eprintln!("{name}: {}", out.card.summary);
         }
         let all: BTreeSet<&str> = registry().iter().map(|s| s.name).collect();
@@ -557,8 +976,16 @@ mod tests {
         assert!(a.plan_files().iter().any(|(_, t)| t == "Agent tools test"));
         let kita = a.find_card_id("Kitasan Black").unwrap();
         assert_eq!(a.owned_card(kita).map(|c| c.lb), Some(3));
-        assert!(std::fs::read_to_string(dir.join("results/careers.md")).unwrap().contains("from the agent test"));
-        assert_eq!(a.agent.open_after, Some(OpenAt::Card(kita)), "the last page asked for opens when the answer ends");
+        assert!(
+            std::fs::read_to_string(dir.join("results/careers.md"))
+                .unwrap()
+                .contains("from the agent test")
+        );
+        assert_eq!(
+            a.agent.open_after,
+            Some(OpenAt::Card(kita)),
+            "the last page asked for opens when the answer ends"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -570,11 +997,19 @@ mod tests {
         let mut a = crate::App::for_tests();
         a.planner.demo(&a.roster, &a.kb, 100601);
         let before = serde_json::to_value(&a.planner.plan).unwrap();
-        let Exec::Done(out) = a.agent_call(&ctx, "set_plan", &json!({"style": "End", "target_stats": [900, 900, 900, 900, 900]})) else { panic!("set_plan finishes at once") };
+        let Exec::Done(out) = a.agent_call(
+            &ctx,
+            "set_plan",
+            &json!({"style": "End", "target_stats": [900, 900, 900, 900, 900]}),
+        ) else {
+            panic!("set_plan finishes at once")
+        };
         assert!(!out.is_error, "{}", out.text);
         assert_eq!(a.planner.plan.style, crate::knowledge::Style::End);
         let idx = out.card.undo.expect("an undo point");
-        let Exec::Done(deck) = a.agent_call(&ctx, "recommend_deck", &json!({})) else { panic!("recommend_deck finishes at once") };
+        let Exec::Done(deck) = a.agent_call(&ctx, "recommend_deck", &json!({})) else {
+            panic!("recommend_deck finishes at once")
+        };
         assert!(matches!(deck.card.visual, Visual::Deck { .. }));
         // Undo the first change: it and the deck after it go.
         let msg = a.agent_undo(idx).unwrap();
@@ -583,15 +1018,32 @@ mod tests {
         assert!(a.agent_undo(idx).is_err(), "already undone");
         // Not owned, or two of one character: an error, and the deck stays.
         let deck_before = a.planner.plan.deck;
-        for input in [json!({"cards": ["no such card at all"]}), json!({"cards": ["Kitasan Black", "Kitasan Black"]})] {
-            let Exec::Done(out) = a.agent_call(&ctx, "set_deck", &input) else { panic!("set_deck finishes at once") };
+        for input in [
+            json!({"cards": ["no such card at all"]}),
+            json!({"cards": ["Kitasan Black", "Kitasan Black"]}),
+        ] {
+            let Exec::Done(out) = a.agent_call(&ctx, "set_deck", &input) else {
+                panic!("set_deck finishes at once")
+            };
             assert!(out.is_error, "{input}");
         }
         assert_eq!(a.planner.plan.deck, deck_before);
-        let Exec::Done(out) = a.agent_call(&ctx, "set_plan", &json!({"style": "Sideways"})) else { panic!("finishes at once") };
-        assert!(out.is_error && out.text.contains("must be one of"), "{}", out.text);
-        let Exec::Done(out) = a.agent_call(&ctx, "set_plan", &json!({"stlye": "Pace"})) else { panic!("finishes at once") };
-        assert!(out.is_error && out.text.contains("no field"), "{}", out.text);
+        let Exec::Done(out) = a.agent_call(&ctx, "set_plan", &json!({"style": "Sideways"})) else {
+            panic!("finishes at once")
+        };
+        assert!(
+            out.is_error && out.text.contains("must be one of"),
+            "{}",
+            out.text
+        );
+        let Exec::Done(out) = a.agent_call(&ctx, "set_plan", &json!({"stlye": "Pace"})) else {
+            panic!("finishes at once")
+        };
+        assert!(
+            out.is_error && out.text.contains("no field"),
+            "{}",
+            out.text
+        );
         assert!(a.agent.undo.is_empty(), "failed calls leave no undo points");
     }
 
@@ -613,7 +1065,10 @@ mod tests {
         assert!(missing.is_empty(), "no glyph for {missing:?}");
         // The community tier list's marks, shown on the Skills page and in Step 5.
         for sym in ["⍟", "◎", "◯", "▲", "△", "✕"] {
-            assert!(ctx.fonts_mut(|f| f.has_glyphs(&font, sym)), "no glyph for the tier mark {sym}");
+            assert!(
+                ctx.fonts_mut(|f| f.has_glyphs(&font, sym)),
+                "no glyph for the tier mark {sym}"
+            );
         }
         // The check can tell: the compass drew as an empty box.
         assert!(!ctx.fonts_mut(|f| f.has_glyphs(&font, "🧭")));
@@ -628,14 +1083,36 @@ mod tests {
         let names: BTreeSet<&str> = registry().iter().map(|s| s.name).collect();
         assert_eq!(names.len(), registry().len(), "tool names are unique");
         let schema = &find("run_compare").unwrap().schema;
-        assert!(validate(schema, &json!({"runs": 500, "race": {"cm": "next", "ground": "Soft"}}), "").is_ok());
+        assert!(
+            validate(
+                schema,
+                &json!({"runs": 500, "race": {"cm": "next", "ground": "Soft"}}),
+                ""
+            )
+            .is_ok()
+        );
         assert!(validate(schema, &json!({"runs": 50}), "").is_err());
         assert!(validate(schema, &json!({"race": {"ground": "Mud"}}), "").is_err());
-        assert!(validate(schema, &json!({"runs": null}), "").is_ok(), "null means left out");
-        assert!(validate(&find("set_skills").unwrap().schema, &json!({}), "").is_err(), "required field");
-        assert_eq!(find("umalord_get_plan").map(|s| s.name), Some("get_plan"), "OpenCode's MCP prefix");
+        assert!(
+            validate(schema, &json!({"runs": null}), "").is_ok(),
+            "null means left out"
+        );
+        assert!(
+            validate(&find("set_skills").unwrap().schema, &json!({}), "").is_err(),
+            "required field"
+        );
+        assert_eq!(
+            find("umalord_get_plan").map(|s| s.name),
+            Some("get_plan"),
+            "OpenCode's MCP prefix"
+        );
         let api = api_tools(true);
-        assert!(api.as_array().unwrap().iter().all(|t| t["eager_input_streaming"] == true));
+        assert!(
+            api.as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["eager_input_streaming"] == true)
+        );
         assert!(api.as_array().unwrap().last().unwrap()["cache_control"].is_object());
     }
 }

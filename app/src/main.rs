@@ -1,19 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! umaLord: account-aware Uma Musume knowledge base, planner and results log.
+//! UmaYu: account-aware Uma Musume knowledge base, planner and results log.
 //!
-//! Usage: `umalord [path-to-umaLord-folder]`. Without a path it searches upward from the
+//! Usage: `umayu [path-to-UmaYu-folder]`. Without a path it searches upward from the
 //! current dir and the exe for `account/support_cards.md`.
 
+#[macro_use]
+mod lang;
 mod agent;
 mod ask;
 mod ask_opencode;
 mod career;
-mod data;
 mod charts;
 mod collection_kit;
 mod course_notes;
+mod data;
 mod digest;
+mod gameaudio;
 mod home;
 mod knowledge;
 mod live;
@@ -27,12 +30,13 @@ mod profile;
 mod recommend;
 mod settings;
 mod settings_page;
+mod sim;
 mod skill_opt;
 mod skill_pick;
-mod sim;
-mod tab_career;
 mod tab_cards;
+mod tab_career;
 mod tab_collection;
+mod tab_music;
 mod tab_overview;
 mod tab_planner;
 mod tab_results;
@@ -47,25 +51,39 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use data::{Roster, Source, SupportCard, Uma};
-use eframe::egui::{self, CornerRadius, Margin, RichText, Stroke, vec2};
+use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, vec2};
 use knowledge::{Knowledge, SkillSource};
 use ui_util::{semibold, tier_color};
 
 /// Window icon: Special Week's portrait, embedded so the exe has it anywhere.
 fn window_icon() -> Option<egui::IconData> {
-    let img = image::load_from_memory_with_format(include_bytes!("../assets/umas/100101.webp"), image::ImageFormat::WebP).ok()?;
+    let img = image::load_from_memory_with_format(
+        include_bytes!("../assets/umas/100101.webp"),
+        image::ImageFormat::WebP,
+    )
+    .ok()?;
     let rgba = img.into_rgba8();
-    Some(egui::IconData { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
+    Some(egui::IconData {
+        width: rgba.width(),
+        height: rgba.height(),
+        rgba: rgba.into_raw(),
+    })
 }
 
 fn main() -> eframe::Result {
-    // `umalord --simulate plans/<plan>.md`: race the plan (1000 runs, same setup as the Planner's
+    settings::migrate_appdata();
+    // `umayu --simulate plans/<plan>.md`: race the plan (1000 runs, same setup as the Planner's
     // Simulate button), write its ## Simulation section, and exit without opening a window.
     let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|a| a == "--simulate") {
         let plan = args.get(1).map(PathBuf::from);
-        let root = data::find_root(plan.as_ref().and_then(|p| p.parent().map(Path::to_path_buf)));
-        let result = plan.ok_or_else(|| "usage: umalord --simulate <plan.md>".to_string()).and_then(|p| App::new(root).simulate_plan_file(&p));
+        let root = data::find_root(
+            plan.as_ref()
+                .and_then(|p| p.parent().map(Path::to_path_buf)),
+        );
+        let result = plan
+            .ok_or_else(|| "usage: umayu --simulate <plan.md>".to_string())
+            .and_then(|p| App::new(root).simulate_plan_file(&p));
         let (msg, code) = match result {
             Ok(m) => (m, 0),
             Err(e) => (e, 1),
@@ -77,27 +95,53 @@ fn main() -> eframe::Result {
         println!("{msg}");
         std::process::exit(code);
     }
-    // `umalord --mcp [folder]`: the assistant's tools as an MCP server on stdin/stdout, for
+    // `umayu --mcp [folder]`: the assistant's tools as an MCP server on stdin/stdout, for
     // OpenCode (the Ask tab starts it), Claude Code or Claude Desktop. No window.
     if args.first().is_some_and(|a| a == "--mcp") {
         let root = data::find_root(args.get(1).map(PathBuf::from));
         let stdin = std::io::stdin();
-        let result = agent::mcp::serve(stdin.lock(), std::io::stdout(), move || agent::mcp::headless_app(root));
+        let result = agent::mcp::serve(stdin.lock(), std::io::stdout(), move || {
+            agent::mcp::headless_app(root)
+        });
         std::process::exit(i32::from(result.is_err()));
     }
-    // `umalord --export-profile [name]`: save the account to profiles/<name>-<date>.umalord.json.
-    // `umalord --start-over [name]`: back the account up to profiles/backups/, then empty it.
-    if let Some(cmd) = args.first().and_then(|a| a.to_str()).filter(|a| matches!(*a, "--export-profile" | "--start-over")) {
+    // `umayu --export-profile [name]`: save the account to profiles/<name>-<date>.umalord.json.
+    // `umayu --start-over [name]`: back the account up to profiles/backups/, then empty it.
+    if let Some(cmd) = args
+        .first()
+        .and_then(|a| a.to_str())
+        .filter(|a| matches!(*a, "--export-profile" | "--start-over"))
+    {
         let name = args.get(1).map(|a| a.to_string_lossy().to_string());
-        let result = data::find_root(None).ok_or_else(|| "umaLord folder not found.".to_string()).and_then(|root| {
-            let current = Roster::load(Some(&root)).0.profile.unwrap_or_else(|| "My account".into());
-            if cmd == "--export-profile" {
-                profile::export(&root, name.as_deref().unwrap_or(&current), &ui_util::local_today()).map(|p| format!("Saved {}", p.display()))
-            } else {
-                profile::start_over(&root, name.as_deref().unwrap_or(""), &profile::stamp())
-                    .map(|b| b.map_or("Nothing to back up; the account is empty now.".into(), |p| format!("Backed up to {}; the account is empty now.", p.display())))
-            }
-        });
+        let result = data::find_root(None)
+            .ok_or_else(|| "UmaYu folder not found.".to_string())
+            .and_then(|root| {
+                let current = Roster::load(Some(&root))
+                    .0
+                    .profile
+                    .unwrap_or_else(|| "My account".into());
+                if cmd == "--export-profile" {
+                    profile::export(
+                        &root,
+                        name.as_deref().unwrap_or(&current),
+                        &ui_util::local_today(),
+                    )
+                    .map(|p| format!("Saved {}", p.display()))
+                } else {
+                    profile::start_over(&root, name.as_deref().unwrap_or(""), &profile::stamp())
+                        .map(|b| {
+                            b.map_or(
+                                "Nothing to back up; the account is empty now.".into(),
+                                |p| {
+                                    format!(
+                                        "Backed up to {}; the account is empty now.",
+                                        p.display()
+                                    )
+                                },
+                            )
+                        })
+                }
+            });
         let (msg, code) = match result {
             Ok(m) => (m, 0),
             Err(e) => (e, 1),
@@ -109,18 +153,24 @@ fn main() -> eframe::Result {
     // UMALORD_WINDOW=WxH overrides the start size (dev aid for full-page screenshots).
     let size = std::env::var("UMALORD_WINDOW")
         .ok()
-        .and_then(|s| s.split_once('x').and_then(|(w, h)| Some([w.trim().parse().ok()?, h.trim().parse().ok()?])))
+        .and_then(|s| {
+            s.split_once('x')
+                .and_then(|(w, h)| Some([w.trim().parse().ok()?, h.trim().parse().ok()?]))
+        })
         .unwrap_or([1400.0, 900.0]);
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("umaLord")
+        .with_title("UmaYu")
         .with_inner_size(size)
         .with_min_inner_size([960.0, 600.0]);
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(icon);
     }
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
     eframe::run_native(
-        "umaLord",
+        "UmaYu",
         options,
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -152,23 +202,43 @@ mod tests {
     #[test]
     fn ask_tools_answer_from_real_data() {
         let a = app();
-        let ok = |name: &str, input: serde_json::Value| a.run_tool(name, &input).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let ok = |name: &str, input: serde_json::Value| {
+            a.run_tool(name, &input)
+                .unwrap_or_else(|e| panic!("{name}: {e}"))
+        };
         let long = ok("find_umas", json!({"distance": "Long", "style": "Pace"}));
         assert!(long.contains("Narita Brian"), "{long}");
         let oguri = ok("get_uma", json!({"query": "Oguri Cap [Starlight Beat]"}));
-        assert!(oguri.contains("Owned: yes, 5★, potential 5") && oguri.contains("Unique:"), "{oguri}");
+        assert!(
+            oguri.contains("Owned: yes, 5★, potential 5") && oguri.contains("Unique:"),
+            "{oguri}"
+        );
         let kita = ok("get_card", json!({"query": "Kitasan Black"}));
-        assert!(kita.contains("Owned: yes, LB4 Lv50") && kita.contains("Skill hints"), "{kita}");
-        let skills = ok("search_skills", json!({"query": "corner", "owned_only": true}));
+        assert!(
+            kita.contains("Owned: yes, LB4 Lv50") && kita.contains("Skill hints"),
+            "{kita}"
+        );
+        let skills = ok(
+            "search_skills",
+            json!({"query": "corner", "owned_only": true}),
+        );
         assert!(skills.contains("[available to you]"), "{skills}");
         assert!(ok("get_skill", json!({"query": "Homestretch Haste"})).contains("Sources:"));
         assert!(ok("find_races", json!({"query": "Arima"})).contains("Nakayama"));
         assert!(ok("list_notes", json!({})).contains("insights.md"));
         assert!(ok("read_note", json!({"path": "insights.md"})).contains("Current opinions"));
-        assert!(a.run_tool("read_note", &json!({"path": "../secret.md"})).is_err());
+        assert!(
+            a.run_tool("read_note", &json!({"path": "../secret.md"}))
+                .is_err()
+        );
         // Two Fuji Kiseki outfits are owned, so the tool asks which one.
-        let fuji = a.run_tool("get_uma", &json!({"query": "Fuji Kiseki"})).unwrap_err();
-        assert!(fuji.contains("Shooting Star Revue") && fuji.contains("Succès Étoilé"), "{fuji}");
+        let fuji = a
+            .run_tool("get_uma", &json!({"query": "Fuji Kiseki"}))
+            .unwrap_err();
+        assert!(
+            fuji.contains("Shooting Star Revue") && fuji.contains("Succès Étoilé"),
+            "{fuji}"
+        );
     }
 
     /// A saved plan's markdown carries its data block, which loads back into the same plan.
@@ -179,24 +249,45 @@ mod tests {
         let ctx = egui::Context::default();
         let mut a = app();
         a.planner.demo(&a.roster, &a.kb, 100601);
-        assert!(a.plan_race_setup().course.is_none(), "the demo plan has no course");
-        assert!(a.start_skill_values(&ctx, true).is_err(), "no course, so the skill simulation can't run");
+        assert!(
+            a.plan_race_setup().course.is_none(),
+            "the demo plan has no course"
+        );
+        assert!(
+            a.start_skill_values(&ctx, true).is_err(),
+            "no course, so the skill simulation can't run"
+        );
         let msg = a.auto_pick_skills();
         assert!(!a.planner.plan.skills.is_empty(), "{msg}");
-        let cm = a.kb.upcoming_cms("2026-10-17").first().copied().cloned().expect("an upcoming CM");
+        let cm =
+            a.kb.upcoming_cms("2026-10-17")
+                .first()
+                .copied()
+                .cloned()
+                .expect("an upcoming CM");
         a.planner.plan.apply_cm(&a.kb, &cm);
         a.planner.plan.skills.clear();
         a.start_skill_values(&ctx, true).unwrap();
         let start = std::time::Instant::now();
         while a.planner.skill_job.is_some() {
-            assert!(start.elapsed().as_secs() < 120, "skill simulation never finished");
+            assert!(
+                start.elapsed().as_secs() < 120,
+                "skill simulation never finished"
+            );
             a.planner_poll(&ctx);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let (msg, warn) = a.planner.skill_status.clone().expect("a status line under Step 5");
+        let (msg, warn) = a
+            .planner
+            .skill_status
+            .clone()
+            .expect("a status line under Step 5");
         assert!(!warn && msg.contains("Picked"), "{msg}");
         assert!(!a.planner.plan.skills.is_empty(), "{msg}");
-        assert!(a.chosen_cost(&a.planner.plan.skills, a.plan_career().as_ref()) <= a.sp_budget().unwrap() + 5.0);
+        assert!(
+            a.chosen_cost(&a.planner.plan.skills, a.plan_career().as_ref())
+                <= a.sp_budget().unwrap() + 5.0
+        );
         // ✨ Auto-pick: a quick pick at once, then the optimiser in the background.
         a.auto_pick(&ctx);
         assert!(a.planner.pick_job.is_some(), "{:?}", a.planner.skill_status);
@@ -206,12 +297,22 @@ mod tests {
             a.pick_poll(&ctx);
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let (msg, warn) = a.planner.skill_status.clone().expect("a status line under Step 5");
+        let (msg, warn) = a
+            .planner
+            .skill_status
+            .clone()
+            .expect("a status line under Step 5");
         assert!(!warn && msg.contains("Picked"), "{msg}");
-        let out = a.current_pick().expect("the result is for this plan").clone();
+        let out = a
+            .current_pick()
+            .expect("the result is for this plan")
+            .clone();
         assert_eq!(a.planner.plan.skills, out.chosen);
         assert!(out.verify.is_some() && !out.marginal.is_empty());
-        assert!(a.chosen_cost(&a.planner.plan.skills, a.plan_career().as_ref()) <= a.pick_budget().unwrap() + 5.0);
+        assert!(
+            a.chosen_cost(&a.planner.plan.skills, a.plan_career().as_ref())
+                <= a.pick_budget().unwrap() + 5.0
+        );
     }
 
     /// For CM 21 the meta sheet's cards and skills come first.
@@ -219,40 +320,87 @@ mod tests {
     fn meta_sheet_picks_come_first() {
         let mut a = app();
         a.planner.demo(&a.roster, &a.kb, 100601); // Oguri Cap, Pace
-        let cm = a.kb.umalator_presets.iter().find(|e| e.is_cm() && e.id == 21).cloned().expect("CM 21 preset");
+        let cm =
+            a.kb.umalator_presets
+                .iter()
+                .find(|e| e.is_cm() && e.id == 21)
+                .cloned()
+                .expect("CM 21 preset");
         a.planner.plan.apply_cm(&a.kb, &cm);
         a.planner.plan.style = knowledge::Style::Pace;
         let label = a.plan_meta_label().expect("pvp_meta.json has CM 21");
         assert_eq!(label, "CM 21 Capricorn Cup · Pace");
         // Light Hello is in every CM 21 Pace deck.
         let meta = a.plan_card_meta();
-        assert!(meta.owned.get(&30052).is_some_and(|(w, _)| meta::meta_rank(*w) == 3), "{:?}", meta.owned.get(&30052));
+        assert!(
+            meta.owned
+                .get(&30052)
+                .is_some_and(|(w, _)| meta::meta_rank(*w) == 3),
+            "{:?}",
+            meta.owned.get(&30052)
+        );
         // The sheet's owned Pace trainees for CM 21 lead the best fits.
         let first = a.trainee_candidates()[0];
-        assert!(a.plan_meta_trainees().contains(&first), "best fit {first} isn't one of the sheet's");
+        assert!(
+            a.plan_meta_trainees().contains(&first),
+            "best fit {first} isn't one of the sheet's"
+        );
         let picks = a.recommend_deck(true);
         for p in &picks {
-            eprintln!("{:4.1} {:6.0} {} — {}", p.meta, p.score, a.kb.cards[&p.id].uma, p.reason);
+            eprintln!(
+                "{:4.1} {:6.0} {} — {}",
+                p.meta, p.score, a.kb.cards[&p.id].uma, p.reason
+            );
         }
         // In every slot's ranking the sheet's picks come first, strongest backing first.
         for slot in 0..6 {
-            let ranks: Vec<u8> = a.slot_candidates(slot).iter().map(|c| meta::meta_rank(c.meta)).collect();
-            assert!(ranks.windows(2).all(|w| w[0] >= w[1]), "slot {slot}: {ranks:?}");
+            let ranks: Vec<u8> = a
+                .slot_candidates(slot)
+                .iter()
+                .map(|c| meta::meta_rank(c.meta))
+                .collect();
+            assert!(
+                ranks.windows(2).all(|w| w[0] >= w[1]),
+                "slot {slot}: {ranks:?}"
+            );
         }
-        assert!(picks.iter().filter(|p| p.meta > 0.0).count() >= 4, "most of the deck should come from the sheet's CM 21 Pace decks");
+        assert!(
+            picks.iter().filter(|p| p.meta > 0.0).count() >= 4,
+            "most of the deck should come from the sheet's CM 21 Pace decks"
+        );
         let skills = a.plan_meta_skills();
         let ids: Vec<u32> = a.plan_skill_candidates().into_keys().collect();
-        let offered: Vec<u32> = ids.iter().copied().filter(|s| skills.get(s).is_some_and(|(w, _)| *w >= 1.0)).collect();
+        let offered: Vec<u32> = ids
+            .iter()
+            .copied()
+            .filter(|s| skills.get(s).is_some_and(|(w, _)| *w >= 1.0))
+            .collect();
         // ★ skills come first only with the meta influence at Strong (the default is a tie-break).
         a.planner.plan.meta_influence = skill_opt::MetaInfluence::Strong;
         let chosen = a.recommend_skills(&ids);
-        eprintln!("meta skills on offer: {:?}", offered.iter().map(|s| a.kb.skill_name(*s)).collect::<Vec<_>>());
-        eprintln!("chosen: {:?}", chosen.iter().map(|s| a.kb.skill_name(*s)).collect::<Vec<_>>());
+        eprintln!(
+            "meta skills on offer: {:?}",
+            offered
+                .iter()
+                .map(|s| a.kb.skill_name(*s))
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "chosen: {:?}",
+            chosen
+                .iter()
+                .map(|s| a.kb.skill_name(*s))
+                .collect::<Vec<_>>()
+        );
         for s in &offered {
             // Skills the simulator can't value (debuffs, position skills) are left to the user.
             if a.can_activate_on_plan(*s) != Some(false) && a.skill_unsimulated(*s).is_none() {
                 let gold_or_white = chosen.iter().any(|c| c / 10 == s / 10);
-                assert!(gold_or_white, "{} is recommended and on offer but wasn't picked", a.kb.skill_name(*s));
+                assert!(
+                    gold_or_white,
+                    "{} is recommended and on offer but wasn't picked",
+                    a.kb.skill_name(*s)
+                );
             }
         }
         // Off: the sheet doesn't count at all.
@@ -266,10 +414,21 @@ mod tests {
         a.planner.demo(&a.roster, &a.kb, 101601);
         a.planner.plan.title = "Test plan".into();
         let md = a.plan_markdown(None);
-        for section in ["## Goal", "## Trainee", "## Deck", "## Skills to buy", "## Simulation", "## Recommendation"] {
+        for section in [
+            "## Goal",
+            "## Trainee",
+            "## Deck",
+            "## Skills to buy",
+            "## Simulation",
+            "## Recommendation",
+        ] {
             assert!(md.contains(section), "missing {section}");
         }
-        let json = md.split("<!-- umalord-plan").nth(1).and_then(|t| t.split("-->").next()).unwrap();
+        let json = md
+            .split("<!-- umalord-plan")
+            .nth(1)
+            .and_then(|t| t.split("-->").next())
+            .unwrap();
         let back: tab_planner::Plan = serde_json::from_str(json).unwrap();
         assert_eq!(back.trainee, Some(101601));
         assert_eq!(back.deck, a.planner.plan.deck);
@@ -280,7 +439,12 @@ mod tests {
     fn simulates_a_saved_plan() {
         let mut a = app();
         a.planner.demo(&a.roster, &a.kb, 100601);
-        let cm = a.kb.umalator_presets.iter().find(|e| e.course == 10506).cloned().expect("a Nakayama 2500 preset");
+        let cm =
+            a.kb.umalator_presets
+                .iter()
+                .find(|e| e.course == 10506)
+                .cloned()
+                .expect("a Nakayama 2500 preset");
         a.planner.plan.apply_cm(&a.kb, &cm);
         a.planner.plan.skills = vec![200512];
         a.planner.plan.title = "Headless test".into();
@@ -290,8 +454,15 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_file(&path);
         assert!(msg.contains("Gap"), "{msg}");
-        assert!(text.contains("Gap, Uma 2 ahead of Uma 1 in lengths") && text.contains("https://umalator.app/#"), "{text}");
-        assert!(text.contains("## Recommendation") && text.contains("<!-- umalord-plan"), "the rest of the plan stays");
+        assert!(
+            text.contains("Gap, Uma 2 ahead of Uma 1 in lengths")
+                && text.contains("https://umalator.app/#"),
+            "{text}"
+        );
+        assert!(
+            text.contains("## Recommendation") && text.contains("<!-- umalord-plan"),
+            "the rest of the plan stays"
+        );
         assert!(!text.contains("Not run yet"));
     }
 
@@ -306,9 +477,17 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["outfitId"], "101601");
         assert_eq!(v["strategy"], "Senkou");
-        let skills: Vec<&str> = v["skills"].as_array().unwrap().iter().filter_map(|s| s.as_str()).collect();
+        let skills: Vec<&str> = v["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s.as_str())
+            .collect();
         assert!(skills.contains(&"200512"));
-        assert!(skills.contains(&"101601111"), "umalator.app loads evolved skills");
+        assert!(
+            skills.contains(&"101601111"),
+            "umalator.app loads evolved skills"
+        );
         assert!(!skills.contains(&"300011"));
         assert_eq!(dropped.len(), 1);
     }
@@ -316,17 +495,31 @@ mod tests {
     /// The state inside a umalator.app share link.
     fn decode_link(link: &str) -> serde_json::Value {
         use std::io::Read;
-        let hash = link.strip_prefix("https://umalator.app/#").expect("umalator.app link");
-        let b64 = hash.replace("%2B", "+").replace("%2F", "/").replace("%3D", "=");
+        let hash = link
+            .strip_prefix("https://umalator.app/#")
+            .expect("umalator.app link");
+        let b64 = hash
+            .replace("%2B", "+")
+            .replace("%2F", "/")
+            .replace("%3D", "=");
         const B64: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let sextets: Vec<u32> = b64.trim_end_matches('=').bytes().map(|c| B64.find(c as char).unwrap() as u32).collect();
+        let sextets: Vec<u32> = b64
+            .trim_end_matches('=')
+            .bytes()
+            .map(|c| B64.find(c as char).unwrap() as u32)
+            .collect();
         let mut gz = Vec::new();
         for q in sextets.chunks(4) {
-            let n = q.iter().enumerate().fold(0, |n, (i, s)| n | s << (18 - 6 * i));
+            let n = q
+                .iter()
+                .enumerate()
+                .fold(0, |n, (i, s)| n | s << (18 - 6 * i));
             gz.extend((0..q.len() - 1).map(|i| (n >> (16 - 8 * i)) as u8));
         }
         let mut text = String::new();
-        flate2::read::GzDecoder::new(&gz[..]).read_to_string(&mut text).unwrap();
+        flate2::read::GzDecoder::new(&gz[..])
+            .read_to_string(&mut text)
+            .unwrap();
         serde_json::from_str(&text).unwrap()
     }
 
@@ -343,7 +536,10 @@ mod tests {
         a.planner.demo(&a.roster, &a.kb, 101601);
         a.recommend_deck(true);
         let input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(1400.0, 900.0),
+            )),
             ..Default::default()
         };
         let pages = [
@@ -371,16 +567,28 @@ mod tests {
                 times.push(t.elapsed().as_secs_f64() * 1e3);
             }
             let steady = times[1..].iter().sum::<f64>() / (times.len() - 1) as f64;
-            let name = sub.map(|s| format!("{s:?}")).or(career.map(|c| format!("{c:?}"))).unwrap_or(format!("{tab:?}"));
-            eprintln!("{name:<10} first {:>7.1} ms · then {:>6.2} ms/frame", times[0], steady);
+            let name = sub
+                .map(|s| format!("{s:?}"))
+                .or(career.map(|c| format!("{c:?}")))
+                .unwrap_or(format!("{tab:?}"));
+            eprintln!(
+                "{name:<10} first {:>7.1} ms · then {:>6.2} ms/frame",
+                times[0], steady
+            );
         }
         a.planner.plan.target[0] += 10;
         let t = std::time::Instant::now();
         let _ = a.plan_career();
-        eprintln!("plan_career after a target edit {:>7.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        eprintln!(
+            "plan_career after a target edit {:>7.1} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
         let t = std::time::Instant::now();
         let _ = a.slot_candidates(0);
-        eprintln!("one slot ranking {:>7.1} ms", t.elapsed().as_secs_f64() * 1e3);
+        eprintln!(
+            "one slot ranking {:>7.1} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
     }
 
     /// Searching a Collection list and then clearing the search brings the whole list back.
@@ -391,7 +599,10 @@ mod tests {
         theme::install(&ctx, theme::Mode::Dark);
         a.tab = Tab::Collection;
         let input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, 900.0))),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(1400.0, 900.0),
+            )),
             ..Default::default()
         };
         // Text drawn on screen, as a rough count of what the list shows.
@@ -399,11 +610,19 @@ mod tests {
             let mut n = 0;
             for _ in 0..3 {
                 let out = crate::ui_util::test_frame(&ctx, input(), |ui| a.frame(ui));
-                n = out.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Text(_))).count();
+                n = out
+                    .shapes
+                    .iter()
+                    .filter(|s| matches!(s.shape, egui::Shape::Text(_)))
+                    .count();
             }
             n
         };
-        for sub in [CollectionTab::Umas, CollectionTab::Cards, CollectionTab::Skills] {
+        for sub in [
+            CollectionTab::Umas,
+            CollectionTab::Cards,
+            CollectionTab::Skills,
+        ] {
             a.collection_tab = sub;
             let before = texts(&mut a);
             let set = |a: &mut App, q: &str| match sub {
@@ -417,7 +636,10 @@ mod tests {
             }
             let after = texts(&mut a);
             eprintln!("{sub:?}: {before} texts before, {after} after");
-            assert_eq!(before, after, "{sub:?} list didn't come back after clearing the search");
+            assert_eq!(
+                before, after,
+                "{sub:?} list didn't come back after clearing the search"
+            );
         }
     }
 
@@ -427,7 +649,14 @@ mod tests {
     #[test]
     fn old_plans_find_their_cm_after_live_data() {
         let mut a = app();
-        let fixture = |n: &str| std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(n)).unwrap();
+        let fixture = |n: &str| {
+            std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures")
+                    .join(n),
+            )
+            .unwrap()
+        };
         a.live.data = Some(live::LiveData {
             announcements: live::parse_news(&fixture("news_sample.json")).unwrap(),
             umalator_presets: live::parse_umalator_presets(&fixture("umalator_presets_sample.js")),
@@ -435,24 +664,46 @@ mod tests {
         });
         a.apply_live();
         a.planner.demo(&a.roster, &a.kb, 100601);
-        let old: tab_planner::Plan = serde_json::from_str(r#"{"title":"old","cm_date":"2026-10-25","umalator_course":10701,"conditions":"Firm"}"#).unwrap();
+        let old: tab_planner::Plan = serde_json::from_str(
+            r#"{"title":"old","cm_date":"2026-10-25","umalator_course":10701,"conditions":"Firm"}"#,
+        )
+        .unwrap();
         assert_eq!(old.cm_name, None, "plans saved before cm_name existed load");
         a.planner.plan.cm_date = old.cm_date;
         a.planner.plan.umalator_course = old.umalator_course;
         a.planner.plan.cm_name = None;
         let cm = a.plan_cm().cloned().expect("still linked");
-        assert_eq!((cm.name.as_str(), cm.date.as_str(), cm.announced), ("Capricorn Cup", "2026-10-31", true));
+        assert_eq!(
+            (cm.name.as_str(), cm.date.as_str(), cm.announced),
+            ("Capricorn Cup", "2026-10-31", true)
+        );
         assert!(a.plan_disabled(202231), "Night Races ◎");
         assert_eq!(a.can_activate_on_plan(202231), Some(false));
         let picks = a.recommend_skills(&[202231, 202232, 202233, 200512]);
-        assert!(picks.iter().all(|s| !cm.disabled_skills.contains(s)), "{picks:?}");
+        assert!(
+            picks.iter().all(|s| !cm.disabled_skills.contains(s)),
+            "{picks:?}"
+        );
         a.planner.plan.apply_cm(&a.kb, &cm);
         assert_eq!(a.planner.plan.cm_name.as_deref(), Some("Capricorn Cup"));
-        assert!(a.plan_markdown(None).contains("- Won't activate in this CM: Night Races ◎"));
+        assert!(
+            a.plan_markdown(None)
+                .contains("- Won't activate in this CM: Night Races ◎")
+        );
         // Home shows it as the next CM in the week before.
-        assert_eq!(a.kb.upcoming_cms("2026-10-20").first().map(|e| e.name.as_str()), Some("Capricorn Cup"));
+        assert_eq!(
+            a.kb.upcoming_cms("2026-10-20")
+                .first()
+                .map(|e| e.name.as_str()),
+            Some("Capricorn Cup")
+        );
         // And while it runs: Sagittarius started 2026-10-10 and ends 2026-10-16.
-        assert_eq!(a.kb.upcoming_cms("2026-10-13").first().map(|e| e.name.as_str()), Some("Sagittarius Cup"));
+        assert_eq!(
+            a.kb.upcoming_cms("2026-10-13")
+                .first()
+                .map(|e| e.name.as_str()),
+            Some("Sagittarius Cup")
+        );
     }
 
     /// The umalator.app link decodes back to both builds, the course and the plan's conditions.
@@ -461,15 +712,28 @@ mod tests {
         let mut a = app();
         a.planner.demo(&a.roster, &a.kb, 101601);
         // Mile Championship: Kyoto 1600m has inner and outer layouts.
-        a.planner.plan.course = a.kb.races.iter().find(|r| r.name == "Mile Championship").map(|r| r.id);
+        a.planner.plan.course =
+            a.kb.races
+                .iter()
+                .find(|r| r.name == "Mile Championship")
+                .map(|r| r.id);
         a.planner.plan.conditions = "Soft · Rainy".into();
         let (link, notes) = a.umalator_link().unwrap();
         let v = decode_link(&link);
         assert_eq!(v["uma1"]["outfitId"], "101601");
         assert_eq!(v["uma1"], v["uma2"]);
-        assert!([10804, 10805].contains(&v["courseId"].as_u64().unwrap()), "a Kyoto 1600m course");
-        assert!(notes.iter().any(|n| n.contains("layout")), "inner/outer is flagged: {notes:?}");
-        assert_eq!((v["ground"].as_u64(), v["weather"].as_u64()), (Some(3), Some(3)));
+        assert!(
+            [10804, 10805].contains(&v["courseId"].as_u64().unwrap()),
+            "a Kyoto 1600m course"
+        );
+        assert!(
+            notes.iter().any(|n| n.contains("layout")),
+            "inner/outer is flagged: {notes:?}"
+        );
+        assert_eq!(
+            (v["ground"].as_u64(), v["weather"].as_u64()),
+            (Some(3), Some(3))
+        );
         // An exact Umalator course id (as a CM preset sets) wins over the guess.
         a.planner.plan.umalator_course = Some(10805);
         let (link, notes) = a.umalator_link().unwrap();
@@ -484,35 +748,87 @@ mod tests {
         a.planner.demo(&a.roster, &a.kb, 101601);
         // Sagittarius Cup 2026-10-04: Nakayama Turf 2500m (inner), Good · Cloudy · Winter.
         let upcoming = a.kb.upcoming_cms("2026-10-01");
-        let e = upcoming.first().copied().cloned().expect("CM presets in umalator.json");
-        assert_eq!((e.name.as_str(), e.date.as_str(), e.course), ("Sagittarius Cup", "2026-10-04", 10506));
-        assert!(upcoming.windows(2).all(|w| w[0].date <= w[1].date), "soonest first");
-        assert!(upcoming.iter().all(|u| u.is_cm() && !u.course_name.is_empty() && !u.conditions.is_empty()));
+        let e = upcoming
+            .first()
+            .copied()
+            .cloned()
+            .expect("CM presets in umalator.json");
+        assert_eq!(
+            (e.name.as_str(), e.date.as_str(), e.course),
+            ("Sagittarius Cup", "2026-10-04", 10506)
+        );
+        assert!(
+            upcoming.windows(2).all(|w| w[0].date <= w[1].date),
+            "soonest first"
+        );
+        assert!(
+            upcoming
+                .iter()
+                .all(|u| u.is_cm() && !u.course_name.is_empty() && !u.conditions.is_empty())
+        );
 
         a.planner.plan.conditions = "Heavy · night race".into();
         a.planner.plan.distance = knowledge::Distance::Sprint;
         assert_eq!(a.planner.plan.apply_cm(&a.kb, &e), None);
         let p = &a.planner.plan;
-        assert_eq!(p.conditions, "Good · Cloudy · Winter · night race", "chip format, free text kept");
-        assert_eq!((p.distance, p.surface), (knowledge::Distance::Long, knowledge::Surface::Turf));
-        assert_eq!((p.cm_date.as_deref(), p.umalator_course), (Some("2026-10-04"), Some(10506)));
-        let race = a.kb.races.iter().find(|r| Some(r.id) == p.course).expect("a race on the CM course");
-        assert_eq!((race.track.as_str(), race.distance, race.surface.as_str()), ("Nakayama", 2500, "Turf"));
-        assert!(race.name.contains("Sagittarius Cup") && !race.name.contains("Finals"), "{}", race.name);
+        assert_eq!(
+            p.conditions, "Good · Cloudy · Winter · night race",
+            "chip format, free text kept"
+        );
+        assert_eq!(
+            (p.distance, p.surface),
+            (knowledge::Distance::Long, knowledge::Surface::Turf)
+        );
+        assert_eq!(
+            (p.cm_date.as_deref(), p.umalator_course),
+            (Some("2026-10-04"), Some(10506))
+        );
+        let race =
+            a.kb.races
+                .iter()
+                .find(|r| Some(r.id) == p.course)
+                .expect("a race on the CM course");
+        assert_eq!(
+            (race.track.as_str(), race.distance, race.surface.as_str()),
+            ("Nakayama", 2500, "Turf")
+        );
+        assert!(
+            race.name.contains("Sagittarius Cup") && !race.name.contains("Finals"),
+            "{}",
+            race.name
+        );
         // Picking it again doesn't toggle the conditions off.
         a.planner.plan.apply_cm(&a.kb, &e);
-        assert_eq!(a.planner.plan.conditions, "Good · Cloudy · Winter · night race");
+        assert_eq!(
+            a.planner.plan.conditions,
+            "Good · Cloudy · Winter · night race"
+        );
 
         let (link, notes) = a.umalator_link().unwrap();
         let v = decode_link(&link);
         assert_eq!(v["courseId"], 10506);
-        assert_eq!((v["ground"].as_u64(), v["weather"].as_u64(), v["season"].as_u64(), v["time"].as_u64()), (Some(2), Some(2), Some(4), Some(2)));
+        assert_eq!(
+            (
+                v["ground"].as_u64(),
+                v["weather"].as_u64(),
+                v["season"].as_u64(),
+                v["time"].as_u64()
+            ),
+            (Some(2), Some(2), Some(4), Some(2))
+        );
         assert!(!notes.iter().any(|n| n.contains("layout")), "{notes:?}");
-        assert!(a.plan_markdown(None).contains("- Champions Meeting: Sagittarius Cup (2026-10-04)"));
+        assert!(
+            a.plan_markdown(None)
+                .contains("- Champions Meeting: Sagittarius Cup (2026-10-04)")
+        );
 
         // Plans saved before these fields existed still load.
-        let old: tab_planner::Plan = serde_json::from_str(r#"{"title":"old","course":1023,"conditions":"Firm"}"#).unwrap();
-        assert_eq!((old.cm_date, old.umalator_course, old.course), (None, None, Some(1023)));
+        let old: tab_planner::Plan =
+            serde_json::from_str(r#"{"title":"old","course":1023,"conditions":"Firm"}"#).unwrap();
+        assert_eq!(
+            (old.cm_date, old.umalator_course, old.course),
+            (None, None, Some(1023))
+        );
     }
 }
 
@@ -526,6 +842,8 @@ pub(crate) enum Tab {
     Ask,
     /// The notes and data files: not in the top bar, opened from Settings (`App::open_notes`).
     Notes,
+    /// Game audio library: Files browser, Jukebox, and Live player.
+    Music,
 }
 
 /// The Career tab's sub-tabs, in the order a career goes: plan it, race it, log it.
@@ -540,67 +858,211 @@ impl CareerTab {
     /// Icon, label and what the page is for.
     pub(crate) fn info(self) -> (&'static str, &'static str, &'static str) {
         match self {
-            CareerTab::Plan => ("📋", "Plan", "Plan a career step by step: goal, trainee, deck of support cards, and skills to buy."),
-            CareerTab::Race => ("🏁", "Race sim", "Race two builds against each other many times to see which one wins, and by how much."),
-            CareerTab::Results => ("🏆", "Results", "Write down what really happened in careers and events, so plans can be checked against it."),
+            CareerTab::Plan => (
+                "📋",
+                "Plan",
+                "Plan a career step by step: goal, trainee, deck of support cards, and skills to buy.",
+            ),
+            CareerTab::Race => (
+                "🏁",
+                "Race sim",
+                "Race two builds against each other many times to see which one wins, and by how much.",
+            ),
+            CareerTab::Results => (
+                "🏆",
+                "Results",
+                "Write down what really happened in careers and events, so plans can be checked against it.",
+            ),
         }
     }
 }
 impl Tab {
+    /// Identifier string for settings serialization and persistence.
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Tab::Home => "home",
+            Tab::Collection => "collection",
+            Tab::Career => "career",
+            Tab::Ask => "ask",
+            Tab::Notes => "notes",
+            Tab::Music => "music",
+        }
+    }
+
+    /// Resolve a tab from its settings key.
+    pub(crate) fn from_key(k: &str) -> Option<Tab> {
+        match k {
+            "home" => Some(Tab::Home),
+            "collection" => Some(Tab::Collection),
+            "career" => Some(Tab::Career),
+            "ask" => Some(Tab::Ask),
+            "music" => Some(Tab::Music),
+            _ => None,
+        }
+    }
+
     /// Icon, label and what the page is for, as the top bar and Help show them.
     pub(crate) fn info(self) -> (&'static str, &'static str, &'static str) {
         match self {
-            Tab::Home => ("🏠", "Home", "Your stable at a glance, the next Champions Meeting, and shortcuts to common jobs."),
-            Tab::Collection => ("📚", "Collection", "Everything you own: umas and support cards, plus every skill in the game and where you can get it."),
+            Tab::Home => (
+                "🏠",
+                "Home",
+                "Your stable at a glance, the next Champions Meeting, and shortcuts to common jobs.",
+            ),
+            Tab::Collection => (
+                "📚",
+                "Collection",
+                "Everything you own: umas and support cards, plus every skill in the game and where you can get it.",
+            ),
             Tab::Career => (
                 "🏇",
                 "Career",
                 "Plan a career, race the build against others in the simulator, and log what really happened.",
             ),
-            Tab::Ask => ("💬", "Ask", "Ask questions about your account in plain English and get answers from your own data."),
-            Tab::Notes => ("📝", "Notes", "Read the notes, plans and insights saved in this folder."),
+            Tab::Ask => (
+                "💬",
+                "Ask",
+                "Ask questions about your account in plain English and get answers from your own data.",
+            ),
+            Tab::Notes => (
+                "📝",
+                "Notes",
+                "Read the notes, plans and insights saved in this folder.",
+            ),
+            Tab::Music => (
+                "🎵",
+                "Music",
+                "Game audio library: browse sound files, jukebox songs, and live music.",
+            ),
         }
     }
 }
 
 /// Game words the app uses, for the Help window. General terms only; numbers come from the data.
 pub(crate) const GLOSSARY: &[(&str, &str)] = &[
-    ("Uma, trainee", "A horse girl. You train one in each career; that uma is the trainee."),
-    ("Outfit", "A version of an uma, like [Reeling in the Big One]. Each outfit has its own unique skill and aptitudes."),
-    ("Stars ★", "An uma's star rank, 1 to 5. You raise it with shards, and it makes her stronger, including her unique skill."),
-    ("Potential (P1–P5)", "Unlocks an uma's own skills in steps. At P5 all of them are available to buy."),
-    ("Aptitude", "A letter grade, S down to G, for how well an uma runs on a surface (turf, dirt), a distance and a running style. A or better is what you want; lower grades slow her down."),
-    ("Running style", "Front Runner leads from the start. Pace Chaser runs just behind the leaders. Late Surger waits mid-pack and moves up late. End Closer stays at the back and sprints at the end."),
-    ("Stats", "Speed, Stamina, Power, Guts and Wit (wisdom). Training raises them during a career."),
-    ("Growth", "A trainee's bonus to training gains in some stats, like Wit +20%."),
-    ("Support card", "Up to six cards go with you into a career: five of yours and one borrowed. They boost training and teach skills."),
-    ("Card types", "Speed, Stamina, Power, Guts and Wit cards help train that stat. Pal and Group cards work differently."),
+    (
+        "Uma, trainee",
+        "A horse girl. You train one in each career; that uma is the trainee.",
+    ),
+    (
+        "Outfit",
+        "A version of an uma, like [Reeling in the Big One]. Each outfit has its own unique skill and aptitudes.",
+    ),
+    (
+        "Stars ★",
+        "An uma's star rank, 1 to 5. You raise it with shards, and it makes her stronger, including her unique skill.",
+    ),
+    (
+        "Potential (P1–P5)",
+        "Unlocks an uma's own skills in steps. At P5 all of them are available to buy.",
+    ),
+    (
+        "Aptitude",
+        "A letter grade, S down to G, for how well an uma runs on a surface (turf, dirt), a distance and a running style. A or better is what you want; lower grades slow her down.",
+    ),
+    (
+        "Running style",
+        "Front Runner leads from the start. Pace Chaser runs just behind the leaders. Late Surger waits mid-pack and moves up late. End Closer stays at the back and sprints at the end.",
+    ),
+    (
+        "Stats",
+        "Speed, Stamina, Power, Guts and Wit (wisdom). Training raises them during a career.",
+    ),
+    (
+        "Growth",
+        "A trainee's bonus to training gains in some stats, like Wit +20%.",
+    ),
+    (
+        "Support card",
+        "Up to six cards go with you into a career: five of yours and one borrowed. They boost training and teach skills.",
+    ),
+    (
+        "Card types",
+        "Speed, Stamina, Power, Guts and Wit cards help train that stat. Pal and Group cards work differently.",
+    ),
     ("SSR, SR, R", "Card rarity, best first."),
-    ("LB, limit break", "Merging copies of a card raises its level cap. LB0 is one copy; LB4, also called MLB, is fully limit broken."),
+    (
+        "LB, limit break",
+        "Merging copies of a card raises its level cap. LB0 is one copy; LB4, also called MLB, is fully limit broken.",
+    ),
     ("MLB", "Max limit break (LB4): the card at full strength."),
-    ("Card level", "Higher levels make a card's effects stronger, up to the cap its LB allows."),
-    ("Friend card", "A card borrowed from another player for one career. It can be any card, at their LB."),
-    ("Hint", "A card or event offering a skill at a discount. More hints for the same skill mean a bigger discount."),
-    ("SP, skill points", "Earned during a career and spent on skills at the end."),
-    ("White, gold skills", "Ordinary and stronger skills. A gold skill usually needs its white version first."),
-    ("Unique skill", "Each outfit's own skill. As a parent, an uma can pass a weaker copy on."),
-    ("Evolved skill", "A stronger version of a skill some umas can unlock during a career by meeting its conditions."),
-    ("Sparks", "What a parent passes to the next trainee: blue for stats, pink for aptitudes, green for her unique skill, white for skills and races."),
-    ("Parent", "A saved, finished uma used as a legacy for a new career. Two parents give their sparks."),
-    ("Scenario", "The career's training mode, like URA Finale or Unity Cup. Each one trains differently."),
-    ("Champions Meeting (CM)", "A monthly player-versus-player event on one course with set conditions."),
-    ("Team Trials", "Races of your team of umas against other players' teams."),
+    (
+        "Card level",
+        "Higher levels make a card's effects stronger, up to the cap its LB allows.",
+    ),
+    (
+        "Friend card",
+        "A card borrowed from another player for one career. It can be any card, at their LB.",
+    ),
+    (
+        "Hint",
+        "A card or event offering a skill at a discount. More hints for the same skill mean a bigger discount.",
+    ),
+    (
+        "SP, skill points",
+        "Earned during a career and spent on skills at the end.",
+    ),
+    (
+        "White, gold skills",
+        "Ordinary and stronger skills. A gold skill usually needs its white version first.",
+    ),
+    (
+        "Unique skill",
+        "Each outfit's own skill. As a parent, an uma can pass a weaker copy on.",
+    ),
+    (
+        "Evolved skill",
+        "A stronger version of a skill some umas can unlock during a career by meeting its conditions.",
+    ),
+    (
+        "Sparks",
+        "What a parent passes to the next trainee: blue for stats, pink for aptitudes, green for her unique skill, white for skills and races.",
+    ),
+    (
+        "Parent",
+        "A saved, finished uma used as a legacy for a new career. Two parents give their sparks.",
+    ),
+    (
+        "Scenario",
+        "The career's training mode, like URA Finale or Unity Cup. Each one trains differently.",
+    ),
+    (
+        "Champions Meeting (CM)",
+        "A monthly player-versus-player event on one course with set conditions.",
+    ),
+    (
+        "Team Trials",
+        "Races of your team of umas against other players' teams.",
+    ),
     ("League of Heroes", "A ranked player-versus-player event."),
-    ("Meta", "What most strong players currently run. The app's ★ marks come from a community sheet of PvP decks, umas and skills per Champions Meeting."),
-    ("Lengths (L)", "How far ahead one uma finishes. One length is 2.5 m."),
-    ("Full spurt", "Running the last stretch at top speed. It needs enough HP, which comes from Stamina."),
-    ("Rushed", "When an uma gets over-eager mid-race and burns HP. Wit lowers the chance."),
-    ("Conditions", "The ground (Firm to Heavy), weather and season of a race. Some skills only work in some conditions."),
+    (
+        "Meta",
+        "What most strong players currently run. The app's ★ marks come from a community sheet of PvP decks, umas and skills per Champions Meeting.",
+    ),
+    (
+        "Lengths (L)",
+        "How far ahead one uma finishes. One length is 2.5 m.",
+    ),
+    (
+        "Full spurt",
+        "Running the last stretch at top speed. It needs enough HP, which comes from Stamina.",
+    ),
+    (
+        "Rushed",
+        "When an uma gets over-eager mid-race and burns HP. Wit lowers the chance.",
+    ),
+    (
+        "Conditions",
+        "The ground (Firm to Heavy), weather and season of a race. Some skills only work in some conditions.",
+    ),
 ];
 
 /// Keyboard shortcuts, as Help lists them (`App::shortcuts` handles them).
 pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
-    ("Ctrl+1 … Ctrl+4", "Switch tabs: Home, Collection, Career, Ask"),
+    (
+        "Ctrl+1 … Ctrl+4",
+        "Switch tabs: Home, Collection, Career, Ask",
+    ),
     ("Ctrl+,", "Open Settings"),
     ("Ctrl+F", "Jump to the page's search box"),
     ("Ctrl+S", "Save the plan (on Career → Plan)"),
@@ -608,9 +1070,6 @@ pub(crate) const SHORTCUTS: &[(&str, &str)] = &[
     ("Esc", "Close Help, a dialog, or the details panel"),
     ("?", "Open this Help"),
 ];
-
-/// The top bar's tabs, left to right. Notes isn't one: Settings → Data and updates opens it.
-const TABS: [Tab; 4] = [Tab::Home, Tab::Collection, Tab::Career, Tab::Ask];
 
 /// The Collection tab's sub-tabs.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -660,7 +1119,13 @@ pub(crate) struct App {
     /// Compact spacing; `density` in settings.json.
     pub compact: bool,
     /// Toasts asked for this frame, shown by `App::frame` (code without a `Context` can ask too).
-    pub pending_toasts: std::cell::RefCell<Vec<(String, ui_util::ToastKind, Option<(String, ui_util::ToastAction)>)>>,
+    pub pending_toasts: std::cell::RefCell<
+        Vec<(
+            String,
+            ui_util::ToastKind,
+            Option<(String, ui_util::ToastAction)>,
+        )>,
+    >,
     /// Ctrl+F was pressed: the page's search box takes focus when it's drawn.
     pub focus_search: Cell<bool>,
     pub umas: tab_umas::UmasState,
@@ -689,6 +1154,10 @@ pub(crate) struct App {
     pub live: live::LiveState,
     /// Home's derived data and daily picks.
     pub home: home::HomeState,
+    /// Game audio subsystem: local music player, live music, and jukebox.
+    pub gameaudio: gameaudio::GameAudioState,
+    /// Music tab state.
+    pub music: tab_music::MusicTabState,
     /// UMALORD_RAIL: start with the Collection filters folded, for screenshots.
     pub debug_rail: bool,
     /// UMALORD_EXTRA: after a Compare, also run "what each skill is worth" and "where training points matter".
@@ -710,21 +1179,45 @@ pub(crate) struct App {
     debug_run: bool,
     /// `UMALORD_HOVER=<id>`: draw that setup tile as if the mouse were on it, for screenshots.
     pub debug_hover: Option<u32>,
+    /// Volume requested above 200% awaiting user confirmation.
+    pub pending_high_volume: Option<f32>,
+    /// Whether high volume confirmation modal is shown.
+    pub show_high_volume_modal: bool,
+    /// Whether the one-time Music beta notice modal is shown.
+    pub show_music_beta_modal: bool,
+    /// Tabs hidden from the top bar navigation (persisted in settings.json).
+    pub hidden_tabs: HashSet<String>,
+    /// Currently pinned favorite tab (persisted in settings.json).
+    pub pinned_tab: Option<Tab>,
+    /// Whether to open the pinned tab on startup instead of Home (persisted in settings.json).
+    pub open_pinned_tab_on_start: bool,
 }
 
 /// The frame every page's central panel uses: see-through, with the same margins everywhere.
 pub(crate) fn page_frame() -> egui::Frame {
-    egui::Frame::new().inner_margin(Margin { left: 18, right: 18, top: 14, bottom: 8 })
+    egui::Frame::new().inner_margin(Margin {
+        left: 18,
+        right: 18,
+        top: 14,
+        bottom: 8,
+    })
 }
 
 /// The frame of a page's side panel (filters, lists): see-through, a hairline on its inner edge
 /// comes from the panel itself.
 pub(crate) fn side_frame() -> egui::Frame {
-    egui::Frame::new().inner_margin(Margin { left: 14, right: 12, top: 14, bottom: 8 })
+    egui::Frame::new().inner_margin(Margin {
+        left: 14,
+        right: 12,
+        top: 14,
+        bottom: 8,
+    })
 }
 
 fn load_sim(root: Option<&Path>) -> (Option<std::sync::Arc<sim::data::SimData>>, Option<String>) {
-    let Some(root) = root else { return (None, Some("umaLord folder not found".into())) };
+    let Some(root) = root else {
+        return (None, Some("UmaYu folder not found".into()));
+    };
     match sim::data::SimData::load(root) {
         Ok(d) => (Some(std::sync::Arc::new(d)), None),
         Err(e) => (None, Some(format!("Simulator data missing: {e}"))),
@@ -733,7 +1226,9 @@ fn load_sim(root: Option<&Path>) -> (Option<std::sync::Arc<sim::data::SimData>>,
 
 /// IDs of the `.webp` files in `<root>/app/assets/<sub>/`.
 fn scan_art(root: Option<&Path>, sub: &str) -> HashSet<u32> {
-    let Some(root) = root else { return HashSet::new() };
+    let Some(root) = root else {
+        return HashSet::new();
+    };
     std::fs::read_dir(root.join("app").join("assets").join(sub))
         .into_iter()
         .flatten()
@@ -752,17 +1247,46 @@ impl App {
         let env = |key: &str| std::env::var(key).ok();
         let (sim_data, sim_error) = load_sim(root.as_deref());
         let saved = |key: &str| settings::get(key).and_then(|v| v.as_str().map(String::from));
-        let mascot = env("UMALORD_MASCOT").map(|v| v == "1").or_else(|| settings::get("mascot").and_then(|v| v.as_bool())).unwrap_or(true);
-        let mode = theme::Mode::from_key(&env("UMALORD_THEME").or_else(|| saved("theme")).unwrap_or_default());
+        let mascot = env("UMALORD_MASCOT")
+            .map(|v| v == "1")
+            .or_else(|| settings::get("mascot").and_then(|v| v.as_bool()))
+            .unwrap_or(true);
+        let mode = theme::Mode::from_key(
+            &env("UMALORD_THEME")
+                .or_else(|| saved("theme"))
+                .unwrap_or_default(),
+        );
         // Before `chibi` existed, `mascot: false` hid her too; keep her hidden for those users.
-        let chibi_default = if settings::get("mascot").and_then(|v| v.as_bool()) == Some(false) { theme::Chibi::Off } else { theme::Chibi::Home };
-        theme::use_chibi(env("UMALORD_CHIBI").or_else(|| saved("chibi")).and_then(|k| theme::Chibi::from_key(&k)).unwrap_or(chibi_default));
+        let chibi_default = if settings::get("mascot").and_then(|v| v.as_bool()) == Some(false) {
+            theme::Chibi::Off
+        } else {
+            theme::Chibi::Home
+        };
+        theme::use_chibi(
+            env("UMALORD_CHIBI")
+                .or_else(|| saved("chibi"))
+                .and_then(|k| theme::Chibi::from_key(&k))
+                .unwrap_or(chibi_default),
+        );
         let ui_scale = env("UMALORD_SCALE")
             .and_then(|s| s.parse::<f32>().ok())
-            .or_else(|| settings::get("ui_scale").and_then(|v| v.as_f64()).map(|v| v as f32))
+            .or_else(|| {
+                settings::get("ui_scale")
+                    .and_then(|v| v.as_f64())
+                    .map(|v| v as f32)
+            })
             .unwrap_or(1.0)
             .clamp(*theme::UI_SCALE.start(), *theme::UI_SCALE.end());
-        let compact = env("UMALORD_DENSITY").or_else(|| saved("density")).as_deref() == Some("compact");
+        let compact = env("UMALORD_DENSITY")
+            .or_else(|| saved("density"))
+            .as_deref()
+            == Some("compact");
+        lang::set(
+            env("UMALORD_LANG")
+                .or_else(|| saved("lang"))
+                .and_then(|k| lang::Lang::from_key(&k))
+                .unwrap_or_default(),
+        );
         let mut app = Self {
             sim: Default::default(),
             sim_data,
@@ -798,11 +1322,17 @@ impl App {
             md_cache: Default::default(),
             // System resolves once the window knows Windows' theme (`App::frame`).
             dark: mode != theme::Mode::Light,
-            look: theme::Look::from_key(&env("UMALORD_LOOK").or_else(|| settings::get("look").and_then(|v| v.as_str().map(String::from))).unwrap_or_default()),
+            look: theme::Look::from_key(
+                &env("UMALORD_LOOK")
+                    .or_else(|| settings::get("look").and_then(|v| v.as_str().map(String::from)))
+                    .unwrap_or_default(),
+            ),
             onboarding: Default::default(),
             settings: Default::default(),
             live: Default::default(),
             home: Default::default(),
+            gameaudio: gameaudio::GameAudioState::new(),
+            music: Default::default(),
             debug_rail: false,
             debug_extra: false,
             debug_replay: None,
@@ -815,17 +1345,64 @@ impl App {
             debug_scroll: env("UMALORD_SCROLL").and_then(|s| s.parse().ok()),
             debug_run: env("UMALORD_RUN").is_some_and(|v| v == "1"),
             debug_hover: env("UMALORD_HOVER").and_then(|s| s.parse().ok()),
+            pending_high_volume: None,
+            show_high_volume_modal: false,
+            show_music_beta_modal: !settings::get("music_beta_notice_seen")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            hidden_tabs: settings::get("hidden_tabs")
+                .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+                .map(|vec| {
+                    vec.into_iter()
+                        .filter(|k| matches!(k.as_str(), "collection" | "career" | "ask" | "music"))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            pinned_tab: settings::get("pinned_tab")
+                .and_then(|v| v.as_str().and_then(Tab::from_key)),
+            open_pinned_tab_on_start: settings::get("open_pinned_tab_on_start")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         };
+        app.music.live_vocal_volume = app.gameaudio.live_vocal_default_volume;
         // The live CM schedule: the cache now, a refresh on the first frame if it's stale. Tests
         // stay on the bundled data, so they don't depend on the network or this PC's cache.
-        let live_mode = if cfg!(test) { Some("off".to_string()) } else { env("UMALORD_LIVE") };
+        let live_mode = if cfg!(test) {
+            Some("off".to_string())
+        } else {
+            env("UMALORD_LIVE")
+        };
         app.live_start(live_mode.as_deref());
+        let startup_tab = if app.open_pinned_tab_on_start {
+            match app.pinned_tab {
+                Some(Tab::Collection) if !app.is_tab_hidden(Tab::Collection) => Tab::Collection,
+                Some(Tab::Career) if !app.is_tab_hidden(Tab::Career) => Tab::Career,
+                Some(Tab::Ask) if !app.is_tab_hidden(Tab::Ask) => Tab::Ask,
+                Some(Tab::Music) if app.gameaudio.enabled && !app.is_tab_hidden(Tab::Music) => {
+                    Tab::Music
+                }
+                Some(Tab::Home) => Tab::Home,
+                _ => Tab::Home,
+            }
+        } else {
+            Tab::Home
+        };
         app.tab = match env("UMALORD_TAB").as_deref() {
             Some("umas" | "cards" | "skills" | "collection") => Tab::Collection,
             Some("planner" | "sim" | "results" | "career") => Tab::Career,
             Some("notes") => Tab::Notes,
             Some("ask") => Tab::Ask,
-            _ => Tab::Home,
+            Some("music" | "audio" | "jukebox" | "live") if app.gameaudio.enabled => Tab::Music,
+            _ => startup_tab,
+        };
+        app.music.sub_tab = match env("UMALORD_TAB").as_deref() {
+            Some("jukebox") => tab_music::MusicSubTab::Jukebox,
+            Some("live") => tab_music::MusicSubTab::Live,
+            _ => match env("UMALORD_MUSIC_SUBTAB").as_deref() {
+                Some("jukebox" | "juke") => tab_music::MusicSubTab::Jukebox,
+                Some("live") => tab_music::MusicSubTab::Live,
+                _ => tab_music::MusicSubTab::Files,
+            },
         };
         app.collection_tab = match env("UMALORD_TAB").as_deref() {
             Some("cards") => CollectionTab::Cards,
@@ -840,7 +1417,9 @@ impl App {
         app.help_open = env("UMALORD_HELP").is_some_and(|v| v == "1");
         // UMALORD_SETTINGS=1 opens Settings; UMALORD_SETTINGS_PAGE=<section> picks the section.
         if env("UMALORD_SETTINGS").is_some_and(|v| v == "1") {
-            let page = env("UMALORD_SETTINGS_PAGE").and_then(|k| settings_page::SettingsPage::from_key(&k)).unwrap_or_default();
+            let page = env("UMALORD_SETTINGS_PAGE")
+                .and_then(|k| settings_page::SettingsPage::from_key(&k))
+                .unwrap_or_default();
             app.open_settings(page);
         }
         theme::use_look(app.look);
@@ -870,7 +1449,8 @@ impl App {
             match profile::read(Path::new(&path)) {
                 Ok(p) => {
                     let get = |k: &str| p.files.get(k).cloned().unwrap_or_default();
-                    app.roster = Roster::parse(&get("account/support_cards.md"), &get("account/umas.md"));
+                    app.roster =
+                        Roster::parse(&get("account/support_cards.md"), &get("account/umas.md"));
                     app.onboarding.open = step.is_some();
                 }
                 Err(e) => eprintln!("{e}"),
@@ -896,7 +1476,12 @@ impl App {
         }
         // UMALORD_COURSE=cm: the Skills course filter on the next Champions Meeting.
         if env("UMALORD_COURSE").as_deref() == Some("cm")
-            && let Some(e) = app.kb.upcoming_cms(&ui_util::today()).first().copied().cloned()
+            && let Some(e) = app
+                .kb
+                .upcoming_cms(&ui_util::today())
+                .first()
+                .copied()
+                .cloned()
         {
             app.skills.course = Some(tab_skills::CourseCheck {
                 course: e.course,
@@ -926,11 +1511,33 @@ impl App {
         }
         if let Some(id) = env("UMALORD_SELECT").and_then(|s| s.parse::<u32>().ok()) {
             match (app.tab, app.career_tab) {
-                (Tab::Collection, _) if app.collection_tab == CollectionTab::Skills => app.skills.selected = Some(id),
+                (Tab::Collection, _) if app.collection_tab == CollectionTab::Skills => {
+                    app.skills.selected = Some(id)
+                }
+                (Tab::Music, _) => {
+                    if app.music.sub_tab == tab_music::MusicSubTab::Live {
+                        let member_count = app
+                            .gameaudio
+                            .master
+                            .live_songs
+                            .iter()
+                            .find(|s| s.music_id == id as i32)
+                            .map(|s| s.live_member_number as usize)
+                            .unwrap_or(3);
+                        app.select_live_song(id as i32, member_count);
+                    } else {
+                        app.music.juke_selected_id = Some(id as i32);
+                    }
+                }
                 (Tab::Career, CareerTab::Plan) => {
                     app.planner.demo(&app.roster, &app.kb, id);
                     if app.debug_run
-                        && let Some(cm) = app.kb.upcoming_cms(&ui_util::today()).first().copied().cloned()
+                        && let Some(cm) = app
+                            .kb
+                            .upcoming_cms(&ui_util::today())
+                            .first()
+                            .copied()
+                            .cloned()
                     {
                         app.planner.plan.apply_cm(&app.kb, &cm);
                     }
@@ -942,7 +1549,13 @@ impl App {
                 (Tab::Career, CareerTab::Race) => {
                     // The demo plan for this trainee, with its upcoming CM and auto-picked skills.
                     app.planner.demo(&app.roster, &app.kb, id);
-                    if let Some(cm) = app.kb.upcoming_cms(&ui_util::today()).first().copied().cloned() {
+                    if let Some(cm) = app
+                        .kb
+                        .upcoming_cms(&ui_util::today())
+                        .first()
+                        .copied()
+                        .cloned()
+                    {
                         app.planner.plan.apply_cm(&app.kb, &cm);
                     }
                     app.recommend_deck(true);
@@ -972,17 +1585,25 @@ impl App {
             p.shop.on = true;
             p.shop.stats = p.target;
             p.shop.sp = 1800;
-            p.shop.offered = offered.into_iter().enumerate().map(|(i, id)| (id, (i % 4) as u8)).collect();
+            p.shop.offered = offered
+                .into_iter()
+                .enumerate()
+                .map(|(i, id)| (id, (i % 4) as u8))
+                .collect();
         }
         app
     }
 
     /// The app on this folder's game data, with the test roster (`app/tests/fixtures/`) in place
-    /// of the account files, which may be empty.
+    /// of the account files, which may be empty. The UI is in English, whatever this PC chose.
     #[cfg(test)]
     pub(crate) fn for_tests() -> Self {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
         let mut app = App::new(Some(root));
+        lang::set(lang::Lang::En);
         app.roster = Roster::sample();
         app.onboarding.open = false;
         app
@@ -1002,16 +1623,49 @@ impl App {
         self.home_dirty();
         self.planner.rank_cache.borrow_mut().clear();
         self.notes.loaded = None;
+        self.hidden_tabs = settings::get("hidden_tabs")
+            .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
+            .map(|vec| {
+                vec.into_iter()
+                    .filter(|k| matches!(k.as_str(), "collection" | "career" | "ask" | "music"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.pinned_tab =
+            settings::get("pinned_tab").and_then(|v| v.as_str().and_then(Tab::from_key));
+        self.open_pinned_tab_on_start = settings::get("open_pinned_tab_on_start")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let default_vocal_vol = settings::get("live_vocal_default_volume")
+            .and_then(|v| v.as_f64().map(|f| f as f32))
+            .filter(|v| v.is_finite())
+            .unwrap_or(1.0f32)
+            .clamp(0.0, 1.0);
+        self.gameaudio.live_vocal_default_volume = default_vocal_vol;
+        self.music.live_vocal_volume = default_vocal_vol;
         self.write_digest();
     }
 
     pub fn art_uri(&self, sub: &str, id: u32) -> Option<String> {
-        let set = if sub == "cards" { &self.card_art } else { &self.uma_art };
+        let set = if sub == "cards" {
+            &self.card_art
+        } else {
+            &self.uma_art
+        };
         if !set.contains(&id) {
             return None;
         }
-        let path = self.root.as_ref()?.join("app").join("assets").join(sub).join(format!("{id}.webp"));
-        Some(format!("file:///{}", path.to_string_lossy().replace('\\', "/")))
+        let path = self
+            .root
+            .as_ref()?
+            .join("app")
+            .join("assets")
+            .join(sub)
+            .join(format!("{id}.webp"));
+        Some(format!(
+            "file:///{}",
+            path.to_string_lossy().replace('\\', "/")
+        ))
     }
 
     pub fn owned_card(&self, id: u32) -> Option<&SupportCard> {
@@ -1026,15 +1680,25 @@ impl App {
     /// potential level unlocked).
     pub fn source_available(&self, src: SkillSource) -> bool {
         match src {
-            SkillSource::Potential(u, level) => self.owned_uma(u).is_some_and(|o| o.potential >= level),
-            s => s.uma().is_some_and(|u| self.owned_uma(u).is_some()) || s.card().is_some_and(|c| self.owned_card(c).is_some()),
+            SkillSource::Potential(u, level) => {
+                self.owned_uma(u).is_some_and(|o| o.potential >= level)
+            }
+            s => {
+                s.uma().is_some_and(|u| self.owned_uma(u).is_some())
+                    || s.card().is_some_and(|c| self.owned_card(c).is_some())
+            }
         }
     }
 
     pub fn skill_available(&self, id: u32) -> bool {
         let mut cache = self.available_skills.borrow_mut();
         let set = cache.get_or_insert_with(|| {
-            self.kb.sources.iter().filter(|(_, srcs)| srcs.iter().any(|s| self.source_available(*s))).map(|(id, _)| *id).collect()
+            self.kb
+                .sources
+                .iter()
+                .filter(|(_, srcs)| srcs.iter().any(|s| self.source_available(*s)))
+                .map(|(id, _)| *id)
+                .collect()
         });
         set.contains(&id)
     }
@@ -1055,13 +1719,26 @@ impl App {
             return;
         };
         let color = tier_color(ui, s.tier());
-        let color = if dim { color.gamma_multiply(0.45) } else { color };
+        let color = if dim {
+            color.gamma_multiply(0.45)
+        } else {
+            color
+        };
         let button = egui::Button::new(RichText::new(&s.name).size(13.0).color(color))
             .fill(color.gamma_multiply(0.10))
             .stroke(Stroke::new(1.0, color.gamma_multiply(0.45)))
             .corner_radius(CornerRadius::same(12))
             .small();
-        let hover = format!("{} · {} SP\n{}", s.tier(), s.sp, if s.summary.is_empty() { &s.desc } else { &s.summary });
+        let hover = format!(
+            "{} · {} SP\n{}",
+            s.tier(),
+            s.sp,
+            if s.summary.is_empty() {
+                &s.desc
+            } else {
+                &s.summary
+            }
+        );
         if ui.add(button).on_hover_text(hover).clicked() {
             self.jump.set(Some(Jump::Skill(id)));
         }
@@ -1096,6 +1773,76 @@ impl App {
         }
     }
 
+    /// Whether a tab is currently configured to be hidden from the top bar. Home can never be hidden.
+    pub(crate) fn is_tab_hidden(&self, tab: Tab) -> bool {
+        match tab {
+            Tab::Home => false,
+            Tab::Collection => self.hidden_tabs.contains("collection"),
+            Tab::Career => self.hidden_tabs.contains("career"),
+            Tab::Ask => self.hidden_tabs.contains("ask"),
+            Tab::Music => self.hidden_tabs.contains("music"),
+            Tab::Notes => true,
+        }
+    }
+
+    /// Hide or show a tab on the top bar and save the choice to settings.json.
+    pub(crate) fn set_tab_hidden(&mut self, key: &str, hidden: bool) {
+        if !matches!(key, "collection" | "career" | "ask" | "music") {
+            return;
+        }
+        if hidden {
+            self.hidden_tabs.insert(key.to_string());
+        } else {
+            self.hidden_tabs.remove(key);
+        }
+        let mut list: Vec<String> = self.hidden_tabs.iter().cloned().collect();
+        list.sort();
+        settings::set("hidden_tabs", serde_json::json!(list));
+    }
+
+    /// Pin or unpin a tab, saving to settings.json.
+    pub(crate) fn set_pinned_tab(&mut self, tab: Option<Tab>) {
+        self.pinned_tab = tab;
+        if let Some(t) = tab {
+            settings::set("pinned_tab", serde_json::json!(t.key()));
+        } else {
+            settings::set("pinned_tab", serde_json::Value::Null);
+        }
+    }
+
+    /// Toggle or set whether the pinned tab opens on startup, saving to settings.json.
+    pub(crate) fn set_open_pinned_tab_on_start(&mut self, open: bool) {
+        self.open_pinned_tab_on_start = open;
+        settings::set("open_pinned_tab_on_start", serde_json::json!(open));
+    }
+
+    /// Sets default vocal volume for Music Live and persists to settings.
+    pub(crate) fn set_live_vocal_default_volume(&mut self, volume: f32) {
+        self.gameaudio.set_live_vocal_default_volume(volume);
+        self.music.live_vocal_volume = self.gameaudio.live_vocal_default_volume;
+        if self.gameaudio.current_title().is_some() {
+            self.sync_live_mixer_controls();
+        }
+    }
+
+    /// The list of tabs to display in the top navigation bar, respecting hidden settings.
+    pub(crate) fn visible_tabs(&self) -> Vec<Tab> {
+        let mut tabs = vec![Tab::Home];
+        if !self.is_tab_hidden(Tab::Collection) {
+            tabs.push(Tab::Collection);
+        }
+        if !self.is_tab_hidden(Tab::Career) {
+            tabs.push(Tab::Career);
+        }
+        if !self.is_tab_hidden(Tab::Ask) {
+            tabs.push(Tab::Ask);
+        }
+        if self.gameaudio.enabled && !self.is_tab_hidden(Tab::Music) {
+            tabs.push(Tab::Music);
+        }
+        tabs
+    }
+
     // -----------------------------------------------------------------------
     // Chrome
 
@@ -1108,31 +1855,66 @@ impl App {
                 .uv(egui::Rect::from_min_max(egui::pos2(0.22, 0.08), egui::pos2(0.78, 0.56)))
                 .fit_to_exact_size(vec2(34.0, 34.0));
             ui.add(logo);
-            ui.label(semibold("umaLord", 21.0));
+            ui.label(semibold("UmaYu", 21.0));
             ui.add_space(14.0);
             ui.spacing_mut().item_spacing.x = 4.0;
-            for tab in TABS {
+            let mut pin_action: Option<Option<Tab>> = None;
+            for tab in self.visible_tabs() {
                 let (icon, label, what) = tab.info();
-                let text = RichText::new(format!("{icon} {label}")).size(14.5);
+                let is_pinned = self.pinned_tab == Some(tab);
+                let label_text = if tab == Tab::Music {
+                    if is_pinned {
+                        format!("{icon} {} {} 📌", t!(label), t!("(Beta)"))
+                    } else {
+                        format!("{icon} {} {}", t!(label), t!("(Beta)"))
+                    }
+                } else if is_pinned {
+                    format!("{icon} {} 📌", t!(label))
+                } else {
+                    format!("{icon} {}", t!(label))
+                };
+                let text = RichText::new(label_text).size(14.5);
                 let on = self.tab == tab && !self.onboarding.open;
-                if ui.add(egui::Button::selectable(on, text).min_size(vec2(0.0, 30.0))).on_hover_text(what).clicked() {
+                let hover_text = if is_pinned {
+                    format!("{} • {}", t!(what), t!("Pinned favorite (Right-click to unpin)"))
+                } else {
+                    format!("{} • {}", t!(what), t!("Right-click to pin"))
+                };
+                let resp = ui.add(egui::Button::selectable(on, text).min_size(vec2(0.0, 30.0))).on_hover_text(hover_text);
+                if resp.clicked() {
                     self.tab = tab;
                     self.close_setup();
                 }
+                resp.context_menu(|ui| {
+                    if is_pinned {
+                        ui.label(semibold(t!("📌 Pinned favorite tab"), 13.0));
+                        ui.add_space(2.0);
+                        if ui.button(t!("Unpin tab")).clicked() {
+                            pin_action = Some(None);
+                            ui.close();
+                        }
+                    } else if ui.button(t!("📌 Pin as favorite")).clicked() {
+                        pin_action = Some(Some(tab));
+                        ui.close();
+                    }
+                });
+            }
+            if let Some(new_pin) = pin_action {
+                self.set_pinned_tab(new_pin);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let cog = egui::Button::new(RichText::new("⚙").size(17.0).color(p.text)).min_size(vec2(32.0, 30.0));
-                if ui.add(cog).on_hover_text("Settings (Ctrl+,): your profile, look and theme, game data, the AI assistant").clicked() {
+                if ui.add(cog).on_hover_text(t!("Settings (Ctrl+,): your profile, language, look and theme, game data, the AI assistant")).clicked() {
                     self.open_settings(self.settings.page);
                 }
                 let help = egui::Button::new(RichText::new("?").size(16.0).color(p.text)).min_size(vec2(32.0, 30.0));
-                if ui.add(help).on_hover_text("Help (?): what each tab does, how to plan a career, and the game's words").clicked() {
+                if ui.add(help).on_hover_text(t!("Help (?): what each tab does, how to plan a career, and the game's words")).clicked() {
                     self.help_open = true;
                 }
-                if ui.add(egui::Button::new("🔄").min_size(vec2(32.0, 30.0))).on_hover_text("Reload (F5): re-read your roster, game data and plans from disk").clicked() {
+                if ui.add(egui::Button::new("🔄").min_size(vec2(32.0, 30.0))).on_hover_text(t!("Reload (F5): re-read your roster, game data and plans from disk")).clicked() {
                     self.reload();
-                    self.toast("Reloaded your roster, game data and plans.", ui_util::ToastKind::Success);
+                    self.toast(t!("Reloaded your roster, game data and plans."), ui_util::ToastKind::Success);
                 }
             });
         });
@@ -1157,17 +1939,34 @@ impl App {
 
     /// Show a short message at the bottom of the window (from code without a `Context`).
     pub fn toast(&self, text: impl Into<String>, kind: ui_util::ToastKind) {
-        self.pending_toasts.borrow_mut().push((text.into(), kind, None));
+        self.pending_toasts
+            .borrow_mut()
+            .push((text.into(), kind, None));
     }
 
     /// A toast with a button, e.g. "Show" for a saved file.
-    pub fn toast_action(&self, text: impl Into<String>, kind: ui_util::ToastKind, label: &str, action: ui_util::ToastAction) {
-        self.pending_toasts.borrow_mut().push((text.into(), kind, Some((label.into(), action))));
+    pub fn toast_action(
+        &self,
+        text: impl Into<String>,
+        kind: ui_util::ToastKind,
+        label: &str,
+        action: ui_util::ToastAction,
+    ) {
+        self.pending_toasts
+            .borrow_mut()
+            .push((text.into(), kind, Some((label.into(), action))));
     }
 
     /// A message with a flag for "this is a warning" (the old status-line pair), as a toast.
     pub fn toast_flag(&self, (text, warn): (String, bool)) {
-        self.toast(text, if warn { ui_util::ToastKind::Warn } else { ui_util::ToastKind::Success });
+        self.toast(
+            text,
+            if warn {
+                ui_util::ToastKind::Warn
+            } else {
+                ui_util::ToastKind::Success
+            },
+        );
     }
 
     /// A success or an error, as a toast.
@@ -1192,10 +1991,15 @@ impl App {
                 let result = if path.is_dir() {
                     std::process::Command::new("explorer").arg(&path).spawn()
                 } else {
-                    std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn()
+                    std::process::Command::new("explorer")
+                        .arg(format!("/select,{}", path.display()))
+                        .spawn()
                 };
                 if let Err(e) = result {
-                    self.toast(format!("Couldn't open {}: {e}", path.display()), ui_util::ToastKind::Error);
+                    self.toast(
+                        tf!("Couldn't open {}: {}", path.display(), e),
+                        ui_util::ToastKind::Error,
+                    );
                 }
             }
             Some(ui_util::ToastAction::Undo) => self.undo_setup(),
@@ -1213,32 +2017,56 @@ impl App {
     fn shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Key, KeyboardShortcut, Modifiers};
         let typing = ctx.egui_wants_keyboard_input();
-        for (i, tab) in TABS.iter().enumerate() {
+        let mut tabs = vec![Tab::Home, Tab::Collection, Tab::Career, Tab::Ask];
+        if self.gameaudio.enabled {
+            tabs.push(Tab::Music);
+        }
+        for (i, tab) in tabs.iter().enumerate() {
             let key = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5][i];
-            if ctx.input_mut(|inp| inp.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key))) {
+            if ctx.input_mut(|inp| {
+                inp.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, key))
+            }) {
                 self.tab = *tab;
                 self.close_setup();
             }
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
+        if ctx.input_mut(|i| {
+            i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))
+        }) {
             self.open_settings(self.settings.page);
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F))) {
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::F)))
+        {
             self.focus_search.set(true);
         }
-        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::S))) {
-            if (self.tab, self.career_tab) == (Tab::Career, CareerTab::Plan) && !self.onboarding.open {
+        if ctx.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::S)))
+        {
+            if (self.tab, self.career_tab) == (Tab::Career, CareerTab::Plan)
+                && !self.onboarding.open
+            {
                 self.save_plan();
             } else {
-                self.toast("Ctrl+S saves the plan on Career → Plan.", ui_util::ToastKind::Info);
+                self.toast(
+                    t!("Ctrl+S saves the plan on Career → Plan."),
+                    ui_util::ToastKind::Info,
+                );
             }
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F5)) {
             self.reload();
-            self.toast("Reloaded your roster, game data and plans.", ui_util::ToastKind::Success);
+            self.toast(
+                t!("Reloaded your roster, game data and plans."),
+                ui_util::ToastKind::Success,
+            );
         }
         // `?` opens Help, unless a text box is taking the keys.
-        if !typing && ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(t) if t == "?"))) {
+        if !typing
+            && ctx.input(|i| {
+                i.events
+                    .iter()
+                    .any(|e| matches!(e, egui::Event::Text(t) if t == "?"))
+            })
+        {
             self.help_open = true;
         }
         // Esc closes the topmost thing: a dropdown or text box handles its own, then Help, a
@@ -1252,6 +2080,12 @@ impl App {
     fn close_topmost(&mut self) {
         if self.settings.open || self.onboarding.paste.open {
             // Modals close themselves on Esc.
+        } else if self.show_high_volume_modal {
+            self.show_high_volume_modal = false;
+            self.pending_high_volume = None;
+        } else if self.show_music_beta_modal {
+            self.show_music_beta_modal = false;
+            settings::set("music_beta_notice_seen", serde_json::json!(true));
         } else if self.help_open {
             self.help_open = false;
         } else if self.onboarding.confirm_start_over {
@@ -1286,7 +2120,7 @@ impl App {
                 CareerTab::Race => 3,
                 CareerTab::Results => 4,
             },
-            Tab::Ask | Tab::Notes => 5,
+            Tab::Ask | Tab::Notes | Tab::Music => 5,
         }
     }
 
@@ -1299,7 +2133,7 @@ impl App {
         let narrow = ui.available_width() < 1250.0;
         ui.horizontal(|ui| {
             if let Some(name) = &self.roster.profile {
-                ui.label(format!("👤 {name}")).on_hover_text("Whose account this is. ⚙ Settings → Profile renames it or switches accounts.");
+                ui.label(format!("👤 {name}")).on_hover_text(t!("Whose account this is. ⚙ Settings → Profile renames it or switches accounts."));
                 ui.separator();
             }
             if let Some(server) = &self.roster.server {
@@ -1308,26 +2142,26 @@ impl App {
                 ui.separator();
             }
             match &self.source {
-                Source::Folder(p) => ui.label(if narrow { "📁 Data folder" } else { "📁 Your data folder" }).on_hover_text(p.display().to_string()),
-                Source::Embedded => ui.label(RichText::new("⚠ Using a built-in snapshot: the umaLord folder wasn't found").color(theme::pal(ui).warn)),
+                Source::Folder(p) => ui.label(if narrow { t!("📁 Data folder") } else { t!("📁 Your data folder") }).on_hover_text(p.display().to_string()),
+                Source::Embedded => ui.label(RichText::new(t!("⚠ Using a built-in snapshot: the UmaYu folder wasn't found")).color(theme::pal(ui).warn)),
             };
             if let Some(d) = &self.roster.cards_updated {
                 ui.separator();
-                ui.label(if narrow { format!("Roster {d}") } else { format!("Roster last updated {d}") }).on_hover_text(format!("Your roster files were last updated {d}."));
+                ui.label(if narrow { format!("Roster {d}") } else { tf!("Roster last updated {}", d) }).on_hover_text(tf!("Your roster files were last updated {}.", d));
             }
             ui.separator();
             match (&self.kb.error, &self.kb.built) {
                 (Some(e), _) => {
-                    ui.label(RichText::new("⚠ Game data missing: run tools/update_knowledge.py").color(theme::pal(ui).warn)).on_hover_text(e);
+                    ui.label(RichText::new(t!("⚠ Game data missing: run tools/update_knowledge.py")).color(theme::pal(ui).warn)).on_hover_text(e);
                 }
                 (None, built) => {
                     let day = built.as_ref().map(|b| b[..10.min(b.len())].to_string());
                     let text = match (&day, narrow) {
                         (Some(d), true) => format!("uma.guide {d}"),
-                        (Some(d), false) => format!("Game data from uma.guide, {d}"),
-                        (None, _) => "Game data from uma.guide".to_string(),
+                        (Some(d), false) => tf!("Game data from uma.guide, {}", d),
+                        (None, _) => t!("Game data from uma.guide").to_string(),
                     };
-                    ui.label(text).on_hover_text(format!(
+                    ui.label(text).on_hover_text(tf!(
                         "Game data from uma.guide{}. Global server: {} umas · {} support cards · {} skills",
                         day.map(|d| format!(", {d}")).unwrap_or_default(),
                         self.kb.umas.len(),
@@ -1346,8 +2180,8 @@ impl App {
             if !self.roster.warnings.is_empty() {
                 ui.separator();
                 let n = self.roster.warnings.len();
-                let text = if narrow { format!("⚠ {n} unread lines") } else { format!("⚠ {n} lines in your roster files couldn't be read") };
-                ui.label(RichText::new(text).color(theme::pal(ui).warn)).on_hover_text(format!("{n} lines in your roster files couldn't be read:\n{}", self.roster.warnings.join("\n")));
+                let text = if narrow { tf!("⚠ {} unread lines", n) } else { tf!("⚠ {} lines in your roster files couldn't be read", n) };
+                ui.label(RichText::new(text).color(theme::pal(ui).warn)).on_hover_text(tf!("{} lines in your roster files couldn't be read:\n{}", n, self.roster.warnings.join("\n")));
             }
         });
     }
@@ -1392,38 +2226,82 @@ impl App {
             theme::Look::Sky | theme::Look::Sakura => {
                 // Soft clouds in the corner.
                 let cloud = egui::Color32::from_white_alpha(if self.dark { 10 } else { 70 });
-                for (dx, dy, r) in [(-0.95, -0.12, 0.30), (-0.62, -0.22, 0.38), (-0.25, -0.12, 0.30), (-1.6, -0.75, 0.16), (-1.36, -0.82, 0.20), (-1.12, -0.74, 0.15)] {
+                for (dx, dy, r) in [
+                    (-0.95, -0.12, 0.30),
+                    (-0.62, -0.22, 0.38),
+                    (-0.25, -0.12, 0.30),
+                    (-1.6, -0.75, 0.16),
+                    (-1.36, -0.82, 0.20),
+                    (-1.12, -0.74, 0.15),
+                ] {
                     painter.circle_filled(base + vec2(dx * size, dy * size), r * size, cloud);
                 }
             }
             theme::Look::Sunset => {
                 // A low evening sun with a soft glow, behind her.
                 let sun = rect.right_bottom() - vec2(size * 1.05, size * 0.55);
-                let glow = if self.dark { egui::Color32::from_rgb(251, 146, 60) } else { egui::Color32::from_rgb(253, 186, 116) };
+                let glow = if self.dark {
+                    egui::Color32::from_rgb(251, 146, 60)
+                } else {
+                    egui::Color32::from_rgb(253, 186, 116)
+                };
                 for (r, a) in [(1.0, 0.05), (0.75, 0.08), (0.52, 0.14)] {
                     painter.circle_filled(sun, size * r, glow.gamma_multiply(a));
                 }
-                painter.circle_filled(sun, size * 0.34, glow.gamma_multiply(if self.dark { 0.35 } else { 0.6 }));
+                painter.circle_filled(
+                    sun,
+                    size * 0.34,
+                    glow.gamma_multiply(if self.dark { 0.35 } else { 0.6 }),
+                );
                 let cloud = egui::Color32::from_white_alpha(if self.dark { 8 } else { 60 });
-                for (dx, dy, r) in [(-0.4, -0.08, 0.26), (-0.08, -0.14, 0.32), (-1.7, -0.5, 0.14), (-1.5, -0.56, 0.18)] {
+                for (dx, dy, r) in [
+                    (-0.4, -0.08, 0.26),
+                    (-0.08, -0.14, 0.32),
+                    (-1.7, -0.5, 0.14),
+                    (-1.5, -0.56, 0.18),
+                ] {
                     painter.circle_filled(base + vec2(dx * size, dy * size), r * size, cloud);
                 }
             }
             theme::Look::Night => {
                 // Stars over the upper page, brighter ones bigger, and a moon.
-                let star = if self.dark { egui::Color32::from_rgb(226, 222, 255) } else { egui::Color32::from_rgb(124, 92, 220) };
+                let star = if self.dark {
+                    egui::Color32::from_rgb(226, 222, 255)
+                } else {
+                    egui::Color32::from_rgb(124, 92, 220)
+                };
                 for (x, y, b) in scatter(70, 0x9e37_79b9) {
                     let pos = rect.left_top() + vec2(x * rect.width(), y * y * rect.height() * 0.9);
-                    painter.circle_filled(pos, 0.8 + b * 1.6, star.gamma_multiply(if self.dark { 0.25 + b * 0.45 } else { 0.18 + b * 0.3 }));
+                    painter.circle_filled(
+                        pos,
+                        0.8 + b * 1.6,
+                        star.gamma_multiply(if self.dark {
+                            0.25 + b * 0.45
+                        } else {
+                            0.18 + b * 0.3
+                        }),
+                    );
                 }
                 let moon = rect.right_bottom() - vec2(size * 1.25, size * 1.05);
-                let light = if self.dark { egui::Color32::from_rgb(240, 236, 210) } else { egui::Color32::WHITE };
+                let light = if self.dark {
+                    egui::Color32::from_rgb(240, 236, 210)
+                } else {
+                    egui::Color32::WHITE
+                };
                 painter.circle_filled(moon, size * 0.36, light.gamma_multiply(0.05));
-                painter.circle_filled(moon, size * 0.2, light.gamma_multiply(if self.dark { 0.55 } else { 0.9 }));
+                painter.circle_filled(
+                    moon,
+                    size * 0.2,
+                    light.gamma_multiply(if self.dark { 0.55 } else { 0.9 }),
+                );
             }
             theme::Look::Track => {
                 // The rails of a racetrack's far turn, sweeping across the bottom of the page.
-                let rail = if self.dark { egui::Color32::from_white_alpha(22) } else { egui::Color32::from_rgb(146, 100, 0).gamma_multiply(0.22) };
+                let rail = if self.dark {
+                    egui::Color32::from_white_alpha(22)
+                } else {
+                    egui::Color32::from_rgb(146, 100, 0).gamma_multiply(0.22)
+                };
                 let center = rect.right_bottom() + vec2(-size * 0.2, size * 1.9);
                 for (r, w) in [(size * 2.3, 2.0), (size * 2.55, 1.2)] {
                     let pts: Vec<egui::Pos2> = (0..=48)
@@ -1445,11 +2323,23 @@ impl App {
         }
         if theme::look() == theme::Look::Sakura {
             // Petals drifting down the page.
-            let petal = if self.dark { egui::Color32::from_rgb(244, 143, 177) } else { egui::Color32::from_rgb(236, 112, 158) };
+            let petal = if self.dark {
+                egui::Color32::from_rgb(244, 143, 177)
+            } else {
+                egui::Color32::from_rgb(236, 112, 158)
+            };
             for (x, y, b) in scatter(34, 0x85eb_ca6b) {
                 let pos = rect.left_top() + vec2(x * rect.width(), y * rect.height());
                 let r = 3.0 + b * 4.0;
-                painter.add(egui::Shape::ellipse_filled(pos, vec2(r, r * 0.6), petal.gamma_multiply(if self.dark { 0.16 + b * 0.18 } else { 0.18 + b * 0.22 })));
+                painter.add(egui::Shape::ellipse_filled(
+                    pos,
+                    vec2(r, r * 0.6),
+                    petal.gamma_multiply(if self.dark {
+                        0.16 + b * 0.18
+                    } else {
+                        0.18 + b * 0.22
+                    }),
+                ));
             }
         }
     }
@@ -1457,109 +2347,345 @@ impl App {
     /// What each tab is for, how to get started, and the game words the app uses.
     fn help_window(&mut self, ctx: &egui::Context) {
         let mut open = self.help_open;
-        let mut go = None;
-        let height = (ctx.content_rect().height() - 140.0).clamp(300.0, 720.0);
-        egui::Window::new(semibold("❓ Help", 18.0))
+        let screen = ctx.content_rect();
+        let win_width = (screen.width() - 48.0).clamp(520.0, 800.0);
+        let win_height = (screen.height() - 80.0).clamp(360.0, 780.0);
+
+        enum HelpJump {
+            Tab(Tab),
+            Collection(CollectionTab),
+            Career(CareerTab),
+            Music(tab_music::MusicSubTab),
+            Notes,
+        }
+        let mut go: Option<HelpJump> = None;
+
+        egui::Window::new(semibold(t!("❓ Help"), 18.0))
             .open(&mut open)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .fixed_size([720.0, height])
+            .default_size([win_width, win_height])
+            .min_width(460.0)
+            .min_height(320.0)
+            .max_width((screen.width() - 20.0).max(460.0))
+            .max_height((screen.height() - 30.0).max(320.0))
             .collapsible(false)
+            .resizable(true)
             .show(ctx, |ui| {
                 let p = theme::pal(ui);
-                // A fixed term column, and text that wraps in the rest of the width.
-                let row = |ui: &mut egui::Ui, term: &mut dyn FnMut(&mut egui::Ui), text: RichText| {
-                    ui.horizontal_top(|ui| {
-                        ui.allocate_ui_with_layout(vec2(160.0, 20.0), egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                            ui.set_min_width(160.0);
-                            term(ui);
-                        });
-                        ui.add(egui::Label::new(text).wrap());
-                    });
-                    ui.add_space(4.0);
-                };
+
+                // Top section pills for rapid scanning
+                let sec_id = ui.make_persistent_id("help_active_section");
+                let mut active_section: usize = ui.data(|d| d.get_temp(sec_id)).unwrap_or(0);
+
+                let search_id = ui.make_persistent_id("help_glossary_search");
+                let mut search_query: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
+
+                ui.horizontal_wrapped(|ui| {
+                    let sections = [
+                        t!("All"),
+                        t!("Pages & tabs"),
+                        t!("Career workflow"),
+                        t!("Shortcuts"),
+                        t!("Glossary"),
+                    ];
+                    for (idx, label) in sections.iter().enumerate() {
+                        let selected = active_section == idx;
+                        let text = if selected {
+                            semibold(*label, 13.0).color(p.on_accent)
+                        } else {
+                            RichText::new(*label).size(13.0).color(p.weak)
+                        };
+                        let fill = if selected { p.accent } else { p.raised };
+                        let stroke = if selected {
+                            Stroke::new(1.0, p.accent_strong)
+                        } else {
+                            Stroke::new(1.0, p.border)
+                        };
+                        let btn = egui::Button::new(text)
+                            .fill(fill)
+                            .stroke(stroke)
+                            .corner_radius(CornerRadius::same(6));
+                        if ui.add(btn).clicked() {
+                            active_section = idx;
+                            ui.data_mut(|d| d.insert_temp(sec_id, active_section));
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+
                 let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
-                // UMALORD_SCROLL scrolls Help too, for screenshots of the word list.
                 if let Some(y) = self.debug_scroll {
                     area = area.vertical_scroll_offset(y);
                 }
                 area.show(ui, |ui| {
-                    ui.label(semibold("What each tab is for", 16.0));
-                    ui.add_space(4.0);
-                    for tab in TABS {
-                        let (icon, label, what) = tab.info();
-                        let mut open = |ui: &mut egui::Ui| {
-                            if ui.link(semibold(format!("{icon} {label}"), 14.0)).on_hover_text("Go there").clicked() {
-                                go = Some((tab, None));
-                            }
-                        };
-                        row(ui, &mut open, RichText::new(what).color(p.weak));
-                        // Career's own pages, one level in.
-                        if tab == Tab::Career {
-                            for page in [CareerTab::Plan, CareerTab::Race, CareerTab::Results] {
-                                let (icon, label, what) = page.info();
-                                let mut open = |ui: &mut egui::Ui| {
-                                    ui.add_space(18.0);
-                                    if ui.link(format!("{icon} {label}")).on_hover_text("Go there").clicked() {
-                                        go = Some((Tab::Career, Some(page)));
+                    let avail_w = ui.available_width();
+                    let term_col_w = (avail_w * 0.28).clamp(115.0, 185.0);
+
+                    // Reusable row with responsive columns
+                    let row = |ui: &mut egui::Ui, term: &mut dyn FnMut(&mut egui::Ui), text: RichText| {
+                        ui.horizontal_top(|ui| {
+                            ui.allocate_ui_with_layout(vec2(term_col_w, 18.0), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                ui.set_min_width(term_col_w);
+                                term(ui);
+                            });
+                            ui.add(egui::Label::new(text).wrap());
+                        });
+                        ui.add_space(4.0);
+                    };
+
+                    // SECTION 1: Pages & Tabs
+                    if active_section == 0 || active_section == 1 {
+                        ui_util::card_explained(
+                            ui,
+                            "What each tab is for",
+                            "Overview of UmaYu's main features and navigation.",
+                            |ui| {
+                                let mut tabs = vec![Tab::Home, Tab::Collection, Tab::Career, Tab::Ask];
+                                if self.gameaudio.enabled {
+                                    tabs.push(Tab::Music);
+                                }
+                                for tab in tabs {
+                                    let (icon, label, what) = tab.info();
+                                    let mut open_tab = |ui: &mut egui::Ui| {
+                                        let btn_label = if tab == Tab::Music {
+                                            semibold(format!("{icon} {}", t!("Music (Beta)")), 14.0)
+                                        } else {
+                                            semibold(format!("{icon} {}", t!(label)), 14.0)
+                                        };
+                                        if ui.link(btn_label).on_hover_text(t!("Go there")).clicked() {
+                                            go = Some(HelpJump::Tab(tab));
+                                        }
+                                    };
+                                    row(ui, &mut open_tab, RichText::new(t!(what)).color(p.weak));
+
+                                    // Sub-pages breakdown
+                                    match tab {
+                                        Tab::Collection => {
+                                            let sub_pages = [
+                                                (CollectionTab::Umas, "Umas", "Owned umas, outfits, star ranks and awakened potential levels."),
+                                                (CollectionTab::Cards, "Support cards", "Owned support cards, limit break levels and training effects."),
+                                                (CollectionTab::Skills, "Skills", "Complete skill catalog, SP costs, and acquisition sources."),
+                                            ];
+                                            for (sub, name, desc) in sub_pages {
+                                                let mut open_sub = |ui: &mut egui::Ui| {
+                                                    ui.add_space(16.0);
+                                                    if ui.link(format!("• {}", t!(name))).on_hover_text(t!("Go there")).clicked() {
+                                                        go = Some(HelpJump::Collection(sub));
+                                                    }
+                                                };
+                                                row(ui, &mut open_sub, RichText::new(t!(desc)).size(12.5).color(p.weak));
+                                            }
+                                        }
+                                        Tab::Career => {
+                                            for page in [CareerTab::Plan, CareerTab::Race, CareerTab::Results] {
+                                                let (icon, name, desc) = page.info();
+                                                let mut open_sub = |ui: &mut egui::Ui| {
+                                                    ui.add_space(16.0);
+                                                    if ui.link(format!("{icon} {}", t!(name))).on_hover_text(t!("Go there")).clicked() {
+                                                        go = Some(HelpJump::Career(page));
+                                                    }
+                                                };
+                                                row(ui, &mut open_sub, RichText::new(t!(desc)).size(12.5).color(p.weak));
+                                            }
+                                        }
+                                        Tab::Music => {
+                                            let sub_pages = [
+                                                (tab_music::MusicSubTab::Files, "Files", "Browse and inspect local CRIWARE audio archives (ACB/AWB), play wave cues, and export WAV."),
+                                                (tab_music::MusicSubTab::Jukebox, "Jukebox", "In-game jukebox catalog with short preview and full game-size playback."),
+                                                (tab_music::MusicSubTab::Live, "Live", "Multi-track live stage player with synchronized lyrics and performer lineup controls."),
+                                            ];
+                                            for (sub, name, desc) in sub_pages {
+                                                let mut open_sub = |ui: &mut egui::Ui| {
+                                                    ui.add_space(16.0);
+                                                    if ui.link(format!("• {}", t!(name))).on_hover_text(t!("Go there")).clicked() {
+                                                        go = Some(HelpJump::Music(sub));
+                                                    }
+                                                };
+                                                row(ui, &mut open_sub, RichText::new(t!(desc)).size(12.5).color(p.weak));
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+
+                                // Notes and files entry
+                                let mut open_notes = |ui: &mut egui::Ui| {
+                                    if ui.link(semibold(t!("📝 Notes and files"), 14.0)).on_hover_text(t!("Go there")).clicked() {
+                                        go = Some(HelpJump::Notes);
                                     }
                                 };
-                                row(ui, &mut open, RichText::new(what).color(p.weak));
-                            }
-                        }
+                                row(
+                                    ui,
+                                    &mut open_notes,
+                                    RichText::new(t!("Read the markdown files in this folder: insights, plans, results and your roster files. It's in ⚙ Settings → Data and updates.")).color(p.weak),
+                                );
+                            },
+                        );
                     }
-                    let mut notes = |ui: &mut egui::Ui| {
-                        if ui.link(semibold("📝 Notes and files", 14.0)).on_hover_text("Go there").clicked() {
-                            go = Some((Tab::Notes, None));
-                        }
-                    };
-                    row(ui, &mut notes, RichText::new("Read the markdown files in this folder: insights, plans, results and your roster files. It's in ⚙ Settings → Data and updates.").color(p.weak));
-                    ui.add_space(10.0);
-                    ui.label(semibold("Planning a career, start to finish", 16.0));
-                    for (n, step) in [
-                        "Open 🏇 Career → 📋 Plan and pick a goal. For a Champions Meeting, click the upcoming one and the course fills in, and the 📈 Meta card shows what the community's PvP sheet recommends for it.",
-                        "Pick a trainee. The ✨ suggestions are the sheet's picks you own (★), then your umas with the best aptitudes for that course.",
-                        "Press ✨ Recommend whole deck, or click each slot to choose cards yourself. The sheet's cards come first (★); hover a card to see why it was picked.",
-                        "Under Skills to buy, press ✨ Auto-pick. It buys the sheet's skills first, then the ones that gain the most on the course, within your skill points.",
-                        "Press 💾 Save plan. ▶ Simulate races the plan on the 🏁 Race sim page.",
-                        "After the career, log what happened on the 🏆 Results page.",
-                    ]
-                    .iter()
-                    .enumerate()
-                    {
-                        ui.horizontal_top(|ui| {
-                            ui.label(semibold(format!("{}.", n + 1), 14.0).color(p.accent));
-                            ui.add(egui::Label::new(*step).wrap());
-                        });
+
+                    // SECTION 2: Career Workflow
+                    if active_section == 0 || active_section == 2 {
+                        ui_util::card_explained(
+                            ui,
+                            "Planning a career, start to finish",
+                            "Recommended step-by-step workflow from goal setting to result logging.",
+                            |ui| {
+                                let steps = [
+                                    "Open 🏇 Career → 📋 Plan and pick a goal. For a Champions Meeting, click the upcoming one and the course fills in, and the 📈 Meta card shows what the community's PvP sheet recommends for it.",
+                                    "Pick a trainee. The ✨ suggestions are the sheet's picks you own (★), then your umas with the best aptitudes for that course.",
+                                    "Press ✨ Recommend whole deck, or click each slot to choose cards yourself. The sheet's cards come first (★); hover a card to see why it was picked.",
+                                    "Under Skills to buy, press ✨ Auto-pick. It buys the sheet's skills first, then the ones that gain the most on the course, within your skill points.",
+                                    "Press 💾 Save plan. ▶ Simulate races the plan on the 🏁 Race sim page.",
+                                    "After the career, log what happened on the 🏆 Results page.",
+                                ];
+                                for (n, step) in steps.iter().enumerate() {
+                                    ui.horizontal_top(|ui| {
+                                        let badge = RichText::new(format!("{:02}", n + 1))
+                                            .family(egui::FontFamily::Name(theme::SEMIBOLD.into()))
+                                            .size(13.0)
+                                            .color(p.accent);
+                                        ui.allocate_ui_with_layout(vec2(26.0, 18.0), egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                            ui.label(badge);
+                                        });
+                                        ui.add(egui::Label::new(t!(*step)).wrap());
+                                    });
+                                    ui.add_space(5.0);
+                                }
+                            },
+                        );
                     }
-                    ui.add_space(10.0);
-                    ui.label(semibold("Keyboard shortcuts", 16.0));
-                    ui.add_space(4.0);
-                    for (keys, what) in SHORTCUTS {
-                        row(ui, &mut |ui| _ = ui.label(RichText::new(*keys).monospace().size(13.0)), RichText::new(*what));
+
+                    // SECTION 3: Keyboard Shortcuts
+                    if active_section == 0 || active_section == 3 {
+                        ui_util::card_explained(
+                            ui,
+                            "Keyboard shortcuts",
+                            "Quick actions and navigation keys available anywhere in the app.",
+                            |ui| {
+                                let mut shortcuts: Vec<(&str, &str)> = Vec::new();
+                                if self.gameaudio.enabled {
+                                    shortcuts.push(("Ctrl+1 … Ctrl+5", "Switch tabs: Home, Collection, Career, Ask, Music"));
+                                } else {
+                                    shortcuts.push(("Ctrl+1 … Ctrl+4", "Switch tabs: Home, Collection, Career, Ask"));
+                                }
+                                shortcuts.extend_from_slice(&[
+                                    ("Ctrl+,", "Open Settings"),
+                                    ("Ctrl+F", "Jump to the page's search box"),
+                                    ("Ctrl+S", "Save the plan (on Career → Plan)"),
+                                    ("F5", "Reload your roster, game data and plans from disk"),
+                                    ("Esc", "Close Help, a dialog, or the details panel"),
+                                    ("?", "Open this Help"),
+                                ]);
+
+                                for (keys, what) in shortcuts {
+                                    let mut key_badge = |ui: &mut egui::Ui| {
+                                        egui::Frame::new()
+                                            .fill(p.raised)
+                                            .stroke(Stroke::new(1.0, p.border))
+                                            .corner_radius(CornerRadius::same(4))
+                                            .inner_margin(Margin::symmetric(6, 2))
+                                            .show(ui, |ui| {
+                                                ui.label(RichText::new(keys).monospace().size(12.0));
+                                            });
+                                    };
+                                    row(ui, &mut key_badge, RichText::new(t!(what)));
+                                }
+                            },
+                        );
                     }
-                    ui.add_space(10.0);
-                    ui.label(semibold("Words you'll see", 16.0));
-                    ui.label(RichText::new("General game terms, in short, from knowledge/mechanics.md. Hover a term to see where it comes from.").size(12.5).color(p.weak));
-                    ui.add_space(4.0);
-                    if self.kb.terms.is_empty() {
-                        for (term, meaning) in GLOSSARY {
-                            row(ui, &mut |ui| _ = ui.label(semibold(*term, 13.5)), RichText::new(*meaning));
-                        }
-                    }
-                    for t in &self.kb.terms {
-                        let source = if t.source == "general" { "General knowledge of the game".to_string() } else { format!("Source: {}", t.source) };
-                        row(ui, &mut |ui| _ = ui.label(semibold(&t.term, 13.5)).on_hover_text(&source), RichText::new(&t.meaning));
+
+                    // SECTION 4: Glossary
+                    if active_section == 0 || active_section == 4 {
+                        ui_util::card_explained(
+                            ui,
+                            "Words you'll see",
+                            "General game terms, in short, from knowledge/mechanics.md. Hover a term to see where it comes from.",
+                            |ui| {
+                                ui.horizontal(|ui| {
+                                    let resp = ui.add(
+                                        egui::TextEdit::singleline(&mut search_query)
+                                            .hint_text(t!("Search terms…"))
+                                            .desired_width(ui.available_width().min(320.0)),
+                                    );
+                                    if resp.changed() {
+                                        ui.data_mut(|d| d.insert_temp(search_id, search_query.clone()));
+                                    }
+                                    if !search_query.is_empty() && ui.button("✖").on_hover_text(t!("Clear search")).clicked() {
+                                        search_query.clear();
+                                        ui.data_mut(|d| d.insert_temp(search_id, String::new()));
+                                    }
+                                });
+                                ui.add_space(8.0);
+
+                                let q = search_query.trim().to_lowercase();
+                                let mut rendered_count = 0;
+
+                                if self.kb.terms.is_empty() {
+                                    for (term, meaning) in GLOSSARY {
+                                        let trans_meaning = t!(*meaning);
+                                        if !q.is_empty() && !term.to_lowercase().contains(&q) && !trans_meaning.to_lowercase().contains(&q) {
+                                            continue;
+                                        }
+                                        rendered_count += 1;
+                                        row(ui, &mut |ui| _ = ui.label(semibold(*term, 13.5)), RichText::new(trans_meaning));
+                                    }
+                                } else {
+                                    for t in &self.kb.terms {
+                                        let source = if t.source == "general" {
+                                            t!("General knowledge of the game").to_string()
+                                        } else {
+                                            tf!("Source: {}", t.source)
+                                        };
+                                        let trans_meaning = t!(&t.meaning);
+                                        if !q.is_empty()
+                                            && !t.term.to_lowercase().contains(&q)
+                                            && !t.meaning.to_lowercase().contains(&q)
+                                            && !trans_meaning.to_lowercase().contains(&q)
+                                        {
+                                            continue;
+                                        }
+                                        rendered_count += 1;
+                                        row(
+                                            ui,
+                                            &mut |ui| _ = ui.label(semibold(&t.term, 13.5)).on_hover_text(&source),
+                                            RichText::new(trans_meaning),
+                                        );
+                                    }
+                                }
+
+                                if rendered_count == 0 && !q.is_empty() {
+                                    ui.add_space(4.0);
+                                    ui.label(RichText::new(t!("No terms match your search.")).italics().color(p.weak));
+                                }
+                            },
+                        );
                     }
                 });
             });
-        if let Some((tab, page)) = go {
-            if tab == Tab::Notes {
-                self.open_notes();
-            } else {
-                self.tab = tab;
-            }
-            if let Some(page) = page {
-                self.career_tab = page;
+        if let Some(jump) = go {
+            match jump {
+                HelpJump::Tab(tab) => {
+                    self.tab = tab;
+                    self.close_setup();
+                }
+                HelpJump::Collection(sub) => {
+                    self.tab = Tab::Collection;
+                    self.collection_tab = sub;
+                    self.close_setup();
+                }
+                HelpJump::Career(page) => {
+                    self.tab = Tab::Career;
+                    self.career_tab = page;
+                    self.close_setup();
+                }
+                HelpJump::Music(sub) => {
+                    self.tab = Tab::Music;
+                    self.music.sub_tab = sub;
+                    self.close_setup();
+                }
+                HelpJump::Notes => {
+                    self.open_notes();
+                }
             }
         }
         self.help_open = open;
@@ -1587,12 +2713,17 @@ impl App {
                 _ => {}
             }
         }
-        if self.sim.job.is_none() && self.sim.compare.is_some()
+        if self.sim.job.is_none()
+            && self.sim.compare.is_some()
             && let Some(t) = self.debug_replay.take()
         {
             self.sim.replay.t = t;
         }
-        if self.debug_extra && self.sim.job.is_none() && self.sim.extra.is_none() && self.sim.compare.is_some() {
+        if self.debug_extra
+            && self.sim.job.is_none()
+            && self.sim.extra.is_none()
+            && self.sim.compare.is_some()
+        {
             if self.sim.contribution.is_none() {
                 self.start_extra(ctx, tab_sim::ExtraKind::Contribution);
             } else if self.sim.sensitivity.is_none() {
@@ -1601,7 +2732,11 @@ impl App {
                 self.debug_extra = false;
             }
         }
-        let simulating = self.sim.job.is_some() || self.planner.skill_job.is_some() || self.planner.pick_job.is_some() || self.sim.extra.is_some() || self.debug_extra;
+        let simulating = self.sim.job.is_some()
+            || self.planner.skill_job.is_some()
+            || self.planner.pick_job.is_some()
+            || self.sim.extra.is_some()
+            || self.debug_extra;
         let installing = self.ask.oc.install_rx.is_some() || simulating;
         // UMALORD_ASK=<question>: ask it on start, and hold the screenshot until it's answered.
         if !installing && let Some(q) = self.debug_question.take() {
@@ -1609,17 +2744,22 @@ impl App {
             self.debug_asked = true;
             self.submit_question(ctx, q);
         }
-        let Some(path) = self.screenshot_to.clone() else { return };
+        let Some(path) = self.screenshot_to.clone() else {
+            return;
+        };
         // No tooltips from wherever the real mouse happens to be over the window.
         if ctx.input(|i| i.time) < 0.5 {
             ctx.all_styles_mut(|s| s.interaction.tooltip_delay = f32::INFINITY);
         }
         // UMALORD_APPROVE=ask: the shot once an approval card has shown for a second (the chat
         // scrolls down to it first).
-        if self.ask.shot_on_approval && self.approval_showing() && self.debug_approval_at.is_none() {
+        if self.ask.shot_on_approval && self.approval_showing() && self.debug_approval_at.is_none()
+        {
             self.debug_approval_at = Some(ctx.input(|i| i.time));
         }
-        let card_shown = self.debug_approval_at.is_some_and(|t| ctx.input(|i| i.time) - t > 1.0);
+        let card_shown = self
+            .debug_approval_at
+            .is_some_and(|t| ctx.input(|i| i.time) - t > 1.0);
         let asking = self.debug_asked && self.ask_busy() && !card_shown;
         let waiting = (installing || asking) && ctx.input(|i| i.time) < 300.0;
         if !self.screenshot_requested && !waiting && ctx.input(|i| i.time) >= 2.5 {
@@ -1664,25 +2804,39 @@ impl App {
         self.live_poll(&ctx);
         let p = theme::palette(self.dark);
         egui::Panel::top("top_bar")
-            .frame(egui::Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 9)))
+            .frame(
+                egui::Frame::new()
+                    .fill(p.surface)
+                    .inner_margin(Margin::symmetric(14, 9)),
+            )
             .show(ui, |ui| self.top_bar(ui));
         egui::Panel::bottom("status_bar")
-            .frame(egui::Frame::new().fill(p.surface).inner_margin(Margin::symmetric(14, 5)))
+            .frame(
+                egui::Frame::new()
+                    .fill(p.surface)
+                    .inner_margin(Margin::symmetric(14, 5)),
+            )
             .show(ui, |ui| self.status_bar(ui));
         // The pages' panels are see-through (theme.rs), so this shows behind all of them.
         self.paint_background(ui, ui.available_rect_before_wrap());
         self.take_dropped_profile(&ctx);
+        if !self.gameaudio.enabled && self.tab == Tab::Music {
+            self.tab = Tab::Home;
+        }
         if self.onboarding.open {
             self.onboarding_page(ui);
         } else {
             match self.tab {
                 Tab::Home => {
-                    egui::CentralPanel::default().frame(page_frame()).show(ui, |ui| self.overview(ui));
+                    egui::CentralPanel::default()
+                        .frame(page_frame())
+                        .show(ui, |ui| self.overview(ui));
                 }
                 Tab::Collection => self.collection_tab(ui),
                 Tab::Career => self.career_page(ui),
                 Tab::Notes => self.notes_tab(ui),
                 Tab::Ask => self.ask_tab(ui),
+                Tab::Music => self.music_tab(ui),
             }
         }
         if self.help_open {
@@ -1690,6 +2844,8 @@ impl App {
         }
         self.settings_window(&ctx);
         self.start_over_dialog(&ctx);
+        self.high_volume_warning_modal(&ctx);
+        self.music_beta_notice_modal(&ctx);
         self.apply_jump();
         // Background simulations finish even while another tab is open.
         if (self.tab, self.career_tab) != (Tab::Career, CareerTab::Race) {
@@ -1698,7 +2854,100 @@ impl App {
         self.planner_poll(&ctx);
         self.pick_poll(&ctx);
         self.ask_poll(&ctx);
+        self.gameaudio.poll();
         self.show_toasts(&ctx);
         self.debug_screenshot(&ctx);
+    }
+
+    /// Requests setting game audio volume. If volume exceeds 200% (2.0) and the user has not yet
+    /// acknowledged the warning, volume is clamped to 200% and a confirmation modal is shown.
+    pub(crate) fn request_set_volume(&mut self, target: f32) {
+        let clamped = target.clamp(0.0, 3.0);
+        if clamped > 2.0 && !self.gameaudio.high_volume_warning_acknowledged {
+            self.gameaudio.set_volume(2.0);
+            self.pending_high_volume = Some(clamped);
+            self.show_high_volume_modal = true;
+        } else {
+            self.gameaudio.set_volume(clamped);
+        }
+    }
+
+    /// Renders confirmation modal for volumes exceeding 200%.
+    pub(crate) fn high_volume_warning_modal(&mut self, ctx: &egui::Context) {
+        if !self.show_high_volume_modal {
+            return;
+        }
+        let mut confirmed = false;
+        let mut cancelled = false;
+        let modal = egui::Modal::new(egui::Id::unique("high_volume_warning_modal")).show(ctx, |ui| {
+            ui.set_width(420.0);
+            let p = theme::pal(ui);
+            ui.label(semibold(t!("High volume warning"), theme::size::MD));
+            ui.add_space(theme::space(theme::gap::XS));
+            ui.label(t!("Setting volume above 200% may cause excessive loudness, audio clipping, and risk hearing damage. Do you want to continue?"));
+            ui.add_space(theme::space(theme::gap::MD));
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new(RichText::new(t!("Continue")).color(Color32::WHITE)).fill(p.warn)).clicked() {
+                    confirmed = true;
+                }
+                if ui.button(t!("Cancel")).clicked() {
+                    cancelled = true;
+                }
+            });
+        });
+
+        if confirmed {
+            self.gameaudio.acknowledge_high_volume_warning();
+            if let Some(target) = self.pending_high_volume.take() {
+                self.gameaudio.set_volume(target);
+            }
+            self.show_high_volume_modal = false;
+        } else if cancelled || modal.should_close() {
+            self.pending_high_volume = None;
+            self.show_high_volume_modal = false;
+        }
+    }
+
+    /// Renders the one-time advisory modal introducing the Music (Beta) feature.
+    pub(crate) fn music_beta_notice_modal(&mut self, ctx: &egui::Context) {
+        if !self.show_music_beta_modal
+            || self.onboarding.open
+            || self.settings.open
+            || self.show_high_volume_modal
+        {
+            return;
+        }
+        let mut confirmed = false;
+        let modal = egui::Modal::new(egui::Id::unique("music_beta_notice_modal")).show(ctx, |ui| {
+            ui.set_width(460.0);
+            let p = theme::pal(ui);
+            ui.horizontal(|ui| {
+                ui.label(semibold(t!("🎵 Music Feature (Beta)"), theme::size::MD));
+                ui.add_space(4.0);
+                crate::ui_util::badge(ui, t!("Beta"), p.accent);
+            });
+            ui.add_space(theme::space(theme::gap::XS));
+            ui.label(t!("The Music and Game audio player is currently in Beta. It reads local game files offline to provide audio preview, Jukebox songs, and multi-track Live performances."));
+            ui.add_space(theme::space(theme::gap::XS));
+            ui.label(
+                RichText::new(t!("Compatibility and available tracks depend on your locally downloaded game assets. You can always review this information in Settings → Game audio."))
+                    .size(theme::size::SM)
+                    .color(p.weak),
+            );
+            ui.add_space(theme::space(theme::gap::MD));
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::Button::new(RichText::new(t!("Got it")).color(Color32::WHITE)).fill(p.accent))
+                    .clicked()
+                {
+                    confirmed = true;
+                }
+            });
+        });
+
+        if confirmed || modal.should_close() {
+            self.show_music_beta_modal = false;
+            settings::set("music_beta_notice_seen", serde_json::json!(true));
+        }
     }
 }

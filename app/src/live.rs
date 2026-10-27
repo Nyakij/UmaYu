@@ -1,6 +1,6 @@
 //! Live event data, fetched in the background on launch: the official Global news feed
 //! (umamusume.com) and Moomoolator's event presets (umalator.app). Cached per user in
-//! `%APPDATA%\umaLord\cache\events.json`. For dates, conditions and disabled skills the official
+//! `%APPDATA%\UmaYu\cache\events.json`. For dates, conditions and disabled skills the official
 //! announcement wins over Umalator's guess, which wins over the bundled
 //! `knowledge/data/umalator.json`; Umalator gives the exact course (inner or outer layout).
 
@@ -23,7 +23,9 @@ pub const STALE_SECS: i64 = 6 * 3600;
 const GROUNDS: [&str; 4] = ["Firm", "Good", "Soft", "Heavy"];
 const WEATHERS: [&str; 4] = ["Sunny", "Cloudy", "Rainy", "Snowy"];
 const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
-const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTHS: [&str; 12] = [
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+];
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Kind {
@@ -169,12 +171,19 @@ pub fn utc_date(t: i64) -> String {
 /// Seconds since 1970 for "YYYY-MM-DD" (midnight UTC).
 pub fn date_epoch(date: &str) -> Option<i64> {
     let mut it = date.split('-');
-    let (y, m, d) = (it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.parse().ok()?);
+    let (y, m, d) = (
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+        it.next()?.parse().ok()?,
+    );
     Some(epoch(y, m, d, 0, 0))
 }
 
 pub fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// A time in this computer's time zone (daylight saving for that date included):
@@ -184,7 +193,14 @@ pub fn local(t: i64) -> (i64, u32, u32, u32, u32, u32) {
         let days = t.div_euclid(86_400);
         let (y, m, d) = civil_from_days(days);
         let s = t.rem_euclid(86_400);
-        (y, m, d, (s / 3600) as u32, ((s / 60) % 60) as u32, (days + 4).rem_euclid(7) as u32)
+        (
+            y,
+            m,
+            d,
+            (s / 3600) as u32,
+            ((s / 60) % 60) as u32,
+            (days + 4).rem_euclid(7) as u32,
+        )
     };
     #[cfg(windows)]
     {
@@ -201,54 +217,119 @@ pub fn local(t: i64) -> (i64, u32, u32, u32, u32, u32) {
             ms: u16,
         }
         unsafe extern "system" {
-            fn SystemTimeToTzSpecificLocalTime(tz: *const std::ffi::c_void, utc: *const SystemTime, local: *mut SystemTime) -> i32;
+            fn SystemTimeToTzSpecificLocalTime(
+                tz: *const std::ffi::c_void,
+                utc: *const SystemTime,
+                local: *mut SystemTime,
+            ) -> i32;
         }
         let (y, m, d, h, mi, wd) = utc();
-        let Ok(year) = u16::try_from(y) else { return utc() };
-        let input = SystemTime { year, month: m as u16, weekday: wd as u16, day: d as u16, hour: h as u16, minute: mi as u16, second: 0, ms: 0 };
+        let Ok(year) = u16::try_from(y) else {
+            return utc();
+        };
+        let input = SystemTime {
+            year,
+            month: m as u16,
+            weekday: wd as u16,
+            day: d as u16,
+            hour: h as u16,
+            minute: mi as u16,
+            second: 0,
+            ms: 0,
+        };
         let mut out = SystemTime::default();
         // SAFETY: both structs are SYSTEMTIME-shaped and live for the call; a null zone means the
         // computer's current time zone.
         let ok = unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &input, &mut out) };
         if ok != 0 {
-            return (i64::from(out.year), u32::from(out.month), u32::from(out.day), u32::from(out.hour), u32::from(out.minute), u32::from(out.weekday));
+            return (
+                i64::from(out.year),
+                u32::from(out.month),
+                u32::from(out.day),
+                u32::from(out.hour),
+                u32::from(out.minute),
+                u32::from(out.weekday),
+            );
         }
     }
     utc()
 }
 
 fn clock(h: u32, m: u32) -> String {
+    if crate::lang::current() == crate::lang::Lang::Vi {
+        return format!("{h:02}:{m:02}");
+    }
     let (h12, ampm) = match h {
         0 => (12, "a.m."),
         1..=11 => (h, "a.m."),
         12 => (12, "p.m."),
         _ => (h - 12, "p.m."),
     };
-    if m == 0 { format!("{h12} {ampm}") } else { format!("{h12}:{m:02} {ampm}") }
+    if m == 0 {
+        format!("{h12} {ampm}")
+    } else {
+        format!("{h12}:{m:02} {ampm}")
+    }
 }
 
 const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_NAMES: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS_VI: [&str; 7] = ["CN", "T2", "T3", "T4", "T5", "T6", "T7"];
+const MONTH_NAMES: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
 
-/// "Fri Oct 31, 3 p.m." in local time.
+/// "Fri Oct 31, 3 p.m." in local time; "T6 31/10, 15:00" in Vietnamese.
 pub fn fmt_local(t: i64) -> String {
     let (_, m, d, h, mi, wd) = local(t);
-    format!("{} {} {d}, {}", WEEKDAYS[wd as usize % 7], MONTH_NAMES[(m as usize).clamp(1, 12) - 1], clock(h, mi))
+    let m = (m as usize).clamp(1, 12);
+    if crate::lang::current() == crate::lang::Lang::Vi {
+        return format!(
+            "{} {d:02}/{m:02}, {}",
+            WEEKDAYS_VI[wd as usize % 7],
+            clock(h, mi)
+        );
+    }
+    format!(
+        "{} {} {d}, {}",
+        WEEKDAYS[wd as usize % 7],
+        MONTH_NAMES[m - 1],
+        clock(h, mi)
+    )
 }
 
-/// "10 p.m. UTC, Oct 31".
+/// "10 p.m. UTC, Oct 31"; "22:00 UTC, 31/10" in Vietnamese.
 pub fn fmt_utc(t: i64) -> String {
     let days = t.div_euclid(86_400);
     let (_, m, d) = civil_from_days(days);
     let s = t.rem_euclid(86_400);
-    format!("{} UTC, {} {d}", clock((s / 3600) as u32, ((s / 60) % 60) as u32), MONTH_NAMES[(m as usize).clamp(1, 12) - 1])
+    let m = (m as usize).clamp(1, 12);
+    if crate::lang::current() == crate::lang::Lang::Vi {
+        return format!(
+            "{} UTC, {d:02}/{m:02}",
+            clock((s / 3600) as u32, ((s / 60) % 60) as u32)
+        );
+    }
+    format!(
+        "{} UTC, {} {d}",
+        clock((s / 3600) as u32, ((s / 60) % 60) as u32),
+        MONTH_NAMES[m - 1]
+    )
 }
 
-/// "Oct 31" from a "YYYY-MM-DD" date.
+/// "Oct 31" from a "YYYY-MM-DD" date; "31/10" in Vietnamese.
 pub fn short_day(date: &str) -> String {
     let mut it = date.split('-').skip(1);
-    match (it.next().and_then(|m| m.parse::<usize>().ok()), it.next().and_then(|d| d.parse::<u32>().ok())) {
-        (Some(m), Some(d)) if (1..=12).contains(&m) => format!("{} {d}", MONTH_NAMES[m - 1]),
+    match (
+        it.next().and_then(|m| m.parse::<usize>().ok()),
+        it.next().and_then(|d| d.parse::<u32>().ok()),
+    ) {
+        (Some(m), Some(d)) if (1..=12).contains(&m) => {
+            if crate::lang::current() == crate::lang::Lang::Vi {
+                format!("{d:02}/{m:02}")
+            } else {
+                format!("{} {d}", MONTH_NAMES[m - 1])
+            }
+        }
         _ => date.to_string(),
     }
 }
@@ -257,26 +338,30 @@ pub fn short_day(date: &str) -> String {
 pub fn fmt_until(secs: i64) -> String {
     let a = secs.abs();
     let text = if a >= 2 * 86_400 {
-        format!("{} days", a / 86_400)
+        tf!("{} days", a / 86_400)
     } else if a >= 3600 {
-        format!("{} h {} min", a / 3600, (a / 60) % 60)
+        tf!("{} h {} min", a / 3600, (a / 60) % 60)
     } else {
-        format!("{} min", (a / 60).max(1))
+        tf!("{} min", (a / 60).max(1))
     };
-    if secs >= 0 { format!("in {text}") } else { format!("{text} ago") }
+    if secs >= 0 {
+        tf!("in {}", text)
+    } else {
+        tf!("{} ago", text)
+    }
 }
 
 /// "3 min ago", "2 h ago", "4 days ago".
 pub fn fmt_ago(secs: i64) -> String {
     let a = secs.max(0);
     if a < 90 {
-        "just now".into()
+        t!("just now").into()
     } else if a < 3600 {
-        format!("{} min ago", a / 60)
+        tf!("{} min ago", a / 60)
     } else if a < 2 * 86_400 {
-        format!("{} h ago", a / 3600)
+        tf!("{} h ago", a / 3600)
     } else {
-        format!("{} days ago", a / 86_400)
+        tf!("{} days ago", a / 86_400)
     }
 }
 
@@ -297,7 +382,11 @@ pub fn html_to_text(html: &str) -> String {
             break;
         };
         let tag = rest[i + 1..i + j].trim().to_ascii_lowercase();
-        let name: String = tag.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+        let name: String = tag
+            .trim_start_matches('/')
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric())
+            .collect();
         match name.as_str() {
             "br" => out.push('\n'),
             "h1" | "h2" | "h3" | "h4" if !tag.starts_with('/') => out.push_str("\n## "),
@@ -344,7 +433,11 @@ fn decode_entities(s: &str) -> String {
                 "nbsp" => Some(' '),
                 "ndash" => Some('–'),
                 "mdash" => Some('—'),
-                _ if name.starts_with("#x") || name.starts_with("#X") => u32::from_str_radix(&name[2..], 16).ok().and_then(char::from_u32),
+                _ if name.starts_with("#x") || name.starts_with("#X") => {
+                    u32::from_str_radix(&name[2..], 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                }
                 _ if name.starts_with('#') => name[1..].parse().ok().and_then(char::from_u32),
                 _ => None,
             }?;
@@ -426,7 +519,10 @@ fn moment_at(line: &str, i: usize) -> Option<Moment> {
     };
     let s5 = s4.strip_prefix(',').unwrap_or(s4).trim_start();
     let word: String = s5.chars().take_while(char::is_ascii_alphabetic).collect();
-    let month = MONTHS.iter().position(|m| word.len() >= 3 && word[..3].eq_ignore_ascii_case(m))? as u32 + 1;
+    let month = MONTHS
+        .iter()
+        .position(|m| word.len() >= 3 && word[..3].eq_ignore_ascii_case(m))? as u32
+        + 1;
     let s6 = s5[word.len()..].trim_start_matches('.').trim_start();
     let dn = digits(s6);
     if !(1..=2).contains(&dn) {
@@ -449,14 +545,24 @@ fn moment_at(line: &str, i: usize) -> Option<Moment> {
         (h, false) => h,
     };
     let end = line.len() - rest.len();
-    Some(Moment { year, month, day, hour, minute, start: i, end })
+    Some(Moment {
+        year,
+        month,
+        day,
+        hour,
+        minute,
+        start: i,
+        end,
+    })
 }
 
 /// The times in a line as UTC seconds, with ranges ("A–B") paired. A moment without a year
 /// takes the next one's (or `fallback`); a range that would run backwards starts a year earlier.
 fn times(line: &str, fallback: i64) -> (Vec<i64>, Vec<(i64, i64)>) {
     let ms = moments(line);
-    let years: Vec<i64> = (0..ms.len()).map(|k| ms[k..].iter().find_map(|m| m.year).unwrap_or(fallback)).collect();
+    let years: Vec<i64> = (0..ms.len())
+        .map(|k| ms[k..].iter().find_map(|m| m.year).unwrap_or(fallback))
+        .collect();
     let mut singles = Vec::new();
     let mut ranges = Vec::new();
     let mut k = 0;
@@ -483,18 +589,38 @@ fn times(line: &str, fallback: i64) -> (Vec<i64>, Vec<(i64, i64)>) {
 
 /// "Chukyo / Turf / 1,200m (Sprint) / Left-Handed / Winter / Sunny / Firm".
 pub fn parse_conditions(text: &str) -> Option<RaceConditions> {
-    let parts: Vec<&str> = text.split('/').map(str::trim).filter(|p| !p.is_empty()).collect();
-    let si = parts.iter().position(|p| p.eq_ignore_ascii_case("Turf") || p.eq_ignore_ascii_case("Dirt"))?;
+    let parts: Vec<&str> = text
+        .split('/')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+    let si = parts
+        .iter()
+        .position(|p| p.eq_ignore_ascii_case("Turf") || p.eq_ignore_ascii_case("Dirt"))?;
     if si == 0 {
         return None;
     }
     let track = parts[si - 1].to_string();
     let race = (si >= 2).then(|| parts[..si - 1].join(" / "));
-    let mut c = RaceConditions { race, track, surface: parts[si].to_string(), text: parts.join(" / "), ..Default::default() };
+    let mut c = RaceConditions {
+        race,
+        track,
+        surface: parts[si].to_string(),
+        text: parts.join(" / "),
+        ..Default::default()
+    };
     for p in &parts[si + 1..] {
         let lower = p.to_ascii_lowercase();
-        let code = |names: &[&str; 4]| names.iter().position(|n| n.eq_ignore_ascii_case(p)).map(|i| i as u8 + 1);
-        if let Some(m) = lower.find('m').filter(|_| p.chars().next().is_some_and(|ch| ch.is_ascii_digit())) {
+        let code = |names: &[&str; 4]| {
+            names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(p))
+                .map(|i| i as u8 + 1)
+        };
+        if let Some(m) = lower
+            .find('m')
+            .filter(|_| p.chars().next().is_some_and(|ch| ch.is_ascii_digit()))
+        {
             c.distance = lower[..m].replace(',', "").trim().parse().unwrap_or(0);
         } else if lower == "inner" || lower == "outer" {
             c.layout = lower;
@@ -517,7 +643,11 @@ fn cup_name(title: &str) -> Option<String> {
     let after = after.trim_start();
     let name = match after.find(" Cup") {
         Some(i) => after[..i + 4].to_string(),
-        None => after.split([' ', '!']).take_while(|w| !matches!(*w, "is" | "has" | "will")).collect::<Vec<_>>().join(" "),
+        None => after
+            .split([' ', '!'])
+            .take_while(|w| !matches!(*w, "is" | "has" | "will"))
+            .collect::<Vec<_>>()
+            .join(" "),
     };
     let name = name.trim();
     (!name.is_empty()).then(|| name.to_string())
@@ -534,7 +664,14 @@ pub fn parse_announcement(id: u32, title: &str, message: &str, posted: i64) -> A
     } else {
         Kind::Other
     };
-    let mut a = Announcement { id, title: title.to_string(), posted, kind, cup: cup_name(title), ..Default::default() };
+    let mut a = Announcement {
+        id,
+        title: title.to_string(),
+        posted,
+        kind,
+        cup: cup_name(title),
+        ..Default::default()
+    };
     let year = civil_from_days(posted.div_euclid(86_400)).0;
     let text = html_to_text(message);
     let lines: Vec<&str> = text.lines().collect();
@@ -562,8 +699,14 @@ pub fn parse_announcement(id: u32, title: &str, message: &str, posted: i64) -> A
             continue;
         }
         if in_disabled {
-            match line.strip_prefix('•').or_else(|| line.strip_prefix('・')).or_else(|| line.strip_prefix("- ")) {
-                Some(name) => a.disabled.push(name.split_whitespace().collect::<Vec<_>>().join(" ")),
+            match line
+                .strip_prefix('•')
+                .or_else(|| line.strip_prefix('・'))
+                .or_else(|| line.strip_prefix("- "))
+            {
+                Some(name) => a
+                    .disabled
+                    .push(name.split_whitespace().collect::<Vec<_>>().join(" ")),
                 None => in_disabled = false,
             }
             continue;
@@ -597,7 +740,12 @@ pub fn parse_announcement(id: u32, title: &str, message: &str, posted: i64) -> A
                 a.starts = a.starts.or(Some(*s));
                 a.ends = a.ends.max(Some(*e));
             }
-        } else if a.starts.is_none() && heading.is_empty() && (lower.contains("set to begin") || lower.contains("has begun") || lower.contains("as of")) {
+        } else if a.starts.is_none()
+            && heading.is_empty()
+            && (lower.contains("set to begin")
+                || lower.contains("has begun")
+                || lower.contains("as of"))
+        {
             a.starts = first;
         }
     }
@@ -634,19 +782,26 @@ struct NewsItem {
 fn parse_post_at(s: &str) -> i64 {
     let (date, time) = s.split_once(' ').unwrap_or((s, "0:0:0"));
     let mut t = time.split(':').map(|x| x.parse::<u32>().unwrap_or(0));
-    date_epoch(date).unwrap_or(0) + i64::from(t.next().unwrap_or(0)) * 3600 + i64::from(t.next().unwrap_or(0)) * 60
+    date_epoch(date).unwrap_or(0)
+        + i64::from(t.next().unwrap_or(0)) * 3600
+        + i64::from(t.next().unwrap_or(0)) * 60
 }
 
 /// The news API's JSON as announcements.
 pub fn parse_news(json: &str) -> Result<Vec<Announcement>, String> {
-    let r: NewsResponse = serde_json::from_str(json).map_err(|e| format!("unexpected reply: {e}"))?;
+    let r: NewsResponse = serde_json::from_str(json).map_err(|e| tf!("unexpected reply: {}", e))?;
     if r.response_code != 1 {
-        return Err(format!("the site answered with code {}", r.response_code));
+        return Err(tf!("the site answered with code {}", r.response_code));
     }
     Ok(r.information_list
         .into_iter()
         .map(|it| {
-            let mut a = parse_announcement(it.announce_id, &it.title, &it.message, parse_post_at(&it.post_at));
+            let mut a = parse_announcement(
+                it.announce_id,
+                &it.title,
+                &it.message,
+                parse_post_at(&it.post_at),
+            );
             a.image = it.image.filter(|i| !i.is_empty());
             a
         })
@@ -670,7 +825,18 @@ pub fn parse_umalator_presets(bundle: &str) -> Vec<EventPreset> {
             }
         }
         let num = |k: &str| fields.get(k).and_then(|v| v.parse::<u32>().ok());
-        let (Some(id), Some(kind), Some(name), Some(date), Some(course), Some(season), Some(ground), Some(weather), Some(time), Some(confirmed)) = (
+        let (
+            Some(id),
+            Some(kind),
+            Some(name),
+            Some(date),
+            Some(course),
+            Some(season),
+            Some(ground),
+            Some(weather),
+            Some(time),
+            Some(confirmed),
+        ) = (
             num("id"),
             num("type"),
             fields.get("name"),
@@ -681,12 +847,17 @@ pub fn parse_umalator_presets(bundle: &str) -> Vec<EventPreset> {
             num("weather"),
             num("time"),
             fields.get("confirmed"),
-        ) else {
+        )
+        else {
             continue;
         };
         out.push(EventPreset {
             id,
-            event: if kind == 1 { "League of Heroes".into() } else { "Champions Meeting".into() },
+            event: if kind == 1 {
+                "League of Heroes".into()
+            } else {
+                "Champions Meeting".into()
+            },
             name: name.to_string(),
             date: date.to_string(),
             course,
@@ -710,7 +881,9 @@ pub fn parse_umalator_presets(bundle: &str) -> Vec<EventPreset> {
 /// "Firm · Sunny · Winter · Midday".
 pub fn conditions_text(p: &EventPreset) -> String {
     fn named(names: &[&'static str; 4], code: u8) -> Option<&'static str> {
-        code.checked_sub(1).and_then(|i| names.get(usize::from(i))).copied()
+        code.checked_sub(1)
+            .and_then(|i| names.get(usize::from(i)))
+            .copied()
     }
     let time = match p.time {
         2 => Some("Midday"),
@@ -718,43 +891,88 @@ pub fn conditions_text(p: &EventPreset) -> String {
         4 => Some("Night"),
         _ => None,
     };
-    [named(&GROUNDS, p.ground), named(&WEATHERS, p.weather), named(&SEASONS, p.season), time].into_iter().flatten().collect::<Vec<_>>().join(" · ")
+    [
+        named(&GROUNDS, p.ground),
+        named(&WEATHERS, p.weather),
+        named(&SEASONS, p.season),
+        time,
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ")
 }
 
 fn course_name(kb: &Knowledge, course: u32) -> String {
     kb.umalator_courses
         .iter()
         .find(|c| c.id == course)
-        .map(|c| format!("{} {} {}m{}", kb.track_name(c.track_id), c.surface, c.distance, if c.layout.is_empty() { String::new() } else { format!(" ({})", c.layout) }))
+        .map(|c| {
+            format!(
+                "{} {} {}m{}",
+                kb.track_name(c.track_id),
+                c.surface,
+                c.distance,
+                if c.layout.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", c.layout)
+                }
+            )
+        })
         .unwrap_or_default()
 }
 
 /// Whether an Umalator course fits an announcement's conditions.
 fn course_fits(kb: &Knowledge, course: u32, c: &RaceConditions) -> bool {
-    kb.umalator_courses.iter().find(|u| u.id == course).is_some_and(|u| {
-        kb.track_name(u.track_id).eq_ignore_ascii_case(&c.track)
-            && u.surface.eq_ignore_ascii_case(&c.surface)
-            && u.distance == c.distance
-            && (c.layout.is_empty() || u.layout.starts_with(&c.layout))
-    })
+    kb.umalator_courses
+        .iter()
+        .find(|u| u.id == course)
+        .is_some_and(|u| {
+            kb.track_name(u.track_id).eq_ignore_ascii_case(&c.track)
+                && u.surface.eq_ignore_ascii_case(&c.surface)
+                && u.distance == c.distance
+                && (c.layout.is_empty() || u.layout.starts_with(&c.layout))
+        })
 }
 
 /// The Umalator course for an announcement's conditions: the matching layout, else one an event
 /// already uses, else the first.
 fn find_course(kb: &Knowledge, c: &RaceConditions, used: &[u32]) -> Option<u32> {
-    let fits: Vec<u32> = kb.umalator_courses.iter().filter(|u| course_fits(kb, u.id, c)).map(|u| u.id).collect();
-    fits.iter().find(|id| used.contains(id)).or(fits.first()).copied()
+    let fits: Vec<u32> = kb
+        .umalator_courses
+        .iter()
+        .filter(|u| course_fits(kb, u.id, c))
+        .map(|u| u.id)
+        .collect();
+    fits.iter()
+        .find(|id| used.contains(id))
+        .or(fits.first())
+        .copied()
 }
 
 /// Skill ids for names as announcements write them ("Night Races ◎"). Unmatched names are
 /// returned too, to log.
 pub fn resolve_skills(kb: &Knowledge, names: &[String]) -> (Vec<u32>, Vec<String>) {
-    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase().replace(" ◎", "◎").replace(" ○", "○").replace(" ×", "×");
+    let norm = |s: &str| {
+        s.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+            .replace(" ◎", "◎")
+            .replace(" ○", "○")
+            .replace(" ×", "×")
+    };
     let mut ids = Vec::new();
     let mut missing = Vec::new();
     for n in names {
         let want = norm(n);
-        let mut found: Vec<u32> = kb.skills.values().filter(|s| norm(&s.name) == want).map(|s| s.id).collect();
+        let mut found: Vec<u32> = kb
+            .skills
+            .values()
+            .filter(|s| norm(&s.name) == want)
+            .map(|s| s.id)
+            .collect();
         found.sort_unstable();
         match found.first() {
             Some(id) => ids.push(*id),
@@ -768,10 +986,14 @@ pub fn resolve_skills(kb: &Knowledge, names: &[String]) -> (Vec<u32>, Vec<String
 /// official Champions Meeting announcement on top, matched by cup name within 45 days.
 pub fn merge(kb: &Knowledge, bundled: &[EventPreset], live: &LiveData) -> Vec<EventPreset> {
     let mut out: Vec<EventPreset> = if live.umalator_presets.is_empty() {
-        bundled.iter().cloned().map(|mut p| {
-            p.source = EventSource::Bundled;
-            p
-        }).collect()
+        bundled
+            .iter()
+            .cloned()
+            .map(|mut p| {
+                p.source = EventSource::Bundled;
+                p
+            })
+            .collect()
     } else {
         let mut v: Vec<EventPreset> = live
             .umalator_presets
@@ -794,19 +1016,34 @@ pub fn merge(kb: &Knowledge, bundled: &[EventPreset], live: &LiveData) -> Vec<Ev
         }
         v
     };
-    let mut cms: Vec<&Announcement> = live.announcements.iter().filter(|a| a.kind == Kind::ChampionsMeeting && a.cup.is_some()).collect();
+    let mut cms: Vec<&Announcement> = live
+        .announcements
+        .iter()
+        .filter(|a| a.kind == Kind::ChampionsMeeting && a.cup.is_some())
+        .collect();
     // Later announcements refine earlier ones.
     cms.sort_by_key(|a| a.posted);
     for a in cms {
         let cup = a.cup.as_deref().unwrap_or_default();
-        let at = a.round1.or(a.league_selection).or(a.starts).unwrap_or(a.posted);
-        let idx = out
-            .iter()
-            .position(|p| p.is_cm() && p.name.eq_ignore_ascii_case(cup) && date_epoch(&p.date).is_some_and(|d| (d - at).abs() <= 45 * 86_400));
+        let at = a
+            .round1
+            .or(a.league_selection)
+            .or(a.starts)
+            .unwrap_or(a.posted);
+        let idx = out.iter().position(|p| {
+            p.is_cm()
+                && p.name.eq_ignore_ascii_case(cup)
+                && date_epoch(&p.date).is_some_and(|d| (d - at).abs() <= 45 * 86_400)
+        });
         let i = match idx {
             Some(i) => i,
             None => {
-                out.push(EventPreset { event: "Champions Meeting".into(), name: cup.to_string(), date: utc_date(at), ..Default::default() });
+                out.push(EventPreset {
+                    event: "Champions Meeting".into(),
+                    name: cup.to_string(),
+                    date: utc_date(at),
+                    ..Default::default()
+                });
                 out.len() - 1
             }
         };
@@ -855,15 +1092,27 @@ pub fn merge(kb: &Knowledge, bundled: &[EventPreset], live: &LiveData) -> Vec<Ev
 /// GET (or POST `body` as JSON) with Windows' curl.exe: no TLS crates needed.
 fn fetch(url: &str, body: Option<&str>) -> Result<String, String> {
     let mut cmd = std::process::Command::new("curl.exe");
-    cmd.args(["-sSfL", "--max-time", "15", "-A", &format!("umaLord/{}", env!("CARGO_PKG_VERSION"))]);
+    cmd.args([
+        "-sSfL",
+        "--max-time",
+        "15",
+        "-A",
+        &format!("UmaYu/{}", env!("CARGO_PKG_VERSION")),
+    ]);
     if let Some(b) = body {
         cmd.args(["-H", "Content-Type: application/json", "--data-raw", b]);
     }
     cmd.arg(url);
-    let out = crate::ask::hidden(&mut cmd).output().map_err(|e| format!("couldn't run curl.exe: {e}"))?;
+    let out = crate::ask::hidden(&mut cmd)
+        .output()
+        .map_err(|e| tf!("couldn't run curl.exe: {}", e))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(if err.is_empty() { "no answer".into() } else { err.trim_start_matches("curl: ").to_string() });
+        return Err(if err.is_empty() {
+            t!("no answer").into()
+        } else {
+            err.trim_start_matches("curl: ").to_string()
+        });
     }
     String::from_utf8(out.stdout).map_err(|e| e.to_string())
 }
@@ -872,7 +1121,10 @@ fn fetch(url: &str, body: Option<&str>) -> Result<String, String> {
 fn fetch_news() -> Result<Vec<Announcement>, String> {
     let mut all = Vec::new();
     for page in 0..4 {
-        let body = format!(r#"{{"announce_label":0,"limit":50,"offset":{}}}"#, page * 50);
+        let body = format!(
+            r#"{{"announce_label":0,"limit":50,"offset":{}}}"#,
+            page * 50
+        );
         let items = parse_news(&fetch(NEWS_URL, Some(&body))?)?;
         let done = items.len() < 50 || items.iter().any(|a| a.kind == Kind::ChampionsMeeting);
         all.extend(items);
@@ -886,30 +1138,65 @@ fn fetch_news() -> Result<Vec<Announcement>, String> {
 /// Moomoolator's presets from its current app bundle.
 fn fetch_umalator() -> Result<Vec<EventPreset>, String> {
     let page = fetch(&format!("{UMALATOR_URL}/"), None)?;
-    let start = page.find("/assets/index-").ok_or("couldn't find the app bundle")?;
-    let path: String = page[start..].chars().take_while(|c| !matches!(c, '"' | '\'' | ' ' | '>')).collect();
+    let start = page
+        .find("/assets/index-")
+        .ok_or_else(|| t!("couldn't find the app bundle"))?;
+    let path: String = page[start..]
+        .chars()
+        .take_while(|c| !matches!(c, '"' | '\'' | ' ' | '>'))
+        .collect();
     let presets = parse_umalator_presets(&fetch(&format!("{UMALATOR_URL}{path}"), None)?);
-    if presets.is_empty() { Err("no event presets in the app bundle".into()) } else { Ok(presets) }
+    if presets.is_empty() {
+        Err(t!("no event presets in the app bundle").into())
+    } else {
+        Ok(presets)
+    }
 }
 
 /// Both sources, as one `LiveData` (failed sources marked, with what went wrong).
 pub fn refresh() -> LiveData {
     let t = now();
-    let mut d = LiveData { checked_at: t, ..Default::default() };
+    let mut d = LiveData {
+        checked_at: t,
+        ..Default::default()
+    };
     match fetch_news() {
         Ok(a) => {
-            let cms = a.iter().filter(|x| x.kind == Kind::ChampionsMeeting).count();
-            d.news = SourceStatus { ok: true, message: format!("{} news items, {cms} about Champions Meetings", a.len()), fetched_at: Some(t) };
+            let cms = a
+                .iter()
+                .filter(|x| x.kind == Kind::ChampionsMeeting)
+                .count();
+            d.news = SourceStatus {
+                ok: true,
+                message: format!("{} news items, {cms} about Champions Meetings", a.len()),
+                fetched_at: Some(t),
+            };
             d.announcements = a;
         }
-        Err(e) => d.news = SourceStatus { ok: false, message: e, fetched_at: None },
+        Err(e) => {
+            d.news = SourceStatus {
+                ok: false,
+                message: e,
+                fetched_at: None,
+            }
+        }
     }
     match fetch_umalator() {
         Ok(p) => {
-            d.umalator = SourceStatus { ok: true, message: format!("{} event presets", p.len()), fetched_at: Some(t) };
+            d.umalator = SourceStatus {
+                ok: true,
+                message: format!("{} event presets", p.len()),
+                fetched_at: Some(t),
+            };
             d.umalator_presets = p;
         }
-        Err(e) => d.umalator = SourceStatus { ok: false, message: e, fetched_at: None },
+        Err(e) => {
+            d.umalator = SourceStatus {
+                ok: false,
+                message: e,
+                fetched_at: None,
+            }
+        }
     }
     d
 }
@@ -936,7 +1223,8 @@ pub fn load_cache() -> Option<LiveData> {
 
 pub fn save_cache(d: &LiveData) {
     if let Some(p) = cache_path()
-        && p.parent().is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+        && p.parent()
+            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
         && let Ok(text) = serde_json::to_string(d)
     {
         let _ = std::fs::write(p, text);
@@ -948,7 +1236,12 @@ mod tests {
     use super::*;
 
     fn fixture(name: &str) -> String {
-        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)).unwrap()
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(name),
+        )
+        .unwrap()
     }
 
     fn news() -> Vec<Announcement> {
@@ -971,7 +1264,10 @@ mod tests {
 
     #[test]
     fn reads_times_and_ranges() {
-        let (s, r) = times("League Selection: From 10:00 p.m., Oct 27, 2026 (UTC)", 2026);
+        let (s, r) = times(
+            "League Selection: From 10:00 p.m., Oct 27, 2026 (UTC)",
+            2026,
+        );
         assert_eq!((s, r), (vec![at(2026, 10, 27, 22, 0)], vec![]));
         let (_, r) = times("10:00 p.m., Oct 10–9:59 p.m., Oct 16, 2026 (UTC)", 2020);
         assert_eq!(r, vec![(at(2026, 10, 10, 22, 0), at(2026, 10, 16, 21, 59))]);
@@ -986,8 +1282,13 @@ mod tests {
 
     #[test]
     fn strips_html() {
-        let t = html_to_text("\u{a0}A&amp;B<br>\n<h2 class=\"heading\">\u{a0}Race Conditions</h2>\n\u{a0}Chukyo / <br>Firm&#39;s &#x2013; ok<br><br>Next");
-        assert_eq!(t, "A&B\n\n## Race Conditions\nChukyo /\nFirm's – ok\n\nNext");
+        let t = html_to_text(
+            "\u{a0}A&amp;B<br>\n<h2 class=\"heading\">\u{a0}Race Conditions</h2>\n\u{a0}Chukyo / <br>Firm&#39;s &#x2013; ok<br><br>Next",
+        );
+        assert_eq!(
+            t,
+            "A&B\n\n## Race Conditions\nChukyo /\nFirm's – ok\n\nNext"
+        );
     }
 
     /// "…is coming": league selection and Round 1 times, conditions across a line break, and the
@@ -1001,8 +1302,21 @@ mod tests {
         assert_eq!(a.round1, Some(at(2026, 10, 31, 22, 0)));
         assert_eq!(a.ends, None, "not announced yet");
         let c = a.conditions.unwrap();
-        assert_eq!((c.track.as_str(), c.surface.as_str(), c.distance, c.layout.as_str(), c.direction.as_str()), ("Chukyo", "Turf", 1200, "", "Left"));
-        assert_eq!((c.season, c.weather, c.ground), (Some(4), Some(1), Some(1)), "Winter, Sunny, Firm");
+        assert_eq!(
+            (
+                c.track.as_str(),
+                c.surface.as_str(),
+                c.distance,
+                c.layout.as_str(),
+                c.direction.as_str()
+            ),
+            ("Chukyo", "Turf", 1200, "", "Left")
+        );
+        assert_eq!(
+            (c.season, c.weather, c.ground),
+            (Some(4), Some(1), Some(1)),
+            "Winter, Sunny, Firm"
+        );
         assert_eq!(a.disabled.len(), 9);
         assert_eq!(a.disabled[0], "Night Races ◎");
         assert_eq!(a.disabled[8], "Collaborative Graded Races ×");
@@ -1018,8 +1332,15 @@ mod tests {
             assert_eq!(a.round1, Some(at(2026, 10, 10, 22, 0)), "{id}");
             assert_eq!(a.ends, Some(at(2026, 10, 16, 21, 59)), "{id}");
             let c = a.conditions.unwrap();
-            assert_eq!((c.track.as_str(), c.distance, c.layout.as_str()), ("Nakayama", 2500, "inner"));
-            assert_eq!((c.season, c.weather, c.ground), (Some(4), Some(2), Some(2)), "Winter, Cloudy, Good");
+            assert_eq!(
+                (c.track.as_str(), c.distance, c.layout.as_str()),
+                ("Nakayama", 2500, "inner")
+            );
+            assert_eq!(
+                (c.season, c.weather, c.ground),
+                (Some(4), Some(2), Some(2)),
+                "Winter, Cloudy, Good"
+            );
             assert_eq!(a.disabled.len(), 9, "{id}");
         }
     }
@@ -1029,24 +1350,48 @@ mod tests {
         let a = news().into_iter().find(|a| a.id == 1112).unwrap();
         assert_eq!(a.kind, Kind::LegendRace);
         assert_eq!(a.starts, Some(at(2026, 10, 19, 22, 0)));
-        assert_eq!(a.periods, vec![(at(2026, 10, 19, 22, 0), at(2026, 10, 22, 14, 59)), (at(2026, 10, 22, 15, 0), at(2026, 10, 25, 14, 59))]);
+        assert_eq!(
+            a.periods,
+            vec![
+                (at(2026, 10, 19, 22, 0), at(2026, 10, 22, 14, 59)),
+                (at(2026, 10, 22, 15, 0), at(2026, 10, 25, 14, 59))
+            ]
+        );
         let c = a.conditions.unwrap();
-        assert_eq!((c.race.as_deref(), c.track.as_str(), c.distance, c.layout.as_str()), (Some("Arima Kinen"), "Nakayama", 2500, "inner"));
+        assert_eq!(
+            (
+                c.race.as_deref(),
+                c.track.as_str(),
+                c.distance,
+                c.layout.as_str()
+            ),
+            (Some("Arima Kinen"), "Nakayama", 2500, "inner")
+        );
         let story = news().into_iter().find(|a| a.id == 1125).unwrap();
         assert_eq!(story.kind, Kind::Other);
-        assert_eq!(story.periods, vec![(at(2026, 10, 20, 22, 0), at(2026, 11, 1, 21, 59))]);
+        assert_eq!(
+            story.periods,
+            vec![(at(2026, 10, 20, 22, 0), at(2026, 11, 1, 21, 59))]
+        );
     }
 
     #[test]
     fn reads_umalator_presets() {
         let p = parse_umalator_presets(&fixture("umalator_presets_sample.js"));
         let cap = p.iter().find(|e| e.name == "Capricorn Cup").unwrap();
-        assert_eq!((cap.id, cap.course, cap.date.as_str(), cap.confirmed), (21, 10701, "2026-10-25", false));
+        assert_eq!(
+            (cap.id, cap.course, cap.date.as_str(), cap.confirmed),
+            (21, 10701, "2026-10-25", false)
+        );
         assert!(p.iter().all(|e| e.is_cm()));
     }
 
     fn kb() -> Knowledge {
-        Knowledge::load(Some(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()))
+        Knowledge::load(Some(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+        ))
     }
 
     /// All nine disabled-skill names resolve to skill ids.
@@ -1056,7 +1401,12 @@ mod tests {
         let a = news().into_iter().find(|a| a.id == 1100).unwrap();
         let (ids, missing) = resolve_skills(&kb, &a.disabled);
         assert!(missing.is_empty(), "{missing:?}");
-        assert_eq!(ids, vec![202231, 202232, 202233, 202241, 202242, 202243, 202251, 202252, 202253]);
+        assert_eq!(
+            ids,
+            vec![
+                202231, 202232, 202233, 202241, 202242, 202243, 202251, 202252, 202253
+            ]
+        );
     }
 
     /// The official announcement beats Umalator's guess; Umalator's exact course stays when it
@@ -1065,25 +1415,62 @@ mod tests {
     fn official_dates_win_and_courses_stay_exact() {
         let kb = kb();
         let bundled = kb.umalator_presets.clone();
-        let live = LiveData { announcements: news(), umalator_presets: parse_umalator_presets(&fixture("umalator_presets_sample.js")), ..Default::default() };
+        let live = LiveData {
+            announcements: news(),
+            umalator_presets: parse_umalator_presets(&fixture("umalator_presets_sample.js")),
+            ..Default::default()
+        };
         let merged = merge(&kb, &bundled, &live);
-        let cap = merged.iter().find(|e| e.name == "Capricorn Cup" && e.date.as_str() > "2026-09").unwrap();
+        let cap = merged
+            .iter()
+            .find(|e| e.name == "Capricorn Cup" && e.date.as_str() > "2026-09")
+            .unwrap();
         assert_eq!(cap.date, "2026-10-31", "Round 1, not Umalator's 2026-10-25");
-        assert_eq!((cap.league_selection, cap.round1), (Some(at(2026, 10, 27, 22, 0)), Some(at(2026, 10, 31, 22, 0))));
+        assert_eq!(
+            (cap.league_selection, cap.round1),
+            (Some(at(2026, 10, 27, 22, 0)), Some(at(2026, 10, 31, 22, 0)))
+        );
         assert!(cap.announced && cap.source == EventSource::Official);
         assert_eq!(cap.course, 10701, "Chukyo Turf 1200m");
         assert_eq!(cap.disabled_skills.len(), 9);
         assert_eq!(cap.conditions, "Firm · Sunny · Winter · Midday");
-        let sag = merged.iter().find(|e| e.name == "Sagittarius Cup" && e.date.as_str() > "2026-09").unwrap();
-        assert_eq!((sag.date.as_str(), sag.course, sag.ends), ("2026-10-10", 10506, Some(at(2026, 10, 16, 21, 59))));
-        let aqu = merged.iter().find(|e| e.name == "Aquarius Cup" && e.date.as_str() > "2026-09").unwrap();
-        assert!(!aqu.announced && aqu.source == EventSource::Umalator, "not announced: Umalator's estimate");
+        let sag = merged
+            .iter()
+            .find(|e| e.name == "Sagittarius Cup" && e.date.as_str() > "2026-09")
+            .unwrap();
+        assert_eq!(
+            (sag.date.as_str(), sag.course, sag.ends),
+            ("2026-10-10", 10506, Some(at(2026, 10, 16, 21, 59)))
+        );
+        let aqu = merged
+            .iter()
+            .find(|e| e.name == "Aquarius Cup" && e.date.as_str() > "2026-09")
+            .unwrap();
+        assert!(
+            !aqu.announced && aqu.source == EventSource::Umalator,
+            "not announced: Umalator's estimate"
+        );
         assert!(merged.windows(2).all(|w| w[0].date <= w[1].date));
         // Offline, without Umalator: the bundled presets, still corrected by the official news.
-        let offline = merge(&kb, &bundled, &LiveData { announcements: news(), ..Default::default() });
-        let cap = offline.iter().find(|e| e.name == "Capricorn Cup" && e.date.as_str() > "2026-09").unwrap();
+        let offline = merge(
+            &kb,
+            &bundled,
+            &LiveData {
+                announcements: news(),
+                ..Default::default()
+            },
+        );
+        let cap = offline
+            .iter()
+            .find(|e| e.name == "Capricorn Cup" && e.date.as_str() > "2026-09")
+            .unwrap();
         assert_eq!((cap.date.as_str(), cap.course), ("2026-10-31", 10701));
-        assert!(offline.iter().filter(|e| !e.announced).all(|e| e.source == EventSource::Bundled));
+        assert!(
+            offline
+                .iter()
+                .filter(|e| !e.announced)
+                .all(|e| e.source == EventSource::Bundled)
+        );
     }
 
     /// An announcement with an inner/outer layout picks that layout when Umalator guessed another
@@ -1093,10 +1480,17 @@ mod tests {
         let kb = kb();
         let mut a = news().into_iter().find(|a| a.id == 1087).unwrap();
         a.cup = Some("Ophiuchus Cup".into());
-        let live = LiveData { announcements: vec![a], ..Default::default() };
+        let live = LiveData {
+            announcements: vec![a],
+            ..Default::default()
+        };
         let merged = merge(&kb, &[], &live);
         let oph = merged.iter().find(|e| e.name == "Ophiuchus Cup").unwrap();
-        assert_eq!((oph.course, oph.date.as_str(), oph.event.as_str()), (10506, "2026-10-10", "Champions Meeting"), "Nakayama Turf 2500m (inner)");
+        assert_eq!(
+            (oph.course, oph.date.as_str(), oph.event.as_str()),
+            (10506, "2026-10-10", "Champions Meeting"),
+            "Nakayama Turf 2500m (inner)"
+        );
     }
 
     /// Hits the live feed and Umalator: `cargo test --release live_sources -- --ignored --nocapture`.
@@ -1108,7 +1502,15 @@ mod tests {
         assert!(d.news.ok && d.umalator.ok);
         let merged = merge(&kb(), &kb().umalator_presets, &d);
         for e in merged.iter().filter(|e| e.date.as_str() >= "2026-10-01") {
-            eprintln!("{} {} {} {:?} announced={} disabled={}", e.date, e.name, e.course_name, e.source, e.announced, e.disabled_skills.len());
+            eprintln!(
+                "{} {} {} {:?} announced={} disabled={}",
+                e.date,
+                e.name,
+                e.course_name,
+                e.source,
+                e.announced,
+                e.disabled_skills.len()
+            );
         }
     }
 }
@@ -1138,7 +1540,9 @@ pub(crate) fn enabled() -> bool {
     use std::sync::atomic::Ordering;
     match ENABLED.load(Ordering::Relaxed) {
         0 => {
-            let on = crate::settings::get("live_events").and_then(|v| v.as_bool()).unwrap_or(true);
+            let on = crate::settings::get("live_events")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             ENABLED.store(if on { 2 } else { 1 }, Ordering::Relaxed);
             on
         }
@@ -1164,7 +1568,11 @@ impl crate::App {
             self.live.data = Some(d);
             self.apply_live();
         }
-        let stale = self.live.data.as_ref().is_none_or(|d| now() - d.checked_at > STALE_SECS);
+        let stale = self
+            .live
+            .data
+            .as_ref()
+            .is_none_or(|d| now() - d.checked_at > STALE_SECS);
         self.live.start = match mode {
             Some("fetch") => true,
             Some("cache") => false,
@@ -1209,10 +1617,10 @@ impl crate::App {
         if std::mem::take(&mut self.live.manual) {
             use crate::ui_util::ToastKind;
             match (news_ok, uma_ok) {
-                (true, true) => self.toast("Champions Meeting schedule updated from umamusume.com and umalator.app.", ToastKind::Success),
-                (true, false) => self.toast("Updated from umamusume.com; umalator.app didn't answer, so its last presets stay.", ToastKind::Warn),
-                (false, true) => self.toast(format!("umamusume.com didn't answer ({news_err}); updated Umalator's estimates only."), ToastKind::Warn),
-                (false, false) => self.toast("Couldn't reach umamusume.com or umalator.app; using what was saved before.", ToastKind::Error),
+                (true, true) => self.toast(t!("Champions Meeting schedule updated from umamusume.com and umalator.app."), ToastKind::Success),
+                (true, false) => self.toast(t!("Updated from umamusume.com; umalator.app didn't answer, so its last presets stay."), ToastKind::Warn),
+                (false, true) => self.toast(tf!("umamusume.com didn't answer ({}); updated Umalator's estimates only.", news_err), ToastKind::Warn),
+                (false, false) => self.toast(t!("Couldn't reach umamusume.com or umalator.app; using what was saved before."), ToastKind::Error),
             }
         }
     }
@@ -1221,25 +1629,68 @@ impl crate::App {
     pub(crate) fn live_status(&self) -> (String, String, bool) {
         let sources = |d: &LiveData| {
             let line = |name: &str, s: &SourceStatus| {
-                let when = s.fetched_at.map(|t| format!(", last fetched {}", fmt_ago(now() - t))).unwrap_or_default();
-                format!("{name}: {} {}{when}", if s.ok { "✔" } else { "✖" }, s.message)
+                let when = s
+                    .fetched_at
+                    .map(|t| tf!(", last fetched {}", fmt_ago(now() - t)))
+                    .unwrap_or_default();
+                format!(
+                    "{name}: {} {}{when}",
+                    if s.ok { "✔" } else { "✖" },
+                    s.message
+                )
             };
-            format!("{}\n{}\nChecked {}. Settings → Data and updates refreshes it.", line("umamusume.com", &d.news), line("umalator.app", &d.umalator), fmt_ago(now() - d.checked_at))
+            tf!(
+                "{}\n{}\nChecked {}. Settings → Data and updates refreshes it.",
+                line("umamusume.com", &d.news),
+                line("umalator.app", &d.umalator),
+                fmt_ago(now() - d.checked_at)
+            )
         };
         if self.live.rx.is_some() {
-            return ("📅 Checking the Champions Meeting schedule…".into(), String::new(), false);
+            return (
+                t!("📅 Checking the Champions Meeting schedule…").into(),
+                String::new(),
+                false,
+            );
         }
-        let bundled_day = self.kb.umalator_built.as_deref().map(|b| b[..10.min(b.len())].to_string()).unwrap_or_else(|| "the bundled data".into());
+        let bundled_day = self
+            .kb
+            .umalator_built
+            .as_deref()
+            .map(|b| b[..10.min(b.len())].to_string())
+            .unwrap_or_else(|| t!("the bundled data").into());
         match &self.live.data {
-            Some(d) if d.news.ok => (format!("📅 CM schedule: updated {} (umamusume.com)", fmt_ago(now() - d.checked_at)), sources(d), false),
+            Some(d) if d.news.ok => (
+                tf!(
+                    "📅 CM schedule: updated {} (umamusume.com)",
+                    fmt_ago(now() - d.checked_at)
+                ),
+                sources(d),
+                false,
+            ),
             Some(d) => match d.news.fetched_at {
-                Some(t) => (format!("📅 CM schedule offline: from {} (umamusume.com)", fmt_ago(now() - t)), sources(d), true),
-                None => (format!("📅 CM schedule offline: using data from {bundled_day}"), sources(d), true),
+                Some(t) => (
+                    tf!(
+                        "📅 CM schedule offline: from {} (umamusume.com)",
+                        fmt_ago(now() - t)
+                    ),
+                    sources(d),
+                    true,
+                ),
+                None => (
+                    tf!("📅 CM schedule offline: using data from {}", bundled_day),
+                    sources(d),
+                    true,
+                ),
             },
-            None if enabled() => (format!("📅 CM schedule: using data from {bundled_day}"), "Not fetched yet.".into(), false),
+            None if enabled() => (
+                tf!("📅 CM schedule: using data from {}", bundled_day),
+                t!("Not fetched yet.").into(),
+                false,
+            ),
             None => (
-                format!("📅 CM schedule: using data from {bundled_day}"),
-                "Fetching the live schedule is off (Settings → Data and updates).".into(),
+                tf!("📅 CM schedule: using data from {}", bundled_day),
+                t!("Fetching the live schedule is off (Settings → Data and updates).").into(),
                 false,
             ),
         }

@@ -5,10 +5,18 @@
 /plans/
 /results/
 /profiles/
+/UmamusumeExplorer-master/
+/.zcode/
+/AGENTS.md.bk
+/CHANGELOG.md
+/CLAUDE.md.bk
+/opencode.json.bk
 
 # Build output, and the per-machine toolchain setup that app/setup-toolchain.ps1 writes
 /app/target/
 /app/.cargo/
+*.dll
+
 
 # Downloaded on demand by the Ask tab
 /tools/opencode/
@@ -18,3 +26,10 @@
 /knowledge/digest/
 *.simulate.log
 __pycache__/
+
+# Exported files (e.g. audio from Music tab)
+/exports/
+
+# Local only: development plans and the demo launcher
+/plan/
+/UmaYu-demo.bat

@@ -5,7 +5,7 @@
 //! Two backends. The Claude API: raw HTTP through Windows' curl.exe (Rust has no official
 //! Anthropic SDK, and TLS crates need a C compiler this toolchain lacks), streamed over SSE; the UI
 //! thread runs the tools (they read and change App state) and a worker thread only does HTTP.
-//! OpenCode: `opencode run` with the same tools over MCP (`umalord.exe --mcp`), which writes its
+//! OpenCode: `opencode run` with the same tools over MCP (`umayu.exe --mcp`), which writes its
 //! approvals, page requests and draft to the bridge folder this tab watches (`agent/bridge.rs`).
 
 use std::collections::{HashMap, HashSet};
@@ -20,10 +20,10 @@ use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke, vec2};
 use serde_json::{Value, json};
 
 use crate::App;
-use crate::ui_util::UiExt;
 use crate::agent::{Approval, Card, Exec, OpenAt, ToolOut, Visual, Wait};
 use crate::tab_umas::filter_heading;
 use crate::theme::{pal, size};
+use crate::ui_util::UiExt;
 use crate::ui_util::{badge, semibold, truncate};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -172,10 +172,17 @@ const SUGGESTIONS: [&str; 4] = [
 
 impl AskState {
     pub fn new(root: Option<&Path>) -> Self {
-        let saved_key = crate::settings::get("api_key").and_then(|v| v.as_str().map(str::to_string)).filter(|k| !k.is_empty());
+        let saved_key = crate::settings::get("api_key")
+            .and_then(|v| v.as_str().map(str::to_string))
+            .filter(|k| !k.is_empty());
         let exe = crate::ask_opencode::find_exe(root);
         let saved = |k: &str| crate::settings::get(k).and_then(|v| v.as_str().map(str::to_string));
-        let flag = |k: &str| !cfg!(test) && crate::settings::get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+        let flag = |k: &str| {
+            !cfg!(test)
+                && crate::settings::get(k)
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+        };
         let backend = match saved("ask_backend").as_deref() {
             Some("claude_api") => Backend::ClaudeApi,
             // Default to the free backend; if OpenCode isn't installed the tab offers the download.
@@ -187,7 +194,8 @@ impl AskState {
                 exe,
                 models: Vec::new(),
                 models_rx: None,
-                model: saved("opencode_model").unwrap_or_else(|| crate::ask_opencode::DEFAULT_MODEL.to_string()),
+                model: saved("opencode_model")
+                    .unwrap_or_else(|| crate::ask_opencode::DEFAULT_MODEL.to_string()),
                 session: None,
                 rx: None,
                 child: Default::default(),
@@ -221,8 +229,10 @@ impl AskState {
             activity: Vec::new(),
             answer: None,
             // UMALORD_APPROVE=1 allows plan saves and result logs without asking (unattended runs).
-            auto_save: flag("agent_auto_save_plan") || std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "1"),
-            auto_log: flag("agent_auto_log_result") || std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "1"),
+            auto_save: flag("agent_auto_save_plan")
+                || std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "1"),
+            auto_log: flag("agent_auto_log_result")
+                || std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "1"),
             shot_on_approval: std::env::var("UMALORD_APPROVE").is_ok_and(|v| v == "ask"),
         }
     }
@@ -256,7 +266,8 @@ impl AskState {
 
     /// Whether a Write tool may run without the approval card.
     fn auto_approved(&self, tool: &str, a: &Approval) -> bool {
-        !a.always_ask && ((tool == "save_plan" && self.auto_save) || (tool == "log_result" && self.auto_log))
+        !a.always_ask
+            && ((tool == "save_plan" && self.auto_save) || (tool == "log_result" && self.auto_log))
     }
 
     fn clear(&mut self) {
@@ -286,7 +297,13 @@ pub(crate) fn hidden(cmd: &mut std::process::Command) -> &mut std::process::Comm
 }
 
 fn ant_token() -> Option<String> {
-    let out = hidden(std::process::Command::new("ant").args(["auth", "print-credentials", "--access-token"])).output().ok()?;
+    let out = hidden(std::process::Command::new("ant").args([
+        "auth",
+        "print-credentials",
+        "--access-token",
+    ]))
+    .output()
+    .ok()?;
     let token = String::from_utf8(out.stdout).ok()?.trim().to_string();
     (out.status.success() && !token.is_empty()).then_some(token)
 }
@@ -325,7 +342,10 @@ impl Acc {
         let idx = data["index"].as_u64().unwrap_or(0) as usize;
         match data["type"].as_str().unwrap_or_default() {
             "message_start" => {
-                self.model = data["message"]["model"].as_str().unwrap_or_default().to_string();
+                self.model = data["message"]["model"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
                 if let Some(u) = data["message"]["usage"].as_object() {
                     self.usage.extend(u.clone());
                 }
@@ -338,7 +358,9 @@ impl Acc {
                 match block["type"].as_str().unwrap_or_default() {
                     "tool_use" => {
                         self.partial.insert(idx, String::new());
-                        out.push(StreamEvent::Tool(block["name"].as_str().unwrap_or_default().to_string()));
+                        out.push(StreamEvent::Tool(
+                            block["name"].as_str().unwrap_or_default().to_string(),
+                        ));
                     }
                     "text" => {
                         if let Some(t) = block["text"].as_str().filter(|t| !t.is_empty()) {
@@ -351,7 +373,9 @@ impl Acc {
             }
             "content_block_delta" => {
                 let d = &data["delta"];
-                let Some(block) = self.blocks.get_mut(idx) else { return out };
+                let Some(block) = self.blocks.get_mut(idx) else {
+                    return out;
+                };
                 let append = |b: &mut Value, key: &str, s: &str| {
                     let now = b[key].as_str().unwrap_or_default().to_string();
                     b[key] = Value::String(now + s);
@@ -362,7 +386,11 @@ impl Acc {
                         append(block, "text", t);
                         out.push(StreamEvent::Text(idx, t.to_string()));
                     }
-                    "input_json_delta" => self.partial.entry(idx).or_default().push_str(d["partial_json"].as_str().unwrap_or_default()),
+                    "input_json_delta" => self
+                        .partial
+                        .entry(idx)
+                        .or_default()
+                        .push_str(d["partial_json"].as_str().unwrap_or_default()),
                     "thinking_delta" => {
                         let t = d["thinking"].as_str().unwrap_or_default();
                         append(block, "thinking", t);
@@ -370,7 +398,11 @@ impl Acc {
                             out.push(StreamEvent::Note(idx, t.to_string()));
                         }
                     }
-                    "signature_delta" => append(block, "signature", d["signature"].as_str().unwrap_or_default()),
+                    "signature_delta" => append(
+                        block,
+                        "signature",
+                        d["signature"].as_str().unwrap_or_default(),
+                    ),
                     "citations_delta" => {
                         if !block["citations"].is_array() {
                             block["citations"] = json!([]);
@@ -387,7 +419,11 @@ impl Acc {
                     && let Some(block) = self.blocks.get_mut(idx)
                 {
                     // Eager input streaming: the API doesn't validate the input, so parse it strictly.
-                    match serde_json::from_str::<Value>(if raw.trim().is_empty() { "{}" } else { &raw }) {
+                    match serde_json::from_str::<Value>(if raw.trim().is_empty() {
+                        "{}"
+                    } else {
+                        &raw
+                    }) {
                         Ok(v) if v.is_object() => block["input"] = v,
                         _ => {
                             block["input"] = json!({});
@@ -403,13 +439,21 @@ impl Acc {
                     self.stop_reason = data["delta"]["stop_reason"].clone();
                 }
                 if !data["delta"]["stop_details"].is_null() {
-                    self.usage.insert("stop_details".into(), data["delta"]["stop_details"].clone());
+                    self.usage
+                        .insert("stop_details".into(), data["delta"]["stop_details"].clone());
                 }
                 if let Some(u) = data["usage"].as_object() {
                     self.usage.extend(u.clone());
                 }
             }
-            "error" => self.error = Some(data["error"]["message"].as_str().unwrap_or("The API reported an error.").to_string()),
+            "error" => {
+                self.error = Some(
+                    data["error"]["message"]
+                        .as_str()
+                        .unwrap_or("The API reported an error.")
+                        .to_string(),
+                )
+            }
             _ => {}
         }
         out
@@ -433,17 +477,33 @@ impl Acc {
 
 /// POST the body with curl.exe and stream the answer back. Headers go through a temp file so the
 /// key isn't on a command line.
-fn stream_request(body: Value, auth: Auth, betas: Vec<&'static str>, child: Arc<Mutex<Option<Child>>>, tx: Sender<StreamEvent>, wake: impl Fn() + Send + 'static) {
+fn stream_request(
+    body: Value,
+    auth: Auth,
+    betas: Vec<&'static str>,
+    child: Arc<Mutex<Option<Child>>>,
+    tx: Sender<StreamEvent>,
+    wake: impl Fn() + Send + 'static,
+) {
     std::thread::spawn(move || {
         let send = |e: StreamEvent| {
             let _ = tx.send(e);
             wake();
         };
         let tmp = std::env::temp_dir();
-        let stamp = format!("umalord-{}-{}", std::process::id(), SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        let stamp = format!(
+            "umalord-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        );
         let body_path = tmp.join(format!("{stamp}.json"));
         let head_path = tmp.join(format!("{stamp}.hdr"));
-        let mut headers = vec!["content-type: application/json".to_string(), "anthropic-version: 2023-06-01".to_string()];
+        let mut headers = vec![
+            "content-type: application/json".to_string(),
+            "anthropic-version: 2023-06-01".to_string(),
+        ];
         let mut betas = betas;
         match &auth {
             Auth::ApiKey(k) => headers.push(format!("x-api-key: {k}")),
@@ -459,18 +519,37 @@ fn stream_request(body: Value, auth: Auth, betas: Vec<&'static str>, child: Arc<
             std::fs::write(&body_path, body.to_string()).map_err(|e| e.to_string())?;
             std::fs::write(&head_path, headers.join("\n")).map_err(|e| e.to_string())?;
             let mut cmd = std::process::Command::new("curl.exe");
-            cmd.args(["-sS", "-N", "--max-time", "900", "-X", "POST", API_URL, "-H", &format!("@{}", head_path.display()), "--data-binary", &format!("@{}", body_path.display()), "-w", "\n%{http_code}"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+            cmd.args([
+                "-sS",
+                "-N",
+                "--max-time",
+                "900",
+                "-X",
+                "POST",
+                API_URL,
+                "-H",
+                &format!("@{}", head_path.display()),
+                "--data-binary",
+                &format!("@{}", body_path.display()),
+                "-w",
+                "\n%{http_code}",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
             hidden(&mut cmd);
-            let mut proc = cmd.spawn().map_err(|e| format!("couldn't run curl.exe: {e}"))?;
+            let mut proc = cmd
+                .spawn()
+                .map_err(|e| format!("couldn't run curl.exe: {e}"))?;
             let stdout = proc.stdout.take();
             let mut stderr = proc.stderr.take();
             *child.lock().unwrap_or_else(|p| p.into_inner()) = Some(proc);
             let mut acc = Acc::default();
             let mut other = String::new();
-            for line in BufReader::new(stdout.ok_or("no output from curl")?).lines().map_while(Result::ok) {
+            for line in BufReader::new(stdout.ok_or("no output from curl")?)
+                .lines()
+                .map_while(Result::ok)
+            {
                 if let Some(d) = line.strip_prefix("data:") {
                     if let Ok(v) = serde_json::from_str::<Value>(d.trim()) {
                         for e in acc.apply(&v) {
@@ -486,14 +565,26 @@ fn stream_request(body: Value, auth: Auth, betas: Vec<&'static str>, child: Arc<
             if let Some(e) = stderr.as_mut() {
                 let _ = e.read_to_string(&mut err);
             }
-            let status = child.lock().unwrap_or_else(|p| p.into_inner()).take().and_then(|mut p| p.wait().ok());
-            let Some(status) = status else { return Err("Stopped.".into()) };
+            let status = child
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take()
+                .and_then(|mut p| p.wait().ok());
+            let Some(status) = status else {
+                return Err("Stopped.".into());
+            };
             if !status.success() {
                 return Err(format!("curl failed: {}", err.trim()));
             }
-            let (json_text, code) = other.trim_end().rsplit_once('\n').map_or(("", other.trim()), |(a, b)| (a, b.trim()));
+            let (json_text, code) = other
+                .trim_end()
+                .rsplit_once('\n')
+                .map_or(("", other.trim()), |(a, b)| (a, b.trim()));
             if code != "200" {
-                let msg = serde_json::from_str::<Value>(json_text).ok().and_then(|v| v["error"]["message"].as_str().map(String::from)).unwrap_or_else(|| "unknown error".into());
+                let msg = serde_json::from_str::<Value>(json_text)
+                    .ok()
+                    .and_then(|v| v["error"]["message"].as_str().map(String::from))
+                    .unwrap_or_else(|| "unknown error".into());
                 return Err(format!("API error {code}: {msg}"));
             }
             acc.finish()
@@ -511,13 +602,24 @@ impl App {
     fn system_prompt(&self) -> String {
         let mut roster = String::new();
         for u in &self.roster.umas {
-            roster.push_str(&format!("- uma {} [{}] {}★ P{}\n", u.name, u.outfit, u.stars, u.potential));
+            roster.push_str(&format!(
+                "- uma {} [{}] {}★ P{}\n",
+                u.name, u.outfit, u.stars, u.potential
+            ));
         }
         for c in &self.roster.cards {
-            roster.push_str(&format!("- card {} {} {} [{}] LB{} Lv{}\n", c.rarity.label(), c.card_type.label(), c.uma, c.title, c.lb, c.level));
+            roster.push_str(&format!(
+                "- card {} {} {} [{}] LB{} Lv{}\n",
+                c.rarity.label(),
+                c.card_type.label(),
+                c.uma,
+                c.title,
+                c.lb,
+                c.level
+            ));
         }
         format!(
-            "You are the umaLord assistant inside the user's desktop app for Uma Musume: Pretty Derby (Global/English server). Today is {today}.\n\
+            "You are the UmaYu assistant inside the user's desktop app for Uma Musume: Pretty Derby (Global/English server). Today is {today}.\n\
              You answer questions about this account (its umas and support cards, what to train and why, decks, skills, parents and sparks, and goals such as \
              Team Trials, Champions Meeting, parent runs and League of Heroes), and you can work the app: draft career plans, choose trainees, decks and skills, \
              run the race simulator, and save plans and results once the user approves.\n\n\
@@ -554,11 +656,24 @@ impl App {
         };
         let p = &self.planner.plan;
         let plan = match p.trainee.and_then(|t| self.kb.umas.get(&t)) {
-            Some(u) => format!("'{}' ({} [{}], {})", if p.title.is_empty() { "untitled" } else { &p.title }, u.name, u.outfit, p.purpose.label()),
+            Some(u) => format!(
+                "'{}' ({} [{}], {})",
+                if p.title.is_empty() {
+                    "untitled"
+                } else {
+                    &p.title
+                },
+                u.name,
+                u.outfit,
+                p.purpose.label()
+            ),
             None if p.title.is_empty() => "empty".to_string(),
             None => format!("'{}' (no trainee yet)", p.title),
         };
-        format!("<app_state>Page before the question: {page}. Working plan in the Planner: {plan}. Today: {}.</app_state>", crate::ui_util::today())
+        format!(
+            "<app_state>Page before the question: {page}. Working plan in the Planner: {plan}. Today: {}.</app_state>",
+            crate::ui_util::today()
+        )
     }
 
     fn send_request(&mut self, ctx: &egui::Context) {
@@ -601,14 +716,23 @@ impl App {
         let (tx, rx) = channel();
         let child: Arc<Mutex<Option<Child>>> = Default::default();
         let wake = ctx.clone();
-        stream_request(body, auth, betas, child.clone(), tx, move || wake.request_repaint());
-        self.ask.stream = Some(Stream { rx, child, turns: HashMap::new() });
+        stream_request(body, auth, betas, child.clone(), tx, move || {
+            wake.request_repaint()
+        });
+        self.ask.stream = Some(Stream {
+            rx,
+            child,
+            turns: HashMap::new(),
+        });
         self.ask.status = None;
     }
 
     /// An approval card is waiting for the user.
     pub(crate) fn approval_showing(&self) -> bool {
-        self.ask.turns.iter().any(|t| matches!(t, Turn::Tool(x) if matches!(x.state, ToolState::Asking(..))))
+        self.ask
+            .turns
+            .iter()
+            .any(|t| matches!(t, Turn::Tool(x) if matches!(x.state, ToolState::Asking(..))))
     }
 
     pub(crate) fn ask_busy(&self) -> bool {
@@ -623,26 +747,45 @@ impl App {
                 CallState::Waiting(w) => {
                     let frac = match w {
                         Wait::Pick { .. } => self.planner.pick_job.as_ref().map(|j| j.fraction()),
-                        Wait::SkillValues { .. } => self.planner.skill_job.as_ref().map(|j| j.fraction()),
+                        Wait::SkillValues { .. } => {
+                            self.planner.skill_job.as_ref().map(|j| j.fraction())
+                        }
                         _ => self.sim_job_fraction(),
                     };
                     return (format!("{label}…"), frac);
                 }
-                CallState::Asking => return ("Waiting for your answer on the card above.".into(), None),
+                CallState::Asking => {
+                    return (
+                        t!("Waiting for your answer on the card above.").into(),
+                        None,
+                    );
+                }
                 _ => {}
             }
         }
         if self.approval_showing() {
-            return ("Waiting for your answer on the card above.".into(), None);
+            return (
+                t!("Waiting for your answer on the card above.").into(),
+                None,
+            );
         }
         if self.ask.stream.is_some() {
-            return (self.ask.activity.last().map_or("Thinking…".to_string(), |a| truncate(a, 80)), None);
+            return (
+                self.ask
+                    .activity
+                    .last()
+                    .map_or(t!("Thinking…").to_string(), |a| truncate(a, 80)),
+                None,
+            );
         }
         let line = match self.ask.activity.last() {
             // OpenCode reports umaLord's tools by name: say what they do.
-            Some(a) if a.starts_with("umalord_") => crate::agent::find(a.split(' ').next().unwrap_or_default()).map_or(a.clone(), |s| format!("Done: {}", s.label)),
-            Some(a) => format!("Looking up: {}", truncate(a, 80)),
-            None => "Working…".to_string(),
+            Some(a) if a.starts_with("umalord_") => {
+                crate::agent::find(a.split(' ').next().unwrap_or_default())
+                    .map_or(a.clone(), |s| tf!("Done: {}", s.label))
+            }
+            Some(a) => tf!("Looking up: {}", truncate(a, 80)),
+            None => t!("Working…").to_string(),
         };
         (line, None)
     }
@@ -662,7 +805,7 @@ impl App {
                 StreamEvent::Note(idx, t) => self.stream_text(idx, &t, true),
                 StreamEvent::Tool(name) => {
                     let label = crate::agent::find(&name).map_or(name, |s| s.label.to_string());
-                    self.ask.activity.push(format!("Preparing: {label}"));
+                    self.ask.activity.push(tf!("Preparing: {}", label));
                 }
                 StreamEvent::Done(result) => {
                     self.ask.stream = None;
@@ -681,7 +824,9 @@ impl App {
 
     /// Streamed text goes into its block's turn; a note's into a note turn.
     fn stream_text(&mut self, idx: usize, t: &str, note: bool) {
-        let Some(s) = &mut self.ask.stream else { return };
+        let Some(s) = &mut self.ask.stream else {
+            return;
+        };
         match s.turns.get(&idx).copied() {
             Some(i) => match &mut self.ask.turns[i] {
                 Turn::Assistant(text) | Turn::Note(text) => text.push_str(t),
@@ -689,22 +834,31 @@ impl App {
             },
             None => {
                 s.turns.insert(idx, self.ask.turns.len());
-                self.ask.turns.push(if note { Turn::Note(t.to_string()) } else { Turn::Assistant(t.to_string()) });
+                self.ask.turns.push(if note {
+                    Turn::Note(t.to_string())
+                } else {
+                    Turn::Assistant(t.to_string())
+                });
             }
         }
     }
 
     fn handle_message(&mut self, ctx: &egui::Context, resp: Value) {
         let u = &resp["usage"];
-        self.ask.tokens_in += u["input_tokens"].as_u64().unwrap_or(0) + u["cache_read_input_tokens"].as_u64().unwrap_or(0) + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+        self.ask.tokens_in += u["input_tokens"].as_u64().unwrap_or(0)
+            + u["cache_read_input_tokens"].as_u64().unwrap_or(0)
+            + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
         self.ask.cache_read += u["cache_read_input_tokens"].as_u64().unwrap_or(0);
         self.ask.tokens_out += u["output_tokens"].as_u64().unwrap_or(0);
         let stop = resp["stop_reason"].as_str().unwrap_or_default().to_string();
         if stop == "refusal" {
             // The whole chain declined: nothing of this turn runs, and it isn't echoed (the
             // transcript still ends with the user's message, which the next question joins).
-            let why = resp["stop_details"]["explanation"].as_str().unwrap_or("The model declined this request.");
-            self.ask.status = Some((format!("Declined: {why}"), true));
+            let why = resp["stop_details"]["explanation"].as_str().map_or_else(
+                || t!("The model declined this request.").to_string(),
+                str::to_string,
+            );
+            self.ask.status = Some((tf!("Declined: {}", why), true));
             self.finish_question(ctx);
             return;
         }
@@ -717,21 +871,32 @@ impl App {
             .enumerate()
             .filter(|(i, b)| {
                 let t = b["type"].as_str().unwrap_or_default();
-                t != "fallback" && !(boundary.is_some_and(|f| *i < f) && matches!(t, "thinking" | "redacted_thinking" | "tool_use"))
+                t != "fallback"
+                    && !(boundary.is_some_and(|f| *i < f)
+                        && matches!(t, "thinking" | "redacted_thinking" | "tool_use"))
             })
             .map(|(_, b)| b.clone())
             .collect();
         if !echoed.is_empty() {
-            self.ask.messages.push(json!({"role": "assistant", "content": echoed}));
+            self.ask
+                .messages
+                .push(json!({"role": "assistant", "content": echoed}));
         }
-        let calls: Vec<Value> = echoed.iter().filter(|b| b["type"] == "tool_use").cloned().collect();
+        let calls: Vec<Value> = echoed
+            .iter()
+            .filter(|b| b["type"] == "tool_use")
+            .cloned()
+            .collect();
         if calls.is_empty() {
             if stop == "max_tokens" {
-                self.ask.status = Some(("The answer hit the length limit and is cut off.".into(), true));
+                self.ask.status = Some((
+                    t!("The answer hit the length limit and is cut off.").into(),
+                    true,
+                ));
             } else {
                 let served = resp["model"].as_str().unwrap_or_default();
                 if served != MODELS[self.ask.model].0 && !served.is_empty() {
-                    self.ask.status = Some((format!("Answered by {served} (fallback)."), false));
+                    self.ask.status = Some((tf!("Answered by {} (fallback).", served), false));
                 }
             }
             self.finish_question(ctx);
@@ -742,22 +907,42 @@ impl App {
             let name = c["name"].as_str().unwrap_or_default().to_string();
             let spec = crate::agent::find(&name);
             let turn = self.ask.turns.len();
-            self.ask.turns.push(Turn::Tool(ToolTurn { icon: spec.map_or("🔧", |s| s.icon), label: spec.map_or(name.clone(), |s| s.label.to_string()), state: ToolState::Running }));
+            self.ask.turns.push(Turn::Tool(ToolTurn {
+                icon: spec.map_or("🔧", |s| s.icon),
+                label: spec.map_or(name.clone(), |s| s.label.to_string()),
+                state: ToolState::Running,
+            }));
             let state = if stop == "max_tokens" {
                 // A cut-off input often still parses: don't run it.
-                CallState::Ready(json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": "Your output hit the length limit before this tool's input was complete, so it didn't run. Call it again with a shorter input."}))
+                CallState::Ready(
+                    json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": "Your output hit the length limit before this tool's input was complete, so it didn't run. Call it again with a shorter input."}),
+                )
             } else if let Some(raw) = resp["invalid_inputs"].get(&id) {
-                CallState::Ready(json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": json!({"INVALID_JSON": raw}).to_string()}))
+                CallState::Ready(
+                    json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": json!({"INVALID_JSON": raw}).to_string()}),
+                )
             } else {
                 CallState::Queued
             };
             if let CallState::Ready(_) = state
                 && let Turn::Tool(t) = &mut self.ask.turns[turn]
             {
-                t.state = ToolState::Failed(Card { summary: "Its input was cut off or not valid JSON; the model was told to try again.".into(), ..Default::default() });
+                t.state = ToolState::Failed(Card {
+                    summary: t!(
+                        "Its input was cut off or not valid JSON; the model was told to try again."
+                    )
+                    .into(),
+                    ..Default::default()
+                });
             }
             self.ask.activity.push(format!("{name} {}", c["input"]));
-            self.ask.calls.push(Call { id, name, input: c["input"].clone(), turn, state });
+            self.ask.calls.push(Call {
+                id,
+                name,
+                input: c["input"].clone(),
+                turn,
+                state,
+            });
         }
         self.ask.rounds += 1;
         self.advance_calls(ctx);
@@ -765,7 +950,11 @@ impl App {
 
     fn set_tool_turn(&mut self, turn: usize, out: &ToolOut) {
         if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(turn) {
-            t.state = if out.is_error { ToolState::Failed(out.card.clone()) } else { ToolState::Done(out.card.clone()) };
+            t.state = if out.is_error {
+                ToolState::Failed(out.card.clone())
+            } else {
+                ToolState::Done(out.card.clone())
+            };
         }
     }
 
@@ -782,24 +971,26 @@ impl App {
             loop {
                 let next = match &calls[i].state {
                     CallState::Ready(_) => break,
-                    CallState::Queued => match self.agent_call(ctx, &calls[i].name, &calls[i].input) {
-                        Exec::Done(out) => {
-                            self.set_tool_turn(calls[i].turn, &out);
-                            CallState::Ready(result(&calls[i], &out))
-                        }
-                        Exec::Wait(w) => CallState::Waiting(w),
-                        Exec::Ask(a) if self.ask.auto_approved(&calls[i].name, &a) => {
-                            let out = self.agent_write(&calls[i].name, &calls[i].input);
-                            self.set_tool_turn(calls[i].turn, &out);
-                            CallState::Ready(result(&calls[i], &out))
-                        }
-                        Exec::Ask(a) => {
-                            if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(calls[i].turn) {
-                                t.state = ToolState::Asking(a.question, None);
+                    CallState::Queued => {
+                        match self.agent_call(ctx, &calls[i].name, &calls[i].input) {
+                            Exec::Done(out) => {
+                                self.set_tool_turn(calls[i].turn, &out);
+                                CallState::Ready(result(&calls[i], &out))
                             }
-                            CallState::Asking
+                            Exec::Wait(w) => CallState::Waiting(w),
+                            Exec::Ask(a) if self.ask.auto_approved(&calls[i].name, &a) => {
+                                let out = self.agent_write(&calls[i].name, &calls[i].input);
+                                self.set_tool_turn(calls[i].turn, &out);
+                                CallState::Ready(result(&calls[i], &out))
+                            }
+                            Exec::Ask(a) => {
+                                if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(calls[i].turn) {
+                                    t.state = ToolState::Asking(a.question, None);
+                                }
+                                CallState::Asking
+                            }
                         }
-                    },
+                    }
                     CallState::Waiting(w) => match self.agent_wait(*w) {
                         Some(out) => {
                             self.set_tool_turn(calls[i].turn, &out);
@@ -813,7 +1004,11 @@ impl App {
                     },
                     CallState::Asking => match answer {
                         Some((turn, yes)) if turn == calls[i].turn => {
-                            let out = if yes { self.agent_write(&calls[i].name, &calls[i].input) } else { ToolOut::err("The user declined.") };
+                            let out = if yes {
+                                self.agent_write(&calls[i].name, &calls[i].input)
+                            } else {
+                                ToolOut::err("The user declined.")
+                            };
                             self.set_tool_turn(calls[i].turn, &out);
                             CallState::Ready(result(&calls[i], &out))
                         }
@@ -826,12 +1021,30 @@ impl App {
                 calls[i].state = next;
             }
         }
-        let results: Vec<Value> = calls.into_iter().filter_map(|c| if let CallState::Ready(v) = c.state { Some(v) } else { None }).collect();
-        self.ask.messages.push(json!({"role": "user", "content": results}));
-        let over_time = self.ask.started.is_some_and(|s| s.elapsed() > QUESTION_LIMIT);
+        let results: Vec<Value> = calls
+            .into_iter()
+            .filter_map(|c| {
+                if let CallState::Ready(v) = c.state {
+                    Some(v)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.ask
+            .messages
+            .push(json!({"role": "user", "content": results}));
+        let over_time = self
+            .ask
+            .started
+            .is_some_and(|s| s.elapsed() > QUESTION_LIMIT);
         if self.ask.rounds >= MAX_TOOL_ROUNDS || over_time {
             // The transcript stays valid: the next question joins these tool results.
-            self.ask.status = Some(("Stopped after many steps. Ask it to carry on, or ask something narrower.".into(), true));
+            self.ask.status = Some((
+                t!("Stopped after many steps. Ask it to carry on, or ask something narrower.")
+                    .into(),
+                true,
+            ));
             self.finish_question(ctx);
             return;
         }
@@ -876,25 +1089,40 @@ impl App {
                     CallState::Ready(v) => v,
                     _ => {
                         if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(c.turn) {
-                            t.state = ToolState::Failed(Card { summary: "Stopped.".into(), ..Default::default() });
+                            t.state = ToolState::Failed(Card {
+                                summary: t!("Stopped.").into(),
+                                ..Default::default()
+                            });
                         }
                         json!({"type": "tool_result", "tool_use_id": c.id, "is_error": true, "content": "Stopped by the user."})
                     }
                 };
                 results.push(v);
             }
-            self.ask.messages.push(json!({"role": "user", "content": results}));
+            self.ask
+                .messages
+                .push(json!({"role": "user", "content": results}));
         }
-        if let Some(mut child) = self.ask.oc.child.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        if let Some(mut child) = self
+            .ask
+            .oc
+            .child
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
             let _ = child.kill();
         }
-        self.ask.status = Some(("Stopped.".into(), true));
+        self.ask.status = Some((t!("Stopped.").into(), true));
         self.finish_question(ctx);
     }
 
     /// Kill the request and OpenCode, if running (the window is closing).
     pub(crate) fn stop_ask_processes(&mut self) {
-        let children = [self.ask.stream.as_ref().map(|s| s.child.clone()), Some(self.ask.oc.child.clone())];
+        let children = [
+            self.ask.stream.as_ref().map(|s| s.child.clone()),
+            Some(self.ask.oc.child.clone()),
+        ];
         for child in children.into_iter().flatten() {
             if let Some(mut c) = child.lock().unwrap_or_else(|p| p.into_inner()).take() {
                 let _ = c.kill();
@@ -912,7 +1140,10 @@ impl App {
             self.send_opencode(ctx, q);
             return;
         }
-        let blocks = [json!({"type": "text", "text": q}), json!({"type": "text", "text": self.app_state_note()})];
+        let blocks = [
+            json!({"type": "text", "text": q}),
+            json!({"type": "text", "text": self.app_state_note()}),
+        ];
         // After a refusal or a stopped tool loop the transcript already ends with a user message;
         // add the question to it rather than starting a second one.
         match self.ask.messages.last_mut() {
@@ -921,7 +1152,10 @@ impl App {
                     content.extend(blocks);
                 }
             }
-            _ => self.ask.messages.push(json!({"role": "user", "content": blocks})),
+            _ => self
+                .ask
+                .messages
+                .push(json!({"role": "user", "content": blocks})),
         }
         self.ask.rounds = 0;
         self.ask.started = Some(Instant::now());
@@ -962,7 +1196,10 @@ impl App {
 
     fn send_opencode(&mut self, ctx: &egui::Context, q: String) {
         let (Some(exe), Some(root)) = (self.ask.oc.exe.clone(), self.root.clone()) else {
-            self.ask.status = Some(("OpenCode isn't installed: tools/opencode/opencode.exe is missing.".into(), true));
+            self.ask.status = Some((
+                t!("OpenCode isn't installed: tools/opencode/opencode.exe is missing.").into(),
+                true,
+            ));
             return;
         };
         self.write_digest();
@@ -978,7 +1215,9 @@ impl App {
         self.ask.oc.plans_before = self.plan_times();
         let ctx = ctx.clone();
         self.ask.oc.answer_open = false;
-        let mcp = std::env::current_exe().ok().map(|exe| crate::ask_opencode::mcp_config(&exe, &root, bridge.as_deref()));
+        let mcp = std::env::current_exe()
+            .ok()
+            .map(|exe| crate::ask_opencode::mcp_config(&exe, &root, bridge.as_deref()));
         self.ask.oc.rx = Some(crate::ask_opencode::ask(
             exe,
             root,
@@ -994,28 +1233,48 @@ impl App {
 
     /// When each plan in plans/ was last written.
     fn plan_times(&self) -> HashMap<PathBuf, SystemTime> {
-        let Some(root) = &self.root else { return HashMap::new() };
+        let Some(root) = &self.root else {
+            return HashMap::new();
+        };
         std::fs::read_dir(root.join("plans"))
             .into_iter()
             .flatten()
             .flatten()
             .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
-            .filter(|(p, _)| p.extension().is_some_and(|x| x == "md") && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('_')))
+            .filter(|(p, _)| {
+                p.extension().is_some_and(|x| x == "md")
+                    && !p
+                        .file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with('_'))
+            })
             .collect()
     }
 
     /// Plans the assistant saved since the question started: a toast with Open for each.
     fn check_saved_plans(&mut self) {
         let now = self.plan_times();
-        let mut changed: Vec<PathBuf> = now.iter().filter(|(p, t)| self.ask.oc.plans_before.get(*p) != Some(*t)).map(|(p, _)| p.clone()).collect();
+        let mut changed: Vec<PathBuf> = now
+            .iter()
+            .filter(|(p, t)| self.ask.oc.plans_before.get(*p) != Some(*t))
+            .map(|(p, _)| p.clone())
+            .collect();
         if changed.is_empty() {
             return;
         }
         changed.sort();
         for path in changed {
             let text = std::fs::read_to_string(&path).unwrap_or_default();
-            let title = text.lines().find_map(|l| l.strip_prefix("# ")).unwrap_or_default().to_string();
-            self.toast_action(format!("The assistant saved '{title}'"), crate::ui_util::ToastKind::Success, "Open", crate::ui_util::ToastAction::OpenPlan(path));
+            let title = text
+                .lines()
+                .find_map(|l| l.strip_prefix("# "))
+                .unwrap_or_default()
+                .to_string();
+            self.toast_action(
+                tf!("The assistant saved '{}'", title),
+                crate::ui_util::ToastKind::Success,
+                t!("Open"),
+                crate::ui_util::ToastAction::OpenPlan(path),
+            );
         }
         self.ask.oc.plans_before = now;
         self.planner.refresh_files(self.root.as_deref());
@@ -1025,8 +1284,16 @@ impl App {
     /// While OpenCode answers: show the server's approval questions, collect its page requests,
     /// note a new draft, and toast plans it saved.
     fn bridge_poll(&mut self, ctx: &egui::Context, done: bool) {
-        let Some(dir) = crate::agent::bridge::dir() else { return };
-        if !done && self.ask.oc.scanned.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
+        let Some(dir) = crate::agent::bridge::dir() else {
+            return;
+        };
+        if !done
+            && self
+                .ask
+                .oc
+                .scanned
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(300))
+        {
             return;
         }
         self.ask.oc.scanned = Some(Instant::now());
@@ -1035,14 +1302,22 @@ impl App {
                 continue;
             }
             let spec = crate::agent::find(&p.tool);
-            let auto = (p.tool == "save_plan" && self.ask.auto_save) || (p.tool == "log_result" && self.ask.auto_log);
+            let auto = (p.tool == "save_plan" && self.ask.auto_save)
+                || (p.tool == "log_result" && self.ask.auto_log);
             let state = if auto {
                 crate::agent::bridge::answer(&dir, p.id, true);
-                ToolState::Done(Card { summary: format!("{} (allowed in Settings)", p.question.trim_end_matches('?')), ..Default::default() })
+                ToolState::Done(Card {
+                    summary: tf!("{} (allowed in Settings)", p.question.trim_end_matches('?')),
+                    ..Default::default()
+                })
             } else {
                 ToolState::Asking(p.question.clone(), Some(p.id))
             };
-            self.ask.turns.push(Turn::Tool(ToolTurn { icon: spec.map_or("✏", |s| s.icon), label: spec.map_or(p.tool.clone(), |s| s.label.to_string()), state }));
+            self.ask.turns.push(Turn::Tool(ToolTurn {
+                icon: spec.map_or("✏", |s| s.icon),
+                label: spec.map_or(p.tool.clone(), |s| s.label.to_string()),
+                state,
+            }));
         }
         for at in crate::agent::bridge::take_ui_requests(&dir) {
             self.agent.open_after = Some(at);
@@ -1051,23 +1326,63 @@ impl App {
         if draft.is_some() && draft != self.ask.oc.draft_seen {
             self.ask.oc.draft_seen = draft;
             if let Some(d) = crate::agent::bridge::read_draft(&dir) {
-                let trainee = d.plan.trainee.and_then(|t| self.kb.umas.get(&t)).map_or("no trainee yet".to_string(), |u| format!("{} [{}]", u.name, u.outfit));
-                let title = if d.plan.title.is_empty() { d.plan.purpose.label().to_string() } else { d.plan.title.clone() };
-                let mut card = Card { summary: format!("{title} · {trainee} · {} cards · {} skills", d.plan.deck.iter().flatten().count() + usize::from(d.plan.friend.is_some()), d.plan.skills.len()), ..Default::default() };
-                card.visual = Visual::Deck { cards: d.plan.deck.iter().flatten().copied().collect(), friend: d.plan.friend };
+                let trainee = d
+                    .plan
+                    .trainee
+                    .and_then(|t| self.kb.umas.get(&t))
+                    .map_or(t!("no trainee yet").to_string(), |u| {
+                        format!("{} [{}]", u.name, u.outfit)
+                    });
+                let title = if d.plan.title.is_empty() {
+                    d.plan.purpose.label().to_string()
+                } else {
+                    d.plan.title.clone()
+                };
+                let mut card = Card {
+                    summary: tf!(
+                        "{} · {} · {} cards · {} skills",
+                        title,
+                        trainee,
+                        d.plan.deck.iter().flatten().count() + usize::from(d.plan.friend.is_some()),
+                        d.plan.skills.len()
+                    ),
+                    ..Default::default()
+                };
+                card.visual = Visual::Deck {
+                    cards: d.plan.deck.iter().flatten().copied().collect(),
+                    friend: d.plan.friend,
+                };
                 card.open.push(OpenAt::DraftPlan);
                 if d.compared {
                     card.open.push(OpenAt::DraftRace);
                 }
                 // One card for the draft in this answer, kept last: the newest replaces it.
-                let since = self.ask.turns.iter().rposition(|t| matches!(t, Turn::User(_))).map_or(0, |i| i + 1);
-                if let Some(old) = self.ask.turns[since..].iter().position(|t| matches!(t, Turn::Tool(x) if x.label == DRAFT_CARD)) {
+                let since = self
+                    .ask
+                    .turns
+                    .iter()
+                    .rposition(|t| matches!(t, Turn::User(_)))
+                    .map_or(0, |i| i + 1);
+                if let Some(old) = self.ask.turns[since..]
+                    .iter()
+                    .position(|t| matches!(t, Turn::Tool(x) if x.label == DRAFT_CARD))
+                {
                     self.ask.turns.remove(since + old);
                 }
-                self.ask.turns.push(Turn::Tool(ToolTurn { icon: "📋", label: DRAFT_CARD.into(), state: ToolState::Done(card) }));
+                self.ask.turns.push(Turn::Tool(ToolTurn {
+                    icon: "📋",
+                    label: DRAFT_CARD.into(),
+                    state: ToolState::Done(card),
+                }));
             }
         }
-        if done || self.ask.oc.plans_scanned.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+        if done
+            || self
+                .ask
+                .oc
+                .plans_scanned
+                .is_none_or(|t| t.elapsed() > Duration::from_secs(2))
+        {
             self.ask.oc.plans_scanned = Some(Instant::now());
             self.check_saved_plans();
         }
@@ -1075,11 +1390,16 @@ impl App {
     }
 
     pub(crate) fn start_opencode_install(&mut self, ctx: &egui::Context) {
-        let Some(root) = self.root.clone() else { return };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
         let ctx = ctx.clone();
         self.ask.oc.install_error = None;
         self.ask.oc.install_progress = 0;
-        self.ask.oc.install_rx = Some(crate::ask_opencode::install(crate::ask_opencode::install_dir(&root), move || ctx.request_repaint()));
+        self.ask.oc.install_rx = Some(crate::ask_opencode::install(
+            crate::ask_opencode::install_dir(&root),
+            move || ctx.request_repaint(),
+        ));
     }
 
     /// Download card shown while OpenCode isn't installed.
@@ -1087,17 +1407,34 @@ impl App {
         use crate::ask_opencode::{RELEASE, ZIP_SIZE};
         let p = pal(ui);
         let mb = |b: u64| b as f32 / 1_048_576.0;
-        ui.label(semibold("OpenCode isn't installed yet", 16.0));
-        ui.label(RichText::new("It answers your questions for free, with no key and no account.").color(p.weak));
+        ui.label(semibold(t!("OpenCode isn't installed yet"), 16.0));
+        ui.label(
+            RichText::new(t!(
+                "It answers your questions for free, with no key and no account."
+            ))
+            .color(p.weak),
+        );
         ui.add_space(6.0);
         if self.ask.oc.install_rx.is_some() {
             let done = self.ask.oc.install_progress;
             let bar = egui::ProgressBar::new((done as f32 / ZIP_SIZE as f32).min(1.0))
-                .text(format!("Downloading… {:.1} / {:.1} MB", mb(done), mb(ZIP_SIZE)))
+                .text(tf!(
+                    "Downloading… {} / {} MB",
+                    format!("{:.1}", mb(done)),
+                    format!("{:.1}", mb(ZIP_SIZE))
+                ))
                 .desired_width(ui.available_width().min(420.0));
             ui.add(bar);
         } else {
-            let button = crate::ui_util::primary_button(ui, format!("⬇ Download OpenCode ({:.0} MB)", mb(ZIP_SIZE)), 14.0).min_size(vec2(240.0, 36.0));
+            let button = crate::ui_util::primary_button(
+                ui,
+                tf!(
+                    "⬇ Download OpenCode ({} MB)",
+                    format!("{:.0}", mb(ZIP_SIZE))
+                ),
+                14.0,
+            )
+            .min_size(vec2(240.0, 36.0));
             if ui.add_enabled(self.root.is_some(), button).clicked() {
                 let ctx = ui.ctx().clone();
                 self.start_opencode_install(&ctx);
@@ -1108,7 +1445,7 @@ impl App {
         }
         ui.add_space(4.0);
         ui.label(
-            RichText::new(format!("Official release {RELEASE} from github.com/anomalyco/opencode. The app checks its SHA-256 against the published one before installing it to tools\\opencode."))
+            RichText::new(tf!("Official release {} from github.com/anomalyco/opencode. The app checks its SHA-256 against the published one before installing it to tools\\opencode.", RELEASE))
                 .size(11.5)
                 .color(p.weak),
         );
@@ -1124,7 +1461,8 @@ impl App {
                         self.ask.oc.install_rx = None;
                         self.ask.oc.models_rx = Some(crate::ask_opencode::list_models(exe.clone()));
                         self.ask.oc.exe = Some(exe);
-                        self.ask.status = Some(("OpenCode is installed. Ask away.".into(), false));
+                        self.ask.status =
+                            Some((t!("OpenCode is installed. Ask away.").into(), false));
                     }
                     InstallEvent::Done(Err(e)) => {
                         self.ask.oc.install_rx = None;
@@ -1140,12 +1478,17 @@ impl App {
             match result {
                 Ok(models) => {
                     if !models.contains(&self.ask.oc.model) {
-                        let fallback = models.iter().find(|m| m.as_str() == crate::ask_opencode::DEFAULT_MODEL).or(models.first());
+                        let fallback = models
+                            .iter()
+                            .find(|m| m.as_str() == crate::ask_opencode::DEFAULT_MODEL)
+                            .or(models.first());
                         self.ask.oc.model = fallback.cloned().unwrap_or_default();
                     }
                     self.ask.oc.models = models;
                 }
-                Err(e) => self.ask.status = Some((format!("Couldn't list OpenCode models: {e}"), true)),
+                Err(e) => {
+                    self.ask.status = Some((tf!("Couldn't list OpenCode models: {}", e), true))
+                }
             }
         }
         let Some(rx) = &self.ask.oc.rx else { return };
@@ -1154,13 +1497,33 @@ impl App {
             match e {
                 OcEvent::Session(s) => self.ask.oc.session = Some(s),
                 OcEvent::Tool(t) => {
-                    self.ask.activity.push(format!("{} {}", t.tool, t.target).trim().to_string());
+                    self.ask
+                        .activity
+                        .push(format!("{} {}", t.tool, t.target).trim().to_string());
                     // The app's own tools get a card; file reads stay in the Lookups list.
-                    if let Some(spec) = crate::agent::find(&t.tool).filter(|_| t.tool.starts_with("umalord_")) {
-                        let summary = t.output.lines().find(|l| !l.trim().is_empty()).map(|l| truncate(l, 110)).unwrap_or_default();
-                        let card = Card { summary, ..Default::default() };
-                        let state = if t.error { ToolState::Failed(card) } else { ToolState::Done(card) };
-                        self.ask.turns.push(Turn::Tool(ToolTurn { icon: spec.icon, label: spec.label.to_string(), state }));
+                    if let Some(spec) =
+                        crate::agent::find(&t.tool).filter(|_| t.tool.starts_with("umalord_"))
+                    {
+                        let summary = t
+                            .output
+                            .lines()
+                            .find(|l| !l.trim().is_empty())
+                            .map(|l| truncate(l, 110))
+                            .unwrap_or_default();
+                        let card = Card {
+                            summary,
+                            ..Default::default()
+                        };
+                        let state = if t.error {
+                            ToolState::Failed(card)
+                        } else {
+                            ToolState::Done(card)
+                        };
+                        self.ask.turns.push(Turn::Tool(ToolTurn {
+                            icon: spec.icon,
+                            label: spec.label.to_string(),
+                            state,
+                        }));
                         self.ask.oc.answer_open = false;
                     }
                 }
@@ -1178,21 +1541,32 @@ impl App {
                         self.ask.oc.answer_open = true;
                     }
                 },
-                OcEvent::Error(msg) => self.ask.status = Some((format!("OpenCode: {msg}"), true)),
+                OcEvent::Error(msg) => self.ask.status = Some((tf!("OpenCode: {}", msg), true)),
                 OcEvent::Done(result) => {
                     self.ask.oc.rx = None;
                     self.bridge_poll(ctx, true);
                     if let Err(msg) = result {
                         self.ask.status = Some((msg, true));
-                    } else if !self.ask.turns.iter().rev().take_while(|t| !matches!(t, Turn::User(_))).any(|t| matches!(t, Turn::Assistant(_))) && self.ask.status.is_none() {
-                        self.ask.status = Some(("OpenCode finished without an answer. Try again or pick another model.".into(), true));
+                    } else if !self
+                        .ask
+                        .turns
+                        .iter()
+                        .rev()
+                        .take_while(|t| !matches!(t, Turn::User(_)))
+                        .any(|t| matches!(t, Turn::Assistant(_)))
+                        && self.ask.status.is_none()
+                    {
+                        self.ask.status = Some((t!("OpenCode finished without an answer. Try again or pick another model.").into(), true));
                     }
                     // Questions the server asked and nobody answered are moot now.
                     for t in &mut self.ask.turns {
                         if let Turn::Tool(x) = t
                             && matches!(x.state, ToolState::Asking(..))
                         {
-                            x.state = ToolState::Failed(Card { summary: "Not answered in time.".into(), ..Default::default() });
+                            x.state = ToolState::Failed(Card {
+                                summary: t!("Not answered in time.").into(),
+                                ..Default::default()
+                            });
                         }
                     }
                     self.finish_question(ctx);
@@ -1209,27 +1583,35 @@ impl App {
 
     pub(crate) fn ask_tab(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
-        egui::Panel::right("ask_settings").resizable(false).exact_size(if ui.available_width() < 1100.0 { 240.0 } else { 300.0 }).frame(crate::side_frame()).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| self.ask_settings(ui));
-        });
+        egui::Panel::right("ask_settings")
+            .resizable(false)
+            .exact_size(if ui.available_width() < 1100.0 {
+                240.0
+            } else {
+                300.0
+            })
+            .frame(crate::side_frame())
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.ask_settings(ui));
+            });
         egui::Panel::bottom("ask_input").resizable(false).frame(egui::Frame::new().inner_margin(Margin::symmetric(18, 10))).show(ui, |ui| {
             let busy = self.ask_busy();
             egui::Frame::new().fill(p.surface).stroke(Stroke::new(1.0, p.border)).corner_radius(CornerRadius::same(14)).inner_margin(Margin::same(8)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let edit = ui.add_sized(
                         [ui.available_width() - 96.0, 56.0],
-                        egui::TextEdit::multiline(&mut self.ask.input).hint_text("Ask about your account, or ask it to plan and simulate a career…  (Enter to send, Shift+Enter for a new line)").frame(egui::Frame::new()),
+                        egui::TextEdit::multiline(&mut self.ask.input).hint_text(t!("Ask about your account, or ask it to plan and simulate a career…  (Enter to send, Shift+Enter for a new line)")).frame(egui::Frame::new()),
                     );
                     let enter = edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
                     if busy {
-                        let stop = egui::Button::new(semibold("■ Stop", 14.0)).min_size(vec2(84.0, 40.0));
-                        if ui.add(stop).on_hover_text("Stop the answer and any simulation it started").clicked() {
+                        let stop = egui::Button::new(semibold(t!("■ Stop"), 14.0)).min_size(vec2(84.0, 40.0));
+                        if ui.add(stop).on_hover_text(t!("Stop the answer and any simulation it started")).clicked() {
                             let ctx = ui.ctx().clone();
                             self.stop_answer(&ctx);
                         }
                         return;
                     }
-                    let send = crate::ui_util::primary_button(ui, "Send ➤", 14.0).min_size(vec2(84.0, 40.0));
+                    let send = crate::ui_util::primary_button(ui, t!("Send ➤"), 14.0).min_size(vec2(84.0, 40.0));
                     if (ui.add(send).clicked() || enter) && !self.ask.input.trim().is_empty() {
                         let q = self.ask.input.trim().to_string();
                         self.ask.input.clear();
@@ -1243,8 +1625,8 @@ impl App {
         egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
             crate::ui_util::page_header(
                 ui,
-                "💬 Ask",
-                "Ask in plain English, like you'd ask a friend who knows the game. It answers from your roster and the game data, and can plan and simulate careers for you.",
+                t!("💬 Ask"),
+                t!("Ask in plain English, like you'd ask a friend who knows the game. It answers from your roster and the game data, and can plan and simulate careers for you."),
                 |_| {},
             );
             // An empty chat starts at the top; a conversation follows its newest line.
@@ -1270,18 +1652,19 @@ impl App {
                         } else {
                             crate::ui_util::chibi(ui, 5, 110.0);
                         }
-                        ui.label(semibold("What do you want to know?", 20.0));
-                        let who = if self.ask.backend == Backend::OpenCode { "A free model (via OpenCode)" } else { "Claude" };
+                        ui.label(semibold(t!("What do you want to know?"), 20.0));
+                        let who = if self.ask.backend == Backend::OpenCode { t!("A free model (via OpenCode)") } else { "Claude" };
                         ui.label(
-                            RichText::new(format!(
-                                "{who} looks things up in your roster, the uma.guide data, your plans and results, labels what is data and what is opinion, and can build a plan and race it in the simulator. You can undo every change it makes."
+                            RichText::new(tf!(
+                                "{} looks things up in your roster, the uma.guide data, your plans and results, labels what is data and what is opinion, and can build a plan and race it in the simulator. You can undo every change it makes.",
+                                who
                             ))
                             .color(p.weak),
                         );
                         ui.add_space(16.0);
-                        ui.label(RichText::new("Try one of these:").size(12.5).color(p.weak));
+                        ui.label(RichText::new(t!("Try one of these:")).size(12.5).color(p.weak));
                         for s in SUGGESTIONS {
-                            let b = egui::Button::new(RichText::new(s).size(13.5)).wrap().corner_radius(CornerRadius::same(12)).min_size(vec2(w, 34.0));
+                            let b = egui::Button::new(RichText::new(t!(s)).size(13.5)).wrap().corner_radius(CornerRadius::same(12)).min_size(vec2(w, 34.0));
                             if ui.add(b).clicked() {
                                 actions.push(ChatAction::Ask(s.to_string()));
                             }
@@ -1321,7 +1704,7 @@ impl App {
                         Turn::Note(text) => {
                             ui.horizontal_top(|ui| {
                                 ui.add_space(30.0);
-                                ui.add(egui::Label::new(RichText::new(format!("💭 {}", text.trim())).size(size::SM).italics().color(p.weak)).wrap());
+                                ui.add(egui::Label::new(RichText::new(tf!("💭 {}", text.trim())).size(size::SM).italics().color(p.weak)).wrap());
                             });
                         }
                         Turn::Tool(t) => self.tool_card(ui, i, t, &mut actions),
@@ -1369,7 +1752,7 @@ impl App {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(t.icon).size(15.0));
-                        ui.label(semibold(&t.label, size::BODY));
+                        ui.label(semibold(t!(&t.label), size::BODY));
                         match &t.state {
                             ToolState::Running => {
                                 ui.spinner();
@@ -1385,13 +1768,13 @@ impl App {
                         ToolState::Asking(question, _) => {
                             ui.add(egui::Label::new(RichText::new(question).size(size::BODY)).wrap());
                             ui.horizontal(|ui| {
-                                if ui.add(crate::ui_util::primary_button(ui, "✔ Approve", 13.5)).clicked() {
+                                if ui.add(crate::ui_util::primary_button(ui, t!("✔ Approve"), 13.5)).clicked() {
                                     actions.push(ChatAction::Answer(i, true));
                                 }
-                                if ui.button("✖ Deny").clicked() {
+                                if ui.button(t!("✖ Deny")).clicked() {
                                     actions.push(ChatAction::Answer(i, false));
                                 }
-                                ui.label(RichText::new("Settings → AI assistant can allow plan saves and result logs without asking.").size(size::XS).color(p.weak));
+                                ui.label(RichText::new(t!("Settings → AI assistant can allow plan saves and result logs without asking.")).size(size::XS).color(p.weak));
                             });
                         }
                         ToolState::Done(c) | ToolState::Failed(c) => {
@@ -1405,7 +1788,7 @@ impl App {
                                         }
                                     }
                                     if let Some(u) = undo
-                                        && ui.small_btn("↶ Undo").on_hover_text("Put back the plan and Race sim as they were before this step (and every later step)").clicked()
+                                        && ui.small_btn(t!("↶ Undo")).on_hover_text(t!("Put back the plan and Race sim as they were before this step (and every later step)")).clicked()
                                     {
                                         actions.push(ChatAction::Undo(u));
                                     }
@@ -1426,16 +1809,34 @@ impl App {
             Visual::Deck { cards, friend } => {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    for (id, borrowed) in cards.iter().map(|c| (*c, false)).chain(friend.map(|f| (f, true))) {
-                        let name = self.kb.cards.get(&id).map_or(format!("Card {id}"), |c| format!("{} [{}]", c.uma, c.title));
+                    for (id, borrowed) in cards
+                        .iter()
+                        .map(|c| (*c, false))
+                        .chain(friend.map(|f| (f, true)))
+                    {
+                        let name =
+                            self.kb.cards.get(&id).map_or(format!("Card {id}"), |c| {
+                                format!("{} [{}]", c.uma, c.title)
+                            });
                         let size = vec2(40.0, 40.0 * 346.0 / 260.0);
                         let r = match self.art_uri("cards", id) {
-                            Some(uri) => ui.add(egui::Image::new(uri).fit_to_exact_size(size).corner_radius(CornerRadius::same(5))),
-                            None => ui.add_sized(size, egui::Label::new(RichText::new("?").color(p.weak))),
+                            Some(uri) => ui.add(
+                                egui::Image::new(uri)
+                                    .fit_to_exact_size(size)
+                                    .corner_radius(CornerRadius::same(5)),
+                            ),
+                            None => ui.add_sized(
+                                size,
+                                egui::Label::new(RichText::new("?").color(p.weak)),
+                            ),
                         };
-                        r.on_hover_text(if borrowed { format!("{name} (borrowed friend card)") } else { name });
+                        r.on_hover_text(if borrowed {
+                            tf!("{} (borrowed friend card)", name)
+                        } else {
+                            name
+                        });
                         if borrowed {
-                            ui.label(RichText::new("+ friend").size(size::XS).color(p.weak));
+                            ui.label(RichText::new(t!("+ friend")).size(size::XS).color(p.weak));
                         }
                     }
                 });
@@ -1445,7 +1846,14 @@ impl App {
                 let mut sorted = gaps.clone();
                 sorted.sort_by(f64::total_cmp);
                 ui.allocate_ui(vec2(360.0, 40.0), |ui| {
-                    crate::charts::mini_hist(ui, &sorted, crate::charts::uma_color(1, ui.visuals().dark_mode), "L", 36.0).on_hover_text("Uma 2's lead in every race, in lengths (simulation)");
+                    crate::charts::mini_hist(
+                        ui,
+                        &sorted,
+                        crate::charts::uma_color(1, ui.visuals().dark_mode),
+                        "L",
+                        36.0,
+                    )
+                    .on_hover_text(t!("Uma 2's lead in every race, in lengths (simulation)"));
                 });
             }
             Visual::Skills(ids) => {
@@ -1454,7 +1862,11 @@ impl App {
                         self.skill_link(ui, *id, false);
                     }
                     if ids.len() > 14 {
-                        ui.label(RichText::new(format!("+{} more", ids.len() - 14)).size(size::SM).color(p.weak));
+                        ui.label(
+                            RichText::new(tf!("+{} more", ids.len() - 14))
+                                .size(size::SM)
+                                .color(p.weak),
+                        );
                     }
                 });
             }
@@ -1482,10 +1894,21 @@ impl App {
                     if let (Some(id), Some(dir)) = (*bridge, crate::agent::bridge::dir()) {
                         // OpenCode's server waits for this file.
                         crate::agent::bridge::answer(&dir, id, yes);
-                        let summary = if yes { format!("Approved: {}", question.trim_end_matches('?')) } else { "You declined.".to_string() };
-                        let card = Card { summary, ..Default::default() };
+                        let summary = if yes {
+                            tf!("Approved: {}", question.trim_end_matches('?'))
+                        } else {
+                            t!("You declined.").to_string()
+                        };
+                        let card = Card {
+                            summary,
+                            ..Default::default()
+                        };
                         if let Some(Turn::Tool(t)) = self.ask.turns.get_mut(turn) {
-                            t.state = if yes { ToolState::Done(card) } else { ToolState::Failed(card) };
+                            t.state = if yes {
+                                ToolState::Done(card)
+                            } else {
+                                ToolState::Failed(card)
+                            };
                         }
                     } else {
                         self.ask.answer = Some((turn, yes));
@@ -1501,38 +1924,76 @@ impl App {
     fn ask_settings(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
         let busy = self.ask_busy();
-        filter_heading(ui, "Answered by");
+        filter_heading(ui, t!("Answered by"));
         let (who, detail) = match self.ask.backend {
-            Backend::OpenCode => ("🆓 OpenCode · free model", self.ask.oc.model.trim_start_matches("opencode/").to_string()),
-            Backend::ClaudeApi => ("🔑 Claude API · your key", MODELS[self.ask.model].1.to_string()),
+            Backend::OpenCode => (
+                t!("🆓 OpenCode · free model"),
+                self.ask
+                    .oc
+                    .model
+                    .trim_start_matches("opencode/")
+                    .to_string(),
+            ),
+            Backend::ClaudeApi => (
+                t!("🔑 Claude API · your key"),
+                MODELS[self.ask.model].1.to_string(),
+            ),
         };
         ui.label(semibold(who, 14.0));
         ui.label(RichText::new(detail).size(12.5).color(p.weak));
         if self.ask.backend == Backend::OpenCode && self.ask.oc.exe.is_none() {
-            ui.label(RichText::new("OpenCode isn't installed yet: the download is in the chat area.").size(12.5).color(p.warn));
+            ui.label(
+                RichText::new(t!(
+                    "OpenCode isn't installed yet: the download is in the chat area."
+                ))
+                .size(12.5)
+                .color(p.warn),
+            );
         }
-        if ui.add(egui::Button::new("⚙ Change model, key or permissions").min_size(vec2(0.0, 28.0))).on_hover_text("Settings → AI assistant").clicked() {
+        if ui
+            .add(
+                egui::Button::new(t!("⚙ Change model, key or permissions"))
+                    .min_size(vec2(0.0, 28.0)),
+            )
+            .on_hover_text(t!("Settings → AI assistant"))
+            .clicked()
+        {
             self.open_settings(crate::settings_page::SettingsPage::Ai);
         }
-        filter_heading(ui, "What it can do");
+        filter_heading(ui, t!("What it can do"));
         for line in [
             "📋 Draft plans, decks and skills: undo each from the chat",
             "🏁 Run the race simulator: at most 4 runs a question unless you ask",
             "💾 Save plans and log results: asks first",
             "✏ Change your roster: always asks",
         ] {
-            ui.label(RichText::new(line).size(12.5).color(p.weak));
+            ui.label(RichText::new(t!(line)).size(12.5).color(p.weak));
         }
         let s = &mut self.ask;
-        filter_heading(ui, "This conversation");
-        ui.label(RichText::new(format!("{} tokens in · {} out", s.tokens_in, s.tokens_out)).size(12.5).color(p.weak));
+        filter_heading(ui, t!("This conversation"));
+        ui.label(
+            RichText::new(tf!("{} tokens in · {} out", s.tokens_in, s.tokens_out))
+                .size(12.5)
+                .color(p.weak),
+        );
         if s.cache_read > 0 {
-            ui.label(RichText::new(format!("{} read from the prompt cache (cheaper)", s.cache_read)).size(11.5).color(p.weak));
+            ui.label(
+                RichText::new(tf!("{} read from the prompt cache (cheaper)", s.cache_read))
+                    .size(11.5)
+                    .color(p.weak),
+            );
         }
         if s.backend == Backend::OpenCode {
-            ui.label(RichText::new("Free models cost nothing; the count is for interest.").size(11.5).color(p.weak));
+            ui.label(
+                RichText::new(t!("Free models cost nothing; the count is for interest."))
+                    .size(11.5)
+                    .color(p.weak),
+            );
         }
-        if ui.add_enabled(!busy, egui::Button::new("🗑 New conversation")).clicked() {
+        if ui
+            .add_enabled(!busy, egui::Button::new(t!("🗑 New conversation")))
+            .clicked()
+        {
             s.clear();
             self.agent.undo.clear();
             if let Some(dir) = crate::agent::bridge::dir() {
@@ -1541,11 +2002,14 @@ impl App {
         }
         if !self.ask.activity.is_empty() {
             ui.add_space(10.0);
-            egui::CollapsingHeader::new(format!("Lookups ({})", self.ask.activity.len())).show(ui, |ui| {
-                for a in &self.ask.activity {
-                    ui.label(RichText::new(truncate(a, 120)).small().monospace());
-                }
-            });
+            egui::CollapsingHeader::new(tf!("Lookups ({})", self.ask.activity.len())).show(
+                ui,
+                |ui| {
+                    for a in &self.ask.activity {
+                        ui.label(RichText::new(truncate(a, 120)).small().monospace());
+                    }
+                },
+            );
         }
     }
 
@@ -1555,11 +2019,11 @@ impl App {
         if s.oc.models.is_empty() && s.oc.models_rx.is_none() {
             s.oc.models_rx = Some(crate::ask_opencode::list_models(exe.clone()));
         }
-        filter_heading(ui, "Model");
+        filter_heading(ui, t!("Model"));
         if s.oc.models_rx.is_some() && s.oc.models.is_empty() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(RichText::new("Loading models…").color(p.weak));
+                ui.label(RichText::new(t!("Loading models…")).color(p.weak));
             });
         }
         let before = s.oc.model.clone();
@@ -1568,13 +2032,32 @@ impl App {
             models
                 .iter()
                 .map(|m| {
-                    let text = format!("{}{}", if crate::ask_opencode::is_free(m) { "🆓 " } else { "" }, m.trim_start_matches("opencode/"));
-                    (Some(m.clone()), text, crate::ask_opencode::model_note(m).to_string())
+                    let text = format!(
+                        "{}{}",
+                        if crate::ask_opencode::is_free(m) {
+                            "🆓 "
+                        } else {
+                            ""
+                        },
+                        m.trim_start_matches("opencode/")
+                    );
+                    (
+                        Some(m.clone()),
+                        text,
+                        crate::ask_opencode::model_note(m).to_string(),
+                    )
                 })
                 .collect()
         };
         let current = s.oc.model.clone();
-        if let Some(m) = crate::ui_util::search_combo(ui, "oc_model", current.trim_start_matches("opencode/"), 250.0, items, Some(&current)) {
+        if let Some(m) = crate::ui_util::search_combo(
+            ui,
+            "oc_model",
+            current.trim_start_matches("opencode/"),
+            250.0,
+            items,
+            Some(&current),
+        ) {
             s.oc.model = m;
         }
         if s.oc.model != before {
@@ -1582,18 +2065,22 @@ impl App {
         }
         let note = crate::ask_opencode::model_note(&s.oc.model);
         let safe = note.starts_with("keeps nothing");
-        badge(ui, format!("{} {note}", if safe { "🔒" } else { "ℹ" }), if safe { p.accent } else { pal(ui).warn });
+        badge(
+            ui,
+            format!("{} {}", if safe { "🔒" } else { "ℹ" }, t!(note)),
+            if safe { p.accent } else { pal(ui).warn },
+        );
         ui.add_space(4.0);
-        if ui.small_btn("🔄 Refresh models").clicked() && s.oc.models_rx.is_none() {
+        if ui.small_btn(t!("🔄 Refresh models")).clicked() && s.oc.models_rx.is_none() {
             s.oc.models.clear();
             s.oc.models_rx = Some(crate::ask_opencode::list_models(exe));
         }
         ui.add_space(6.0);
         ui.label(
-            RichText::new(
-                "OpenCode (opencode.ai) reads your files (the roster digest, uma.guide data, plans and results) and uses umaLord's own tools to draft plans and run the simulator. \
-                 It can't edit files or run commands; plans and results it saves go through the approval cards. Free models are offered for a limited time and are weaker than Claude.",
-            )
+            RichText::new(t!(
+                "OpenCode (opencode.ai) reads your files (the roster digest, uma.guide data, plans and results) and uses UmaYu's own tools to draft plans and run the simulator. \
+                 It can't edit files or run commands; plans and results it saves go through the approval cards. Free models are offered for a limited time and are weaker than Claude."
+            ))
             .size(11.5)
             .color(p.weak),
         );
@@ -1601,51 +2088,89 @@ impl App {
 
     pub(crate) fn claude_api_settings(ui: &mut egui::Ui, s: &mut AskState) {
         let p = pal(ui);
-        filter_heading(ui, "Model");
+        filter_heading(ui, t!("Model"));
         for (i, (_, label, _, _)) in MODELS.iter().enumerate() {
             ui.radio_value(&mut s.model, i, *label);
         }
-        filter_heading(ui, "Effort");
+        filter_heading(ui, t!("Effort"));
         ui.horizontal(|ui| {
             for (i, e) in EFFORTS.iter().enumerate() {
-                ui.selectable_value(&mut s.effort, i, *e);
+                ui.selectable_value(&mut s.effort, i, t!(*e));
             }
         });
-        ui.label(RichText::new("Higher effort thinks longer and costs more.").size(12.0).color(p.weak));
+        ui.label(
+            RichText::new(t!("Higher effort thinks longer and costs more."))
+                .size(12.0)
+                .color(p.weak),
+        );
 
-        filter_heading(ui, "API key");
-        let has_key = s.auth_label() != "no key set yet";
-        badge(ui, format!("{} {}", if has_key { "✔" } else { "✖" }, s.auth_label()), if has_key { p.accent } else { pal(ui).warn });
+        filter_heading(ui, t!("API key"));
+        let key_label = s.auth_label();
+        let has_key = key_label != "no key set yet";
+        badge(
+            ui,
+            format!("{} {}", if has_key { "✔" } else { "✖" }, t!(key_label)),
+            if has_key { p.accent } else { pal(ui).warn },
+        );
         ui.add_space(4.0);
-        ui.add(egui::TextEdit::singleline(&mut s.key_input).password(true).hint_text("sk-ant-…").desired_width(f32::INFINITY));
-        ui.tick(&mut s.remember, "Remember on this PC");
-        if s.remember && !s.key_input.trim().is_empty() && ui.button("💾 Save key").clicked() {
+        ui.add(
+            egui::TextEdit::singleline(&mut s.key_input)
+                .password(true)
+                .hint_text("sk-ant-…")
+                .desired_width(f32::INFINITY),
+        );
+        ui.tick(&mut s.remember, t!("Remember on this PC"));
+        if s.remember && !s.key_input.trim().is_empty() && ui.button(t!("💾 Save key")).clicked()
+        {
             let ok = crate::settings::set("api_key", json!(s.key_input.trim()));
             if ok {
                 s.saved_key = Some(s.key_input.trim().to_string());
             }
-            s.status = Some((if ok { "Key saved.".into() } else { "Couldn't save the key.".into() }, !ok));
+            s.status = Some((
+                if ok {
+                    t!("Key saved.").into()
+                } else {
+                    t!("Couldn't save the key.").into()
+                },
+                !ok,
+            ));
         }
-        if s.saved_key.is_some() && ui.small_btn("Forget saved key").clicked() {
+        if s.saved_key.is_some() && ui.small_btn(t!("Forget saved key")).clicked() {
             crate::settings::set("api_key", Value::Null);
             s.saved_key = None;
         }
-        ui.label(RichText::new("Get a key at console.anthropic.com. Saved keys are stored in plain text under %APPDATA%\\umaLord.").size(11.5).color(p.weak));
+        ui.label(RichText::new(t!("Get a key at console.anthropic.com. Saved keys are stored in plain text under %APPDATA%\\UmaYu.")).size(11.5).color(p.weak));
     }
 
     /// Settings → AI assistant: which writes may happen without the approval card.
     pub(crate) fn agent_permissions(ui: &mut egui::Ui, s: &mut AskState) {
         let p = pal(ui);
-        filter_heading(ui, "What the assistant may do without asking");
-        ui.label(RichText::new("Drafts (the working plan, the Race sim's builds) always change at once and can be undone from the chat. Writing files asks first, unless you allow it here.").size(12.0).color(p.weak));
-        if ui.tick(&mut s.auto_save, "Save plans to the plans folder").changed() {
+        filter_heading(ui, t!("What the assistant may do without asking"));
+        ui.label(RichText::new(t!("Drafts (the working plan, the Race sim's builds) always change at once and can be undone from the chat. Writing files asks first, unless you allow it here.")).size(12.0).color(p.weak));
+        if ui
+            .tick(&mut s.auto_save, t!("Save plans to the plans folder"))
+            .changed()
+        {
             crate::settings::set("agent_auto_save_plan", json!(s.auto_save));
         }
-        if ui.tick(&mut s.auto_log, "Add entries to the results logs").changed() {
+        if ui
+            .tick(&mut s.auto_log, t!("Add entries to the results logs"))
+            .changed()
+        {
             crate::settings::set("agent_auto_log_result", json!(s.auto_log));
         }
-        ui.add_enabled(false, egui::Checkbox::new(&mut false, "Change your roster (limit breaks, stars, potential)"));
-        ui.label(RichText::new("Roster changes always ask.").size(11.5).color(p.weak));
+        ui.add_enabled(
+            false,
+            egui::Checkbox::new(
+                &mut false,
+                t!("Change your roster (limit breaks, stars, potential)"),
+            ),
+        );
+        ui.label(
+            RichText::new(t!("Roster changes always ask."))
+                .size(11.5)
+                .color(p.weak),
+        );
     }
 }
 
@@ -1703,16 +2228,33 @@ mod tests {
                 }
             }
         }
-        assert_eq!((text.as_str(), notes.as_str()), ("Let me look.", "Checking the schedule."));
+        assert_eq!(
+            (text.as_str(), notes.as_str()),
+            ("Let me look.", "Checking the schedule.")
+        );
         let m = acc.finish().unwrap();
         let c = m["content"].as_array().unwrap();
         assert_eq!(c.len(), 4);
-        assert_eq!(c[0], json!({"type": "thinking", "thinking": "Checking the schedule.", "signature": "sig"}));
+        assert_eq!(
+            c[0],
+            json!({"type": "thinking", "thinking": "Checking the schedule.", "signature": "sig"})
+        );
         assert_eq!(c[1]["text"], "Let me look.");
         assert_eq!(c[2]["input"], json!({"distance": "Long"}));
-        assert_eq!(c[3]["input"], json!({}), "an unparseable input is echoed as an empty object");
+        assert_eq!(
+            c[3]["input"],
+            json!({}),
+            "an unparseable input is echoed as an empty object"
+        );
         assert_eq!(m["invalid_inputs"]["toolu_2"], "{\"query\": \"Oguri");
-        assert_eq!((m["stop_reason"].as_str(), m["usage"]["output_tokens"].as_u64(), m["usage"]["cache_read_input_tokens"].as_u64()), (Some("tool_use"), Some(42), Some(500)));
+        assert_eq!(
+            (
+                m["stop_reason"].as_str(),
+                m["usage"]["output_tokens"].as_u64(),
+                m["usage"]["cache_read_input_tokens"].as_u64()
+            ),
+            (Some("tool_use"), Some(42), Some(500))
+        );
         let mut err = Acc::default();
         err.apply(&json!({"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}}));
         assert!(err.finish().unwrap_err().contains("Overloaded"));
@@ -1725,24 +2267,68 @@ mod tests {
         let mut a = App::for_tests();
         a.tab = crate::Tab::Ask;
         a.agent_snapshot("test");
-        let card = |visual: Visual| Card { summary: "A result line".into(), visual, open: vec![OpenAt::Plan, OpenAt::Race], undo: Some(0) };
-        let tool = |label: &str, state: ToolState| Turn::Tool(ToolTurn { icon: "🏁", label: label.into(), state });
+        let card = |visual: Visual| Card {
+            summary: "A result line".into(),
+            visual,
+            open: vec![OpenAt::Plan, OpenAt::Race],
+            undo: Some(0),
+        };
+        let tool = |label: &str, state: ToolState| {
+            Turn::Tool(ToolTurn {
+                icon: "🏁",
+                label: label.into(),
+                state,
+            })
+        };
         a.ask.turns = vec![
             Turn::User("Plan the next CM and simulate it.".into()),
             Turn::Note("Checking the schedule, then the meta sheet.".into()),
-            tool("Recommended a deck", ToolState::Done(card(Visual::Deck { cards: vec![30028, 30052], friend: Some(30076) }))),
-            tool("Raced two builds", ToolState::Done(card(Visual::Verdict { line: "Uma 2 wins 99% of 1000 races, by 3.29 L on average".into(), gaps: (0..200).map(|i| f64::from(i) / 40.0 - 1.0).collect() }))),
-            tool("Auto-picked skills", ToolState::Done(card(Visual::Skills(vec![200512, 200532])))),
-            tool("Tested what matters", ToolState::Done(card(Visual::Bars(vec![("+50 Power".into(), 0.22), ("+50 Wit".into(), -0.05)])))),
-            tool("Loaded the plan", ToolState::Failed(Card { summary: "Enter target stats first.".into(), ..Default::default() })),
+            tool(
+                "Recommended a deck",
+                ToolState::Done(card(Visual::Deck {
+                    cards: vec![30028, 30052],
+                    friend: Some(30076),
+                })),
+            ),
+            tool(
+                "Raced two builds",
+                ToolState::Done(card(Visual::Verdict {
+                    line: "Uma 2 wins 99% of 1000 races, by 3.29 L on average".into(),
+                    gaps: (0..200).map(|i| f64::from(i) / 40.0 - 1.0).collect(),
+                })),
+            ),
+            tool(
+                "Auto-picked skills",
+                ToolState::Done(card(Visual::Skills(vec![200512, 200532]))),
+            ),
+            tool(
+                "Tested what matters",
+                ToolState::Done(card(Visual::Bars(vec![
+                    ("+50 Power".into(), 0.22),
+                    ("+50 Wit".into(), -0.05),
+                ]))),
+            ),
+            tool(
+                "Loaded the plan",
+                ToolState::Failed(Card {
+                    summary: "Enter target stats first.".into(),
+                    ..Default::default()
+                }),
+            ),
             tool("Simulated the skills on offer", ToolState::Running),
             Turn::Assistant("**Done.** A table:\n\n| a | b |\n|---|---|\n| 1 | 2 |".into()),
-            tool("Saved the plan", ToolState::Asking("Save plan 'X' to a new file in plans/?".into(), None)),
+            tool(
+                "Saved the plan",
+                ToolState::Asking("Save plan 'X' to a new file in plans/?".into(), None),
+            ),
         ];
         for mode in [crate::theme::Mode::Dark, crate::theme::Mode::Light] {
             crate::theme::install(&ctx, mode);
             for size in [egui::vec2(1400.0, 900.0), egui::vec2(960.0, 600.0)] {
-                let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                };
                 let _ = crate::ui_util::test_frame(&ctx, input, |ui| a.frame(ui));
             }
         }
@@ -1768,31 +2354,62 @@ mod tests {
         });
         a.handle_message(&ctx, msg);
         assert_eq!(a.ask.calls.len(), 3);
-        assert!(matches!(a.ask.calls[0].state, CallState::Ready(_)), "the Draft ran at once");
-        assert!(matches!(a.ask.calls[1].state, CallState::Waiting(_)), "the Long tool waits for its job");
+        assert!(
+            matches!(a.ask.calls[0].state, CallState::Ready(_)),
+            "the Draft ran at once"
+        );
+        assert!(
+            matches!(a.ask.calls[1].state, CallState::Waiting(_)),
+            "the Long tool waits for its job"
+        );
         let start = Instant::now();
-        while matches!(a.ask.calls.get(1).map(|c| &c.state), Some(CallState::Waiting(_))) {
-            assert!(start.elapsed().as_secs() < 60, "the stamina run never finished");
+        while matches!(
+            a.ask.calls.get(1).map(|c| &c.state),
+            Some(CallState::Waiting(_))
+        ) {
+            assert!(
+                start.elapsed().as_secs() < 60,
+                "the stamina run never finished"
+            );
             a.agent_poll_jobs(&ctx);
             a.advance_calls(&ctx);
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert!(matches!(a.ask.calls[2].state, CallState::Asking), "the Write tool waits for the user");
+        assert!(
+            matches!(a.ask.calls[2].state, CallState::Asking),
+            "the Write tool waits for the user"
+        );
         for _ in 0..5 {
             a.advance_calls(&ctx);
         }
-        assert!(matches!(a.ask.calls[2].state, CallState::Asking), "still waiting: nothing is written without Approve");
+        assert!(
+            matches!(a.ask.calls[2].state, CallState::Asking),
+            "still waiting: nothing is written without Approve"
+        );
         assert!(a.plan_times().is_empty(), "no plan file yet");
         let turn = a.ask.calls[2].turn;
         // Deny: the call gets an error result and nothing is written.
         a.chat_action(&ctx, ChatAction::Answer(turn, false));
         assert!(a.ask.calls.is_empty(), "all three results went back");
-        let results = a.ask.messages.last().unwrap()["content"].as_array().unwrap().clone();
-        let ids: Vec<&str> = results.iter().map(|r| r["tool_use_id"].as_str().unwrap()).collect();
+        let results = a.ask.messages.last().unwrap()["content"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let ids: Vec<&str> = results
+            .iter()
+            .map(|r| r["tool_use_id"].as_str().unwrap())
+            .collect();
         assert_eq!(ids, ["t1", "t2", "t3"]);
         assert_eq!(results[2]["is_error"], true);
         assert_eq!(results[2]["content"], "The user declined.");
-        assert!(results[1]["content"].as_str().unwrap().contains("full spurt"), "{}", results[1]["content"]);
+        assert!(
+            results[1]["content"]
+                .as_str()
+                .unwrap()
+                .contains("full spurt"),
+            "{}",
+            results[1]["content"]
+        );
         assert!(a.plan_times().is_empty());
         // Approve a save this time.
         let msg = json!({"content": [{"type": "tool_use", "id": "t4", "name": "save_plan", "input": {"title": "Agent test"}}], "stop_reason": "tool_use", "usage": {}, "model": "m", "invalid_inputs": {}});

@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use crate::sim::course::Course;
 use crate::sim::data::SimData;
 use crate::sim::params::RaceParams;
-use crate::sim::run::{Progress, SimOptions, UmaBuild, realistic_options, run_chart, run_comparison};
+use crate::sim::run::{
+    Progress, SimOptions, UmaBuild, realistic_options, run_chart, run_comparison,
+};
 
 /// How much the community meta sheet's skill advice counts against the simulation.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
@@ -31,7 +33,11 @@ pub(crate) enum MetaInfluence {
 }
 
 impl MetaInfluence {
-    pub const ALL: [MetaInfluence; 3] = [MetaInfluence::Off, MetaInfluence::TieBreak, MetaInfluence::Strong];
+    pub const ALL: [MetaInfluence; 3] = [
+        MetaInfluence::Off,
+        MetaInfluence::TieBreak,
+        MetaInfluence::Strong,
+    ];
 
     /// Lengths added per unit of meta weight.
     pub fn lengths(self) -> f64 {
@@ -53,8 +59,12 @@ impl MetaInfluence {
     pub fn explain(self) -> &'static str {
         match self {
             MetaInfluence::Off => "Simulation only: the meta sheet's skill advice doesn't count.",
-            MetaInfluence::TieBreak => "The meta sheet's advice only decides between skills the simulation finds about equal (+0.05 L per unit of backing).",
-            MetaInfluence::Strong => "The meta sheet's skills first, as long as they can trigger on the course (+2 L per unit of backing).",
+            MetaInfluence::TieBreak => {
+                "The meta sheet's advice only decides between skills the simulation finds about equal (+0.05 L per unit of backing)."
+            }
+            MetaInfluence::Strong => {
+                "The meta sheet's skills first, as long as they can trigger on the course (+2 L per unit of backing)."
+            }
         }
     }
 }
@@ -72,7 +82,11 @@ pub(crate) enum PickObjective {
 }
 
 impl PickObjective {
-    pub const ALL: [PickObjective; 3] = [PickObjective::Lengths, PickObjective::Consistency, PickObjective::Rating];
+    pub const ALL: [PickObjective; 3] = [
+        PickObjective::Lengths,
+        PickObjective::Consistency,
+        PickObjective::Rating,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -84,9 +98,15 @@ impl PickObjective {
 
     pub fn explain(self) -> &'static str {
         match self {
-            PickObjective::Lengths => "The set that gains the most lengths on average in the plan's race.",
-            PickObjective::Consistency => "Each skill's gain is weighted by how often it triggers, so cheap, reliable skills win.",
-            PickObjective::Rating => "The most skill evaluation points within the SP budget, for the uma's rank: an SS rank parent makes better sparks (uma.guide, Parenting). Points come from uma.guide's skill data. The game also scales skills tied to a distance or style by the uma's aptitude, which isn't modelled. No racing.",
+            PickObjective::Lengths => {
+                "The set that gains the most lengths on average in the plan's race."
+            }
+            PickObjective::Consistency => {
+                "Each skill's gain is weighted by how often it triggers, so cheap, reliable skills win."
+            }
+            PickObjective::Rating => {
+                "The most skill evaluation points within the SP budget, for the uma's rank: an SS rank parent makes better sparks (uma.guide, Parenting). Points come from uma.guide's skill data. The game also scales skills tied to a distance or style by the uma's aptitude, which isn't modelled. No racing."
+            }
         }
     }
 }
@@ -142,7 +162,15 @@ pub(crate) struct Tune {
 impl Tune {
     /// Small runs, for tests that drive the whole app.
     pub fn quick() -> Self {
-        Tune { keep: 8, step_runs: 40, verify_runs: 200, drop_runs: 40, swap_time: Duration::from_secs(2), swap_pool: 4, ..Tune::default() }
+        Tune {
+            keep: 8,
+            step_runs: 40,
+            verify_runs: 200,
+            drop_runs: 40,
+            swap_time: Duration::from_secs(2),
+            swap_pool: 4,
+            ..Tune::default()
+        }
     }
 }
 
@@ -250,31 +278,69 @@ impl Set {
 
     /// What the set costs in all.
     pub fn cost(&self, by_id: &HashMap<u32, &Candidate>) -> f64 {
-        self.ids.iter().filter_map(|id| by_id.get(id)).map(|c| c.own + c.lower.map_or(0.0, |(_, p)| p)).sum()
+        self.ids
+            .iter()
+            .filter_map(|id| by_id.get(id))
+            .map(|c| c.own + c.lower.map_or(0.0, |(_, p)| p))
+            .sum()
     }
 
     fn build(&self, base: &UmaBuild, data: &SimData) -> UmaBuild {
         let mut u = base.clone();
-        u.skills.extend(self.ids.iter().copied().filter(|id| data.skills.contains_key(id)));
+        u.skills.extend(
+            self.ids
+                .iter()
+                .copied()
+                .filter(|id| data.skills.contains_key(id)),
+        );
         u.normalise(data);
         u
     }
 }
 
 /// Mean gap of `b` over `a`, and how often each of `b`'s skills triggered (0–1).
-fn race(input: &Input, a: &UmaBuild, b: &UmaBuild, runs: usize, seed: f64) -> (f64, Vec<f64>, HashMap<u32, f64>) {
+fn race(
+    input: &Input,
+    a: &UmaBuild,
+    b: &UmaBuild,
+    runs: usize,
+    seed: f64,
+) -> (f64, Vec<f64>, HashMap<u32, f64>) {
     let opts: SimOptions = realistic_options(seed, runs);
-    let r = run_comparison(&input.data, &input.course, &input.race, a, b, &opts, false, false, None);
-    let rates = r.umas[1].skills.iter().map(|s| (s.id, s.rate / 100.0)).collect();
+    let r = run_comparison(
+        &input.data,
+        &input.course,
+        &input.race,
+        a,
+        b,
+        &opts,
+        false,
+        false,
+        None,
+    );
+    let rates = r.umas[1]
+        .skills
+        .iter()
+        .map(|s| (s.id, s.rate / 100.0))
+        .collect();
     (r.mean, r.gaps, rates)
 }
 
 /// Evaluate many builds against one in parallel: each item's (mean gap, trigger rates).
-fn race_many(input: &Input, a: &UmaBuild, items: &[UmaBuild], runs: usize, seed: f64, progress: &Progress) -> Vec<Option<(f64, HashMap<u32, f64>)>> {
+fn race_many(
+    input: &Input,
+    a: &UmaBuild,
+    items: &[UmaBuild],
+    runs: usize,
+    seed: f64,
+    progress: &Progress,
+) -> Vec<Option<(f64, HashMap<u32, f64>)>> {
     if items.is_empty() {
         return Vec::new();
     }
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .clamp(1, 16);
     let chunk = items.len().div_ceil(threads);
     std::thread::scope(|scope| {
         let handles: Vec<_> = items
@@ -294,7 +360,10 @@ fn race_many(input: &Input, a: &UmaBuild, items: &[UmaBuild], runs: usize, seed:
                 })
             })
             .collect();
-        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
     })
 }
 
@@ -316,11 +385,19 @@ fn lengths(x: f64) -> String {
 
 fn name(input: &Input, id: u32, names: &BTreeMap<u32, String>) -> String {
     let _ = input;
-    names.get(&id).cloned().unwrap_or_else(|| format!("skill {id}"))
+    names
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| format!("skill {id}"))
 }
 
 /// Run the optimiser. `names` labels the log.
-pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &Progress, phase: &Phase) -> Outcome {
+pub(crate) fn optimise(
+    input: &Input,
+    names: &BTreeMap<u32, String>,
+    progress: &Progress,
+    phase: &Phase,
+) -> Outcome {
     let start = Instant::now();
     let t = input.tune;
     let data = &input.data;
@@ -333,9 +410,26 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
     };
 
     // 1. Screen: every simulatable candidate alone, in realistic races.
-    let sim_ids: Vec<u32> = input.candidates.iter().map(|c| c.id).filter(|id| data.skills.contains_key(id)).collect();
-    phase.set(format!("Screening {} skills in realistic races…", sim_ids.len()));
-    let rows = run_chart(data, &input.course, &input.race, &input.base, &sim_ids, input.seed, true, progress);
+    let sim_ids: Vec<u32> = input
+        .candidates
+        .iter()
+        .map(|c| c.id)
+        .filter(|id| data.skills.contains_key(id))
+        .collect();
+    phase.set(tf!(
+        "Screening {} skills in realistic races…",
+        sim_ids.len()
+    ));
+    let rows = run_chart(
+        data,
+        &input.course,
+        &input.race,
+        &input.base,
+        &sim_ids,
+        input.seed,
+        true,
+        progress,
+    );
     out.singles = rows.iter().map(|r| (r.id, r.mean)).collect();
     if cancelled() {
         out.cancelled = true;
@@ -344,25 +438,44 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
     }
     let single = |id: u32| out.singles.get(&id).copied().unwrap_or(0.0);
     let full_cost = |c: &Candidate| c.own + c.lower.map_or(0.0, |(_, p)| p);
-    let mut by_gain: Vec<&Candidate> = input.candidates.iter().filter(|c| single(c.id) > 0.0).collect();
+    let mut by_gain: Vec<&Candidate> = input
+        .candidates
+        .iter()
+        .filter(|c| single(c.id) > 0.0)
+        .collect();
     by_gain.sort_by(|a, b| single(b.id).total_cmp(&single(a.id)));
     let mut by_eff = by_gain.clone();
-    by_eff.sort_by(|a, b| (single(b.id) / full_cost(b).max(1.0)).total_cmp(&(single(a.id) / full_cost(a).max(1.0))));
+    by_eff.sort_by(|a, b| {
+        (single(b.id) / full_cost(b).max(1.0)).total_cmp(&(single(a.id) / full_cost(a).max(1.0)))
+    });
     let mut pool: Vec<u32> = Vec::new();
-    for c in by_gain.iter().take(t.keep).chain(by_eff.iter().take(t.keep)) {
+    for c in by_gain
+        .iter()
+        .take(t.keep)
+        .chain(by_eff.iter().take(t.keep))
+    {
         if !pool.contains(&c.id) {
             pool.push(c.id);
         }
     }
-    for c in input.candidates.iter().filter(|c| c.pinned || (c.meta > 0.0 && input.meta != MetaInfluence::Off)) {
+    for c in input
+        .candidates
+        .iter()
+        .filter(|c| c.pinned || (c.meta > 0.0 && input.meta != MetaInfluence::Off))
+    {
         if !pool.contains(&c.id) && (c.pinned || data.skills.contains_key(&c.id)) {
             pool.push(c.id);
         }
     }
     // A gold's white can be bought alone too.
-    let whites: Vec<u32> = pool.iter().filter_map(|id| by_id.get(id).and_then(|c| c.lower)).map(|(l, _)| l).filter(|l| by_id.contains_key(l) && !pool.contains(l)).collect();
+    let whites: Vec<u32> = pool
+        .iter()
+        .filter_map(|id| by_id.get(id).and_then(|c| c.lower))
+        .map(|(l, _)| l)
+        .filter(|l| by_id.contains_key(l) && !pool.contains(l))
+        .collect();
     pool.extend(whites);
-    out.log.push(format!(
+    out.log.push(tf!(
         "Screened {} skills alone in realistic races (wit checks and rushing on); kept {} by gain and by gain per SP, plus every pinned and meta-backed one.",
         sim_ids.len(),
         pool.len()
@@ -374,7 +487,8 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
     for c in input.candidates.iter().filter(|c| c.pinned) {
         if set.add_cost(c).is_some() {
             set.add(c);
-            out.log.push(format!("📌 {} (pinned)", name(input, c.id, names)));
+            out.log
+                .push(tf!("📌 {} (pinned)", name(input, c.id, names)));
         }
     }
     let mut step = 0;
@@ -389,19 +503,41 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
             .iter()
             .filter(|id| !set.ids.contains(id))
             .filter_map(|id| by_id.get(id).copied())
-            .filter_map(|c| set.add_cost(c).filter(|cost| *cost <= left + 0.5).map(|cost| (c, cost)))
+            .filter_map(|c| {
+                set.add_cost(c)
+                    .filter(|cost| *cost <= left + 0.5)
+                    .map(|cost| (c, cost))
+            })
             .filter(|(c, _)| data.skills.contains_key(&c.id))
             .collect();
         if options.is_empty() {
-            out.log.push(format!("Stopped: nothing else fits the {left:.0} SP left."));
+            out.log.push(tf!(
+                "Stopped: nothing else fits the {} SP left.",
+                format!("{left:.0}")
+            ));
             break;
         }
         step += 1;
-        phase.set(format!("Choosing skill {step}: racing {} options on top of {} chosen…", options.len(), set.ids.len()));
+        phase.set(tf!(
+            "Choosing skill {}: racing {} options on top of {} chosen…",
+            step,
+            options.len(),
+            set.ids.len()
+        ));
         set_total(options.len());
         let b = set.build(&input.base, data);
-        let builds: Vec<UmaBuild> = options.iter().map(|(c, _)| crate::sim::run::with_skill(data, &b, c.id)).collect();
-        let results = race_many(input, &b, &builds, t.step_runs, input.seed + step as f64, progress);
+        let builds: Vec<UmaBuild> = options
+            .iter()
+            .map(|(c, _)| crate::sim::run::with_skill(data, &b, c.id))
+            .collect();
+        let results = race_many(
+            input,
+            &b,
+            &builds,
+            t.step_runs,
+            input.seed + step as f64,
+            progress,
+        );
         let endgame = left < t.endgame_sp;
         let mut best: Option<(usize, f64, f64, f64)> = None;
         for (i, r) in results.iter().enumerate() {
@@ -417,36 +553,72 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
         let Some((i, _, s, gain)) = best else { break };
         let (c, cost) = options[i];
         if s <= t.min_gain {
-            out.log.push(format!("Stopped: the best next skill, {}, adds only {}.", name(input, c.id, names), lengths(gain)));
+            out.log.push(tf!(
+                "Stopped: the best next skill, {}, adds only {}.",
+                name(input, c.id, names),
+                lengths(gain)
+            ));
             break;
         }
-        let upgrade = c.lower.filter(|(l, _)| set.ids.contains(l)).map_or(String::new(), |(l, _)| format!(", upgrading {}", name(input, l, names)));
+        let upgrade = c
+            .lower
+            .filter(|(l, _)| set.ids.contains(l))
+            .map_or(String::new(), |(l, _)| {
+                tf!(", upgrading {}", name(input, l, names))
+            });
         set.add(c);
         out.added.insert(c.id, (step, gain));
-        let meta = if c.meta > 0.0 && input.meta != MetaInfluence::Off { format!(" (meta +{:.2})", c.meta * input.meta.lengths()) } else { String::new() };
-        out.log.push(format!(
-            "{step}. {}: {} on top of the set{meta}, for {cost:.0} SP{upgrade}{} — {:.0} SP left.",
+        let meta = if c.meta > 0.0 && input.meta != MetaInfluence::Off {
+            tf!(
+                " (meta +{})",
+                format!("{:.2}", c.meta * input.meta.lengths())
+            )
+        } else {
+            String::new()
+        };
+        out.log.push(tf!(
+            "{}. {}: {} on top of the set{}, for {} SP{},{} — {} SP left.",
+            step,
             name(input, c.id, names),
             lengths(gain),
-            if endgame { ", best that fits" } else { "" },
-            left - cost
+            meta,
+            format!("{cost:.0}"),
+            upgrade,
+            if endgame { t!(", best that fits") } else { "" },
+            format!("{:.0}", left - cost)
         ));
     }
 
     // 3. Swaps: drop one chosen skill and add one that isn't, within budget, if that gains.
-    let mut unchosen: Vec<&Candidate> = pool.iter().filter_map(|id| by_id.get(id).copied()).filter(|c| data.skills.contains_key(&c.id)).collect();
-    unchosen.sort_by(|a, b| (single(b.id) / full_cost(b).max(1.0)).total_cmp(&(single(a.id) / full_cost(a).max(1.0))));
+    let mut unchosen: Vec<&Candidate> = pool
+        .iter()
+        .filter_map(|id| by_id.get(id).copied())
+        .filter(|c| data.skills.contains_key(&c.id))
+        .collect();
+    unchosen.sort_by(|a, b| {
+        (single(b.id) / full_cost(b).max(1.0)).total_cmp(&(single(a.id) / full_cost(a).max(1.0)))
+    });
     let swap_start = Instant::now();
     let mut round = 0;
     while !out.cancelled && swap_start.elapsed() < t.swap_time && !set.ids.is_empty() {
         round += 1;
         let current = set.build(&input.base, data);
         let mut trials: Vec<(u32, u32, Set)> = Vec::new();
-        for &drop in set.ids.iter().filter(|id| by_id.get(id).is_some_and(|c| !c.pinned)) {
+        for &drop in set
+            .ids
+            .iter()
+            .filter(|id| by_id.get(id).is_some_and(|c| !c.pinned))
+        {
             let mut without = set.clone();
             without.ids.retain(|s| *s != drop);
-            for c in unchosen.iter().filter(|c| !set.ids.contains(&c.id) && c.id != drop).take(t.swap_pool) {
-                let Some(cost) = without.add_cost(c) else { continue };
+            for c in unchosen
+                .iter()
+                .filter(|c| !set.ids.contains(&c.id) && c.id != drop)
+                .take(t.swap_pool)
+            {
+                let Some(cost) = without.add_cost(c) else {
+                    continue;
+                };
                 if without.cost(&by_id) + cost > input.budget + 0.5 {
                     continue;
                 }
@@ -458,25 +630,45 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
         if trials.is_empty() {
             break;
         }
-        phase.set(format!("Trying {} swaps (round {round})…", trials.len()));
+        phase.set(tf!("Trying {} swaps (round {})…", trials.len(), round));
         set_total(trials.len());
-        let builds: Vec<UmaBuild> = trials.iter().map(|(_, _, s)| s.build(&input.base, data)).collect();
-        let results = race_many(input, &current, &builds, t.step_runs, input.seed + 100.0 + f64::from(round), progress);
+        let builds: Vec<UmaBuild> = trials
+            .iter()
+            .map(|(_, _, s)| s.build(&input.base, data))
+            .collect();
+        let results = race_many(
+            input,
+            &current,
+            &builds,
+            t.step_runs,
+            input.seed + 100.0 + f64::from(round),
+            progress,
+        );
         if cancelled() {
             out.cancelled = true;
             break;
         }
-        let best = results.iter().enumerate().filter_map(|(i, r)| r.as_ref().map(|(g, _)| (i, *g))).max_by(|a, b| a.1.total_cmp(&b.1));
+        let best = results
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.as_ref().map(|(g, _)| (i, *g)))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
         match best {
             Some((i, gain)) if gain > t.min_gain * 1.5 => {
                 let (drop, add, next) = trials.swap_remove(i);
-                out.log.push(format!("Swap: {} out, {} in: {}.", name(input, drop, names), name(input, add, names), lengths(gain)));
+                out.log.push(tf!(
+                    "Swap: {} out, {} in: {}.",
+                    name(input, drop, names),
+                    name(input, add, names),
+                    lengths(gain)
+                ));
                 out.added.remove(&drop);
                 out.added.insert(add, (0, gain));
                 set = next;
             }
             _ => {
-                out.log.push("No swap of one chosen skill for another does better.".to_string());
+                out.log
+                    .push(t!("No swap of one chosen skill for another does better.").to_string());
                 break;
             }
         }
@@ -484,7 +676,7 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
 
     // 4. Verify: the final set against her unique only, and each skill's gain within the set.
     if !out.cancelled && !set.ids.is_empty() {
-        phase.set(format!("Checking the set in {} races…", t.verify_runs));
+        phase.set(tf!("Checking the set in {} races…", t.verify_runs));
         set_total(1 + set.ids.len());
         let fin = set.build(&input.base, data);
         let (mean, gaps, rates) = race(input, &input.base, &fin, t.verify_runs, input.seed + 999.0);
@@ -493,8 +685,18 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
         let sd = (gaps.iter().map(|g| (g - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
         let half = 1.96 * sd / n.sqrt();
         let singles_sum = set.ids.iter().map(|id| single(*id)).sum();
-        out.verify = Some(Verify { mean, lo: mean - half, hi: mean + half, runs: gaps.len(), singles_sum });
-        out.activation = set.ids.iter().map(|id| (*id, rates.get(id).copied().unwrap_or(0.0))).collect();
+        out.verify = Some(Verify {
+            mean,
+            lo: mean - half,
+            hi: mean + half,
+            runs: gaps.len(),
+            singles_sum,
+        });
+        out.activation = set
+            .ids
+            .iter()
+            .map(|id| (*id, rates.get(id).copied().unwrap_or(0.0)))
+            .collect();
         let without: Vec<UmaBuild> = set
             .ids
             .iter()
@@ -505,7 +707,9 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
             })
             .collect();
         // Each skill's gain in the set: the full set against the set without it.
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
+        let threads = std::thread::available_parallelism()
+            .map_or(4, |n| n.get())
+            .clamp(1, 16);
         let chunk = without.len().div_ceil(threads).max(1);
         let gains: Vec<f64> = std::thread::scope(|scope| {
             let handles: Vec<_> = without
@@ -515,7 +719,8 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
                     scope.spawn(move || {
                         part.iter()
                             .map(|w| {
-                                let (g, _, _) = race(input, w, fin, t.drop_runs, input.seed + 555.0);
+                                let (g, _, _) =
+                                    race(input, w, fin, t.drop_runs, input.seed + 555.0);
                                 progress.done.fetch_add(1, Ordering::Relaxed);
                                 g
                             })
@@ -523,14 +728,19 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
                     })
                 })
                 .collect();
-            handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_default())
+                .collect()
         });
         out.marginal = set.ids.iter().copied().zip(gains).collect();
-        out.log.push(format!(
-            "Checked in {} races: {mean:+.2} L (95%: {:+.2} to {:+.2}) against her unique alone. Their single gains add up to {singles_sum:.2} L: skills overlap and share the same stretches of the race.",
+        out.log.push(tf!(
+            "Checked in {} races: {} L (95%: {} to {}) against her unique alone. Their single gains add up to {} L: skills overlap and share the same stretches of the race.",
             gaps.len(),
-            mean - half,
-            mean + half
+            format!("{mean:+.2}"),
+            format!("{:+.2}", mean - half),
+            format!("{:+.2}", mean + half),
+            format!("{singles_sum:.2}")
         ));
     }
     out.spent = set.cost(&by_id);
@@ -544,11 +754,23 @@ pub(crate) fn optimise(input: &Input, names: &BTreeMap<u32, String>, progress: &
 pub(crate) fn check_set(input: &Input, ids: &[u32]) -> Verify {
     let set = Set { ids: ids.to_vec() };
     let fin = set.build(&input.base, &input.data);
-    let (mean, gaps, _) = race(input, &input.base, &fin, input.tune.verify_runs, input.seed + 999.0);
+    let (mean, gaps, _) = race(
+        input,
+        &input.base,
+        &fin,
+        input.tune.verify_runs,
+        input.seed + 999.0,
+    );
     let n = gaps.len().max(1) as f64;
     let sd = (gaps.iter().map(|g| (g - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
     let half = 1.96 * sd / n.sqrt();
-    Verify { mean, lo: mean - half, hi: mean + half, runs: gaps.len(), singles_sum: 0.0 }
+    Verify {
+        mean,
+        lo: mean - half,
+        hi: mean + half,
+        runs: gaps.len(),
+        singles_sum: 0.0,
+    }
 }
 
 #[cfg(test)]
@@ -556,7 +778,13 @@ mod tests {
     use super::*;
 
     fn cand(id: u32, own: f64, lower: Option<(u32, f64)>) -> Candidate {
-        Candidate { id, own, lower, meta: 0.0, pinned: false }
+        Candidate {
+            id,
+            own,
+            lower,
+            meta: 0.0,
+            pinned: false,
+        }
     }
 
     /// One per group: a gold costs its white too unless the white is in, and replaces it.
@@ -574,7 +802,10 @@ mod tests {
         assert_eq!(s.ids, vec![200351], "the gold replaces its white");
         assert_eq!(s.add_cost(&white), None, "a white after its gold");
         assert_eq!(s.add_cost(&other), Some(80.0));
-        let by_id: HashMap<u32, &Candidate> = [(white.id, &white), (gold.id, &gold), (other.id, &other)].into_iter().collect();
+        let by_id: HashMap<u32, &Candidate> =
+            [(white.id, &white), (gold.id, &gold), (other.id, &other)]
+                .into_iter()
+                .collect();
         assert_eq!(s.cost(&by_id), 250.0);
     }
 
@@ -582,7 +813,10 @@ mod tests {
     fn meta_influence_levels() {
         assert_eq!(MetaInfluence::Off.lengths(), 0.0);
         assert!(MetaInfluence::TieBreak.lengths() < 0.1);
-        assert_eq!(MetaInfluence::Strong.lengths(), crate::meta::META_SKILL_LENGTHS);
+        assert_eq!(
+            MetaInfluence::Strong.lengths(),
+            crate::meta::META_SKILL_LENGTHS
+        );
         assert_eq!(MetaInfluence::default(), MetaInfluence::TieBreak);
     }
 }

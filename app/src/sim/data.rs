@@ -73,7 +73,8 @@ fn read<T: for<'de> Deserialize<'de>>(dir: &Path, file: &str) -> Result<T, Strin
 }
 
 fn ids<V>(map: HashMap<String, V>) -> impl Iterator<Item = (u32, V)> {
-    map.into_iter().filter_map(|(k, v)| Some((k.parse().ok()?, v)))
+    map.into_iter()
+        .filter_map(|(k, v)| Some((k.parse().ok()?, v)))
 }
 
 impl SimData {
@@ -83,7 +84,8 @@ impl SimData {
         let meta: HashMap<String, RawMeta> = read(&dir, "skill_meta.json")?;
         let courses: HashMap<String, RawCourse> = read(&dir, "course_data.json")?;
         let names: HashMap<String, Vec<String>> = read(&dir, "skillnames.json").unwrap_or_default();
-        let tracks: HashMap<String, Vec<String>> = read(&dir, "tracknames.json").unwrap_or_default();
+        let tracks: HashMap<String, Vec<String>> =
+            read(&dir, "tracknames.json").unwrap_or_default();
         #[derive(Deserialize, Default)]
         struct NotInGame {
             #[serde(default)]
@@ -93,11 +95,25 @@ impl SimData {
         Ok(SimData {
             skills: ids(skills).collect(),
             meta: ids(meta)
-                .filter_map(|(id, m)| Some((id, SkillMeta { group_id: m.group_id.parse().ok()?, debuff: m.icon_id.starts_with('3') })))
+                .filter_map(|(id, m)| {
+                    Some((
+                        id,
+                        SkillMeta {
+                            group_id: m.group_id.parse().ok()?,
+                            debuff: m.icon_id.starts_with('3'),
+                        },
+                    ))
+                })
                 .collect(),
-            names: ids(names).filter_map(|(id, n)| Some((id, n.into_iter().next()?))).collect(),
-            courses: ids(courses).map(|(id, c)| (id, Course::from_raw(&c))).collect(),
-            tracks: ids(tracks).filter_map(|(id, n)| Some((id, n.into_iter().rev().find(|s| !s.is_empty())?))).collect(),
+            names: ids(names)
+                .filter_map(|(id, n)| Some((id, n.into_iter().next()?)))
+                .collect(),
+            courses: ids(courses)
+                .map(|(id, c)| (id, Course::from_raw(&c)))
+                .collect(),
+            tracks: ids(tracks)
+                .filter_map(|(id, n)| Some((id, n.into_iter().rev().find(|s| !s.is_empty())?)))
+                .collect(),
             not_in_game: nig.skills.iter().filter_map(|s| s.parse().ok()).collect(),
         })
     }
@@ -111,20 +127,33 @@ impl SimData {
     }
 
     pub fn skill_name(&self, id: u32) -> String {
-        self.names.get(&id).cloned().unwrap_or_else(|| format!("Skill {id}"))
+        self.names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Skill {id}"))
     }
 
     /// "Nakayama Turf 2500m (inner)".
     pub fn course_name(&self, id: u32) -> String {
-        let Some(c) = self.courses.get(&id) else { return format!("Course {id}") };
-        let track = self.tracks.get(&c.race_track_id).cloned().unwrap_or_else(|| format!("Track {}", c.race_track_id));
+        let Some(c) = self.courses.get(&id) else {
+            return format!("Course {id}");
+        };
+        let track = self
+            .tracks
+            .get(&c.race_track_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Track {}", c.race_track_id));
         let layout = match c.layout {
             2 => " (inner)",
             3 => " (outer)",
             4 => " (outer→inner)",
             _ => "",
         };
-        format!("{track} {} {}m{layout}", if c.surface == 2 { "Dirt" } else { "Turf" }, c.distance)
+        format!(
+            "{track} {} {}m{layout}",
+            if c.surface == 2 { "Dirt" } else { "Turf" },
+            c.distance
+        )
     }
 
     /// The unique skill id an outfit has at a star count (uniqueSkillForUma in HorseDefTypes.ts):

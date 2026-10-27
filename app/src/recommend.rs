@@ -19,7 +19,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
 use crate::App;
-use crate::career::{self, CardStats, CareerInput, CareerResult, Common, Scenario, card_stats, effect_names, hint_discount};
+use crate::career::{
+    self, CardStats, CareerInput, CareerResult, Common, Scenario, card_stats, effect_names,
+    hint_discount,
+};
 use crate::data::Rarity;
 use crate::knowledge::{Distance, Style, Surface, grade_rank};
 use crate::tab_planner::Fit;
@@ -71,7 +74,11 @@ pub(crate) struct RankContext {
 
 impl RankContext {
     fn stats(&self, id: u32, friend: bool) -> Option<&CardStats> {
-        if friend { self.friend.get(&id) } else { self.owned.get(&id) }
+        if friend {
+            self.friend.get(&id)
+        } else {
+            self.owned.get(&id)
+        }
     }
 
     fn career(&self, deck: &[&CardStats]) -> Option<CareerResult> {
@@ -106,7 +113,11 @@ fn default_weights(distance: Distance, surface: Surface, style: Style) -> [f64; 
         Distance::Medium => 0.65,
         Distance::Long => 0.55,
     } + if surface == Surface::Dirt { 0.1 } else { 0.0 }
-        + if matches!(style, Style::Late | Style::End) { 0.1 } else { 0.0 };
+        + if matches!(style, Style::Late | Style::End) {
+            0.1
+        } else {
+            0.0
+        };
     let wit = 0.7 + if style == Style::Front { 0.1 } else { 0.0 };
     [1.0, stamina, power, 0.45, wit]
 }
@@ -131,18 +142,36 @@ impl App {
     /// Lengths a skill gains for this plan: simulated if the skill chart ran for it, else an
     /// estimate from how its conditions fit (gold 0.6 L, white 0.25 L if it fits; less if generic).
     pub(crate) fn skill_lengths(&self, id: u32) -> (f64, bool) {
-        if let Some(v) = self.planner.current_skill_values(self.plan_key()).and_then(|v| v.rows.get(&id)) {
+        if let Some(v) = self
+            .planner
+            .current_skill_values(self.plan_key())
+            .and_then(|v| v.rows.get(&id))
+        {
             return (v.mean.max(0.0), true);
         }
-        let Some(s) = self.kb.skills.get(&id) else { return (0.0, false) };
+        let Some(s) = self.kb.skills.get(&id) else {
+            return (0.0, false);
+        };
         // Can it trigger on this course at all (direction, ground, weather, season, distance, style)?
         if self.can_activate_on_plan(id) == Some(false) {
             return (0.0, false);
         }
         let gold = s.rarity >= 2;
         let v = match self.skill_fit(id) {
-            Fit::Target => if gold { 0.6 } else { 0.25 },
-            Fit::General => if gold { 0.35 } else { 0.12 },
+            Fit::Target => {
+                if gold {
+                    0.6
+                } else {
+                    0.25
+                }
+            }
+            Fit::General => {
+                if gold {
+                    0.35
+                } else {
+                    0.12
+                }
+            }
             Fit::Other => 0.0,
         };
         (v, false)
@@ -169,9 +198,25 @@ impl App {
             let setup = self.plan_race_setup();
             let course = data.courses.get(&setup.course?)?;
             let p = &self.planner.plan;
-            let conditions = [setup.ground.unwrap_or(1), setup.weather.unwrap_or(1), setup.season.unwrap_or(1), setup.time.unwrap_or(2)];
-            let stats = if p.target.iter().any(|v| *v > 0) { p.target.map(f64::from) } else { [1000.0; 5] };
-            skill_can_activate(data, course, conditions, stats, crate::tab_sim::strategy_of(p.style), id)
+            let conditions = [
+                setup.ground.unwrap_or(1),
+                setup.weather.unwrap_or(1),
+                setup.season.unwrap_or(1),
+                setup.time.unwrap_or(2),
+            ];
+            let stats = if p.target.iter().any(|v| *v > 0) {
+                p.target.map(f64::from)
+            } else {
+                [1000.0; 5]
+            };
+            skill_can_activate(
+                data,
+                course,
+                conditions,
+                stats,
+                crate::tab_sim::strategy_of(p.style),
+                id,
+            )
         })();
         let mut cache = self.planner.activation_cache.borrow_mut();
         if cache.0 != key {
@@ -186,7 +231,9 @@ impl App {
         let names = effect_names(&self.kb);
         let scenario = self.plan_scenario().cloned();
         let info = p.trainee.and_then(|t| self.kb.umas.get(&t));
-        let (objectives, uma_events) = info.map(|u| career::trainee_inputs(&self.kb, u)).unwrap_or_default();
+        let (objectives, uma_events) = info
+            .map(|u| career::trainee_inputs(&self.kb, u))
+            .unwrap_or_default();
         let friend_lb = p.friend_lb.min(4);
         let mut owned = HashMap::new();
         let mut friend = HashMap::new();
@@ -195,11 +242,19 @@ impl App {
         let mut all_skills: BTreeSet<u32> = BTreeSet::new();
         for c in &self.roster.cards {
             if let Some(ci) = self.kb.cards.get(&c.id) {
-                owned.insert(c.id, card_stats(ci, u32::from(c.level), &names, scenario.as_ref()));
+                owned.insert(
+                    c.id,
+                    card_stats(ci, u32::from(c.level), &names, scenario.as_ref()),
+                );
             }
         }
         let today = crate::ui_util::today();
-        for ci in self.kb.cards.values().filter(|c| c.rarity == "SSR" && c.released(&today)) {
+        for ci in self
+            .kb
+            .cards
+            .values()
+            .filter(|c| c.rarity == "SSR" && c.released(&today))
+        {
             let level = u32::from(Rarity::SSR.max_level(friend_lb));
             friend.insert(ci.id, card_stats(ci, level, &names, scenario.as_ref()));
         }
@@ -212,13 +267,20 @@ impl App {
         }
         let mut trainee_skills = HashSet::new();
         if let (Some(i), Some(o)) = (info, p.trainee.and_then(|t| self.owned_uma(t))) {
-            trainee_skills.extend(i.skills.iter().filter(|s| s.potential <= o.potential).map(|s| s.id));
+            trainee_skills.extend(
+                i.skills
+                    .iter()
+                    .filter(|s| s.potential <= o.potential)
+                    .map(|s| s.id),
+            );
             trainee_skills.extend(i.event_skills.iter().copied());
         }
         let mut link_gold = HashMap::new();
         if let Some(sc) = &scenario {
             for (uma, skill) in &sc.link_golds {
-                if let Some(id) = self.kb.skill_order.iter().find(|id| self.kb.skills[*id].name == *skill && self.kb.skills[*id].rarity >= 2) {
+                if let Some(id) = self.kb.skill_order.iter().find(|id| {
+                    self.kb.skills[*id].name == *skill && self.kb.skills[*id].rarity >= 2
+                }) {
                     link_gold.insert(uma.clone(), *id);
                     all_skills.insert(*id);
                 }
@@ -232,8 +294,13 @@ impl App {
             skill_lengths.insert(*id, v);
         }
         let values = self.planner.current_skill_values(self.plan_key());
-        let stats_per_length = values.and_then(|v| v.stats_per_length).unwrap_or(DEFAULT_STATS_PER_LENGTH);
-        let skill_names = all_skills.iter().map(|id| (*id, self.kb.skill_name(*id))).collect();
+        let stats_per_length = values
+            .and_then(|v| v.stats_per_length)
+            .unwrap_or(DEFAULT_STATS_PER_LENGTH);
+        let skill_names = all_skills
+            .iter()
+            .map(|id| (*id, self.kb.skill_name(*id)))
+            .collect();
         RankContext {
             common: self.kb.scenarios.as_ref().map(|s| s.common.clone()),
             scenario,
@@ -261,7 +328,9 @@ impl App {
 
     fn deck6(&self) -> [Option<u32>; 6] {
         let p = &self.planner.plan;
-        [p.deck[0], p.deck[1], p.deck[2], p.deck[3], p.deck[4], p.friend]
+        [
+            p.deck[0], p.deck[1], p.deck[2], p.deck[3], p.deck[4], p.friend,
+        ]
     }
 
     fn rank_cache_key(&self) -> RankKey {
@@ -277,13 +346,20 @@ impl App {
             return picks.clone();
         }
         let picks = rank_slot(&self.rank_context(), &key.2, slot);
-        self.planner.rank_cache.borrow_mut().insert(key, slot, picks.clone());
+        self.planner
+            .rank_cache
+            .borrow_mut()
+            .insert(key, slot, picks.clone());
         picks
     }
 
     /// The slot's ranking if it's ready; otherwise starts ranking every slot in the background
     /// (this slot first) and returns None. The UI stays responsive while it runs.
-    pub(crate) fn slot_candidates_ready(&self, slot: usize, ctx: &eframe::egui::Context) -> Option<Vec<CardPick>> {
+    pub(crate) fn slot_candidates_ready(
+        &self,
+        slot: usize,
+        ctx: &eframe::egui::Context,
+    ) -> Option<Vec<CardPick>> {
         let key = self.rank_cache_key();
         let mut cache = self.planner.rank_cache.borrow_mut();
         cache.drain(key);
@@ -314,17 +390,33 @@ impl App {
         for c in &self.roster.cards {
             (c.id, c.lb, c.level).hash(&mut h);
         }
-        self.planner.current_skill_values(self.plan_key()).map(|v| v.rows.len()).hash(&mut h);
+        self.planner
+            .current_skill_values(self.plan_key())
+            .map(|v| v.rows.len())
+            .hash(&mut h);
         h.finish()
     }
 
     /// Score and reason for one card in the current deck, from the slot ranking. `Err(())` while
     /// the ranking is still running in the background.
-    pub(crate) fn card_value(&self, id: u32, ctx: &eframe::egui::Context) -> Result<Option<(f32, String)>, ()> {
+    pub(crate) fn card_value(
+        &self,
+        id: u32,
+        ctx: &eframe::egui::Context,
+    ) -> Result<Option<(f32, String)>, ()> {
         let p = &self.planner.plan;
-        let Some(slot) = (if p.friend == Some(id) { Some(5) } else { p.deck.iter().position(|d| *d == Some(id)) }) else { return Ok(None) };
+        let Some(slot) = (if p.friend == Some(id) {
+            Some(5)
+        } else {
+            p.deck.iter().position(|d| *d == Some(id))
+        }) else {
+            return Ok(None);
+        };
         let picks = self.slot_candidates_ready(slot, ctx).ok_or(())?;
-        Ok(picks.into_iter().find(|c| c.id == id).map(|c| (c.score, c.reason)))
+        Ok(picks
+            .into_iter()
+            .find(|c| c.id == id)
+            .map(|c| (c.score, c.reason)))
     }
 
     /// Fill the deck's empty slots (or all of them) with the best candidates, one slot at a time.
@@ -336,13 +428,17 @@ impl App {
         }
         let ctx = self.rank_context();
         let p = &self.planner.plan;
-        let mut deck = [p.deck[0], p.deck[1], p.deck[2], p.deck[3], p.deck[4], p.friend];
+        let mut deck = [
+            p.deck[0], p.deck[1], p.deck[2], p.deck[3], p.deck[4], p.friend,
+        ];
         let mut filled = Vec::new();
         for slot in 0..6 {
             if deck[slot].is_some() {
                 continue;
             }
-            let Some(best) = rank_slot(&ctx, &deck, slot).into_iter().next() else { continue };
+            let Some(best) = rank_slot(&ctx, &deck, slot).into_iter().next() else {
+                continue;
+            };
             deck[slot] = Some(best.id);
             filled.push(best);
         }
@@ -357,19 +453,35 @@ impl App {
 
     /// Saved parents from account/parents.md, one line each: "Uma — blue · pink · green".
     pub(crate) fn saved_parents(&self) -> Vec<String> {
-        let Some(root) = &self.root else { return Vec::new() };
-        let text = std::fs::read_to_string(root.join("account").join("parents.md")).unwrap_or_default();
-        let Some(table) = crate::data::tables(&text).into_iter().next() else { return Vec::new() };
+        let Some(root) = &self.root else {
+            return Vec::new();
+        };
+        let text =
+            std::fs::read_to_string(root.join("account").join("parents.md")).unwrap_or_default();
+        let Some(table) = crate::data::tables(&text).into_iter().next() else {
+            return Vec::new();
+        };
         let col = |prefix: &str| table.headers.iter().position(|h| h.starts_with(prefix));
         let (uma, blue, pink, green) = (col("Uma"), col("Blue"), col("Pink"), col("Green"));
-        let cell = |row: &[String], i: Option<usize>| i.and_then(|i| row.get(i)).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        let cell = |row: &[String], i: Option<usize>| {
+            i.and_then(|i| row.get(i))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
         table
             .rows
             .iter()
             .filter_map(|row| {
                 let name = cell(row, uma)?;
-                let sparks: Vec<String> = [blue, pink, green].into_iter().filter_map(|i| cell(row, i)).collect();
-                Some(if sparks.is_empty() { name } else { format!("{name} — {}", sparks.join(" · ")) })
+                let sparks: Vec<String> = [blue, pink, green]
+                    .into_iter()
+                    .filter_map(|i| cell(row, i))
+                    .collect();
+                Some(if sparks.is_empty() {
+                    name
+                } else {
+                    format!("{name} — {}", sparks.join(" · "))
+                })
             })
             .collect()
     }
@@ -377,13 +489,19 @@ impl App {
     /// The trainee's aptitudes for the goal that are below A: pink sparks from parents raise them.
     pub(crate) fn pink_sparks_wanted(&self) -> Vec<String> {
         let p = &self.planner.plan;
-        let Some(info) = p.trainee.and_then(|t| self.kb.umas.get(&t)) else { return Vec::new() };
+        let Some(info) = p.trainee.and_then(|t| self.kb.umas.get(&t)) else {
+            return Vec::new();
+        };
         let a = &info.aptitude;
-        [(p.distance.label(), a.distance(p.distance)), (p.surface.label(), a.surface(p.surface)), (p.style.label(), a.style(p.style))]
-            .into_iter()
-            .filter(|(_, g)| grade_rank(g) < 7)
-            .map(|(label, g)| format!("{label} (now {g})"))
-            .collect()
+        [
+            (p.distance.label(), a.distance(p.distance)),
+            (p.surface.label(), a.surface(p.surface)),
+            (p.style.label(), a.style(p.style)),
+        ]
+        .into_iter()
+        .filter(|(_, g)| grade_rank(g) < 7)
+        .map(|(label, g)| format!("{label} (now {g})"))
+        .collect()
     }
 
     /// Owned umas the meta sheet recommends for the plan's CM and style (in its order), then the
@@ -400,8 +518,14 @@ impl App {
                 let fit = u32::from(grade_rank(a.distance(p.distance))) * 3
                     + u32::from(grade_rank(a.surface(p.surface))) * 3
                     + u32::from(grade_rank(a.style(p.style))) * 2;
-                let sheet = meta.iter().position(|m| *m == u.id).map_or(0, |i| (20 - i.min(19) as u32) * 100_000);
-                Some((u.id, sheet + fit * 100 + u32::from(u.stars) * 10 + u32::from(u.potential)))
+                let sheet = meta
+                    .iter()
+                    .position(|m| *m == u.id)
+                    .map_or(0, |i| (20 - i.min(19) as u32) * 100_000);
+                Some((
+                    u.id,
+                    sheet + fit * 100 + u32::from(u.stars) * 10 + u32::from(u.potential),
+                ))
             })
             .collect();
         ids.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
@@ -410,7 +534,12 @@ impl App {
 
     /// The career simulation of the current plan (deck as chosen), cached.
     pub(crate) fn plan_career(&self) -> Option<CareerResult> {
-        let key = (self.plan_key(), self.rank_key(), self.planner.plan.deck, self.planner.plan.friend);
+        let key = (
+            self.plan_key(),
+            self.rank_key(),
+            self.planner.plan.deck,
+            self.planner.plan.friend,
+        );
         if let Some((k, r)) = self.planner.career_cache.borrow().as_ref()
             && *k == key
         {
@@ -418,7 +547,12 @@ impl App {
         }
         let ctx = self.rank_context();
         let p = &self.planner.plan;
-        let mut deck: Vec<&CardStats> = p.deck.iter().flatten().filter_map(|id| ctx.owned.get(id)).collect();
+        let mut deck: Vec<&CardStats> = p
+            .deck
+            .iter()
+            .flatten()
+            .filter_map(|id| ctx.owned.get(id))
+            .collect();
         if let Some(f) = p.friend.and_then(|id| ctx.friend.get(&id)) {
             deck.push(f);
         }
@@ -442,13 +576,20 @@ impl App {
 
     /// The SP available for skills: the plan's own budget if set, else the career estimate.
     pub(crate) fn sp_budget(&self) -> Option<f64> {
-        self.planner.plan.sp_budget.map(f64::from).or_else(|| self.plan_career().map(|c| c.sp_mean))
+        self.planner
+            .plan
+            .sp_budget
+            .map(f64::from)
+            .or_else(|| self.plan_career().map(|c| c.sp_mean))
     }
 
     /// A skill's cost after the hints this deck is expected to give, including the lower version
     /// a gold or ◎ skill needs if the plan doesn't already have it.
     pub(crate) fn skill_cost(&self, id: u32, career: Option<&CareerResult>) -> f64 {
-        self.own_price(id, career) + self.lower_version(id).map_or(0.0, |l| self.own_price(l, career))
+        self.own_price(id, career)
+            + self
+                .lower_version(id)
+                .map_or(0.0, |l| self.own_price(l, career))
     }
 
     /// One skill's price, without the lower version: base SP less the hint discount (the shop's
@@ -457,7 +598,14 @@ impl App {
     pub(crate) fn own_price(&self, id: u32, career: Option<&CareerResult>) -> f64 {
         let p = &self.planner.plan;
         let sp = self.kb.skills.get(&id).map_or(0.0, |s| f64::from(s.sp));
-        let lv = if p.shop.on { p.shop.offered.get(&id).map_or(0.0, |l| f64::from(*l)) } else { career.and_then(|c| c.hint_levels.get(&id)).copied().unwrap_or(0.0) };
+        let lv = if p.shop.on {
+            p.shop.offered.get(&id).map_or(0.0, |l| f64::from(*l))
+        } else {
+            career
+                .and_then(|c| c.hint_levels.get(&id))
+                .copied()
+                .unwrap_or(0.0)
+        };
         let fast = if p.fast_learner { 0.1 } else { 0.0 };
         sp * (1.0 - hint_discount(lv) - fast).max(0.0)
     }
@@ -500,11 +648,19 @@ impl App {
                 let (gain, _) = self.skill_lengths(*id);
                 // A recommended skill that can't trigger on this course isn't worth buying.
                 let boost = match meta.get(id) {
-                    Some((w, _)) if self.can_activate_on_plan(*id) != Some(false) => f64::from(*w) * meta_lengths,
+                    Some((w, _)) if self.can_activate_on_plan(*id) != Some(false) => {
+                        f64::from(*w) * meta_lengths
+                    }
                     _ => 0.0,
                 };
                 let pin = if pinned.contains(id) { 1000.0 } else { 0.0 };
-                (gain + boost + pin > 0.0).then(|| (*id, gain + boost + pin, self.skill_cost(*id, career.as_ref())))
+                (gain + boost + pin > 0.0).then(|| {
+                    (
+                        *id,
+                        gain + boost + pin,
+                        self.skill_cost(*id, career.as_ref()),
+                    )
+                })
             })
             .collect();
         knapsack(&items, budget, |id| id / 10)
@@ -525,7 +681,9 @@ impl App {
             .filter_map(|id| {
                 let s = self.kb.skills.get(id)?;
                 let pinned = p.pinned_skills.contains(id);
-                let excluded = p.banned_skills.contains(id) || (p.shop.on && !p.shop.offered.contains_key(id)) || (!p.shop.on && ctx.parent_only.contains(id));
+                let excluded = p.banned_skills.contains(id)
+                    || (p.shop.on && !p.shop.offered.contains_key(id))
+                    || (!p.shop.on && ctx.parent_only.contains(id));
                 if !pinned && (excluded || s.grade <= 0) {
                     return None;
                 }
@@ -534,7 +692,10 @@ impl App {
             })
             .collect();
         let chosen = knapsack(&items, budget, |id| id / 10);
-        let points = chosen.iter().map(|id| i64::from(self.kb.skills.get(id).map_or(0, |s| s.grade))).sum();
+        let points = chosen
+            .iter()
+            .map(|id| i64::from(self.kb.skills.get(id).map_or(0, |s| s.grade)))
+            .sum();
         (chosen, points)
     }
 
@@ -554,10 +715,13 @@ impl App {
                 }
                 let (gain, _) = self.skill_lengths(*id);
                 let boost = match meta.get(id) {
-                    Some((w, _)) if self.can_activate_on_plan(*id) != Some(false) => f64::from(*w) * crate::meta::META_SKILL_LENGTHS,
+                    Some((w, _)) if self.can_activate_on_plan(*id) != Some(false) => {
+                        f64::from(*w) * crate::meta::META_SKILL_LENGTHS
+                    }
                     _ => 0.0,
                 };
-                (gain + boost > 0.0).then(|| (*id, gain + boost, self.skill_cost(*id, career.as_ref())))
+                (gain + boost > 0.0)
+                    .then(|| (*id, gain + boost, self.skill_cost(*id, career.as_ref())))
             })
             .collect();
         knapsack(&items, budget, |id| id / 10)
@@ -566,7 +730,11 @@ impl App {
 
 /// Multiple-choice knapsack: at most one skill per group (a gold and its white share a group),
 /// maximising total gain within `budget` SP. Costs and budget are rounded to 5 SP.
-pub(crate) fn knapsack(items: &[(u32, f64, f64)], budget: f64, group: impl Fn(u32) -> u32) -> Vec<u32> {
+pub(crate) fn knapsack(
+    items: &[(u32, f64, f64)],
+    budget: f64,
+    group: impl Fn(u32) -> u32,
+) -> Vec<u32> {
     let step = 5.0;
     let cap = (budget / step).floor().max(0.0) as usize;
     let mut groups: Vec<(u32, Vec<(u32, f64, usize)>)> = Vec::new();
@@ -608,16 +776,34 @@ pub(crate) fn knapsack(items: &[(u32, f64, f64)], budget: f64, group: impl Fn(u3
 
 fn fmt_stats(d: &[f64; 5]) -> String {
     let names = ["Spd", "Sta", "Pow", "Gut", "Wit"];
-    let parts: Vec<String> = d.iter().zip(names).filter(|(v, _)| v.abs() >= 1.0).map(|(v, n)| format!("{n} {v:+.0}")).collect();
-    if parts.is_empty() { "no stats".into() } else { parts.join(" ") }
+    let parts: Vec<String> = d
+        .iter()
+        .zip(names)
+        .filter(|(v, _)| v.abs() >= 1.0)
+        .map(|(v, n)| format!("{n} {v:+.0}"))
+        .collect();
+    if parts.is_empty() {
+        t!("no stats").into()
+    } else {
+        parts.join(" ")
+    }
 }
 
 /// Rank every card that can go in `slot` (0..=4 owned, 5 friend) given the rest of the deck.
 pub(crate) fn rank_slot(ctx: &RankContext, deck: &[Option<u32>; 6], slot: usize) -> Vec<CardPick> {
     let friend = slot == 5;
-    let others: Vec<(u32, bool)> = (0..6).filter(|s| *s != slot).filter_map(|s| deck[s].map(|id| (id, s == 5))).collect();
-    let taken: Vec<String> = others.iter().filter_map(|(id, f)| ctx.stats(*id, *f).map(|c| c.uma.clone())).collect();
-    let other_stats: Vec<&CardStats> = others.iter().filter_map(|(id, f)| ctx.stats(*id, *f)).collect();
+    let others: Vec<(u32, bool)> = (0..6)
+        .filter(|s| *s != slot)
+        .filter_map(|s| deck[s].map(|id| (id, s == 5)))
+        .collect();
+    let taken: Vec<String> = others
+        .iter()
+        .filter_map(|(id, f)| ctx.stats(*id, *f).map(|c| c.uma.clone()))
+        .collect();
+    let other_stats: Vec<&CardStats> = others
+        .iter()
+        .filter_map(|(id, f)| ctx.stats(*id, *f))
+        .collect();
     // Skills the rest of the deck or the trainee already offer don't count twice.
     let mut offered: HashSet<u32> = ctx.trainee_skills.clone();
     for (id, _) in &others {
@@ -627,8 +813,11 @@ pub(crate) fn rank_slot(ctx: &RankContext, deck: &[Option<u32>; 6], slot: usize)
     }
     let pool: Vec<u32> = {
         let map = if friend { &ctx.friend } else { &ctx.owned };
-        let mut v: Vec<u32> =
-            map.values().filter(|c| ctx.trainee.as_deref() != Some(c.uma.as_str()) && !taken.contains(&c.uma)).map(|c| c.id).collect();
+        let mut v: Vec<u32> = map
+            .values()
+            .filter(|c| ctx.trainee.as_deref() != Some(c.uma.as_str()) && !taken.contains(&c.uma))
+            .map(|c| c.id)
+            .collect();
         v.sort_unstable();
         v
     };
@@ -647,19 +836,35 @@ pub(crate) fn rank_slot(ctx: &RankContext, deck: &[Option<u32>; 6], slot: usize)
             let mut delta = [0.0; 5];
             for i in 0..5 {
                 delta[i] = with.stats_mean[i] - base.stats_mean[i];
-                let worth = if ctx.target[i] > 0.0 { career::need_value(base.stats_mean[i], delta[i], ctx.target[i], 0.3) } else { delta[i] };
+                let worth = if ctx.target[i] > 0.0 {
+                    career::need_value(base.stats_mean[i], delta[i], ctx.target[i], 0.3)
+                } else {
+                    delta[i]
+                };
                 score += ctx.weights[i] * worth;
             }
             let dsp = with.sp_mean - base.sp_mean;
             score += dsp * ctx.sp_value;
-            reason.push(format!("career {} · SP {dsp:+.0}", fmt_stats(&delta)));
+            reason.push(tf!(
+                "career {} · SP {}",
+                fmt_stats(&delta),
+                format!("{dsp:+.0}")
+            ));
         } else {
             // No scenario data: its own-stat training effects, weighted by the goal.
             let fac = career::facility_of(&kind);
             let w = fac.map_or(0.75, |f| ctx.weights[f]);
-            let v = c.friendship + c.training * 1.5 + fac.map_or(0.0, |f| c.stat_bonus[f] * 6.0) + c.specialty * 0.12 + c.race_bonus * 0.5;
+            let v = c.friendship
+                + c.training * 1.5
+                + fac.map_or(0.0, |f| c.stat_bonus[f] * 6.0)
+                + c.specialty * 0.12
+                + c.race_bonus * 0.5;
             score += v * w;
-            reason.push(format!("Friendship {:.0} · Training {:.0}", c.friendship, c.training));
+            reason.push(tf!(
+                "Friendship {} · Training {}",
+                format!("{:.0}", c.friendship),
+                format!("{:.0}", c.training)
+            ));
         }
         // Skills it teaches, valued on the target course; the best ones count most.
         let (hints, events) = ctx.card_skills.get(&id).cloned().unwrap_or_default();
@@ -678,16 +883,30 @@ pub(crate) fn rank_slot(ctx: &RankContext, deck: &[Option<u32>; 6], slot: usize)
         score += lengths * ctx.stats_per_length;
         if let Some((v, s)) = vals.first() {
             let name = ctx.skill_names.get(s).cloned().unwrap_or_default();
-            let how = if ctx.simulated { "simulated" } else { "estimated" };
-            reason.push(format!("skills ≈ {:+.2} L ({how}; best: {name} {:+.2} L)", lengths, v));
+            let how = if ctx.simulated {
+                t!("simulated")
+            } else {
+                t!("estimated")
+            };
+            reason.push(tf!(
+                "skills ≈ {} L ({}; best: {} {} L)",
+                format!("{:+.2}", lengths),
+                how,
+                name,
+                format!("{:+.2}", v)
+            ));
         }
         // Scenario link.
         if c.linked {
-            let mut note = "scenario link".to_string();
+            let mut note = t!("Scenario link").to_string();
             if let Some(gold) = ctx.link_gold.get(&c.uma) {
                 let v = ctx.skill_lengths.get(gold).copied().unwrap_or(0.0) * 0.7;
                 score += v * ctx.stats_per_length;
-                note += &format!(" (+{} hint {v:+.2} L)", ctx.skill_names.get(gold).cloned().unwrap_or_default());
+                note += &tf!(
+                    " (+{} hint {} L)",
+                    ctx.skill_names.get(gold).cloned().unwrap_or_default(),
+                    format!("{v:+.2}")
+                );
             }
             reason.push(note);
         }
@@ -695,18 +914,42 @@ pub(crate) fn rank_slot(ctx: &RankContext, deck: &[Option<u32>; 6], slot: usize)
         if meta > 0.0 {
             reason.insert(0, format!("{} {why}", crate::meta::stars(meta)));
         }
-        Some(CardPick { id, score: score as f32, meta, reason: format!("{} {kind} · {}", rarity_label(id), reason.join(" · ")) })
+        Some(CardPick {
+            id,
+            score: score as f32,
+            meta,
+            reason: format!("{} {kind} · {}", rarity_label(id), reason.join(" · ")),
+        })
     };
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 12);
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .clamp(1, 12);
     let chunk = pool.len().div_ceil(threads).max(1);
     let mut picks: Vec<CardPick> = std::thread::scope(|scope| {
-        let handles: Vec<_> = pool.chunks(chunk).map(|ids| scope.spawn(move || ids.iter().filter_map(|id| score_one(*id)).collect::<Vec<_>>())).collect();
-        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        let handles: Vec<_> = pool
+            .chunks(chunk)
+            .map(|ids| {
+                scope.spawn(move || {
+                    ids.iter()
+                        .filter_map(|id| score_one(*id))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
     });
     // The meta sheet's picks first, by how strongly it backs them; the simulation orders cards it
     // backs about equally, and the rest.
     let rank = |c: &CardPick| crate::meta::meta_rank(c.meta);
-    picks.sort_by(|a, b| rank(b).cmp(&rank(a)).then(b.score.total_cmp(&a.score)).then(b.id.cmp(&a.id)));
+    picks.sort_by(|a, b| {
+        rank(b)
+            .cmp(&rank(a))
+            .then(b.score.total_cmp(&a.score))
+            .then(b.id.cmp(&a.id))
+    });
     picks
 }
 
@@ -742,7 +985,9 @@ impl RankCache {
     }
 
     fn get(&self, key: RankKey, slot: usize) -> Option<&Vec<CardPick>> {
-        (self.key == Some(key)).then(|| self.slots.get(&slot)).flatten()
+        (self.key == Some(key))
+            .then(|| self.slots.get(&slot))
+            .flatten()
     }
 
     fn insert(&mut self, key: RankKey, slot: usize, picks: Vec<CardPick>) {
@@ -785,12 +1030,25 @@ impl RankCache {
     }
 
     /// Rank every slot on a background thread, `first` first, skipping slots already cached.
-    fn start(&mut self, key: RankKey, first: usize, ctx: RankContext, repaint: eframe::egui::Context) {
+    fn start(
+        &mut self,
+        key: RankKey,
+        first: usize,
+        ctx: RankContext,
+        repaint: eframe::egui::Context,
+    ) {
         if let Some(old) = self.job.take() {
             old.cancel.store(true, Ordering::Relaxed);
         }
-        let cached: Vec<usize> = if self.key == Some(key) { self.slots.keys().copied().collect() } else { Vec::new() };
-        let order: Vec<usize> = std::iter::once(first).chain((0..6).filter(|s| *s != first)).filter(|s| !cached.contains(s)).collect();
+        let cached: Vec<usize> = if self.key == Some(key) {
+            self.slots.keys().copied().collect()
+        } else {
+            Vec::new()
+        };
+        let order: Vec<usize> = std::iter::once(first)
+            .chain((0..6).filter(|s| *s != first))
+            .filter(|s| !cached.contains(s))
+            .collect();
         let (tx, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
@@ -810,11 +1068,17 @@ impl RankCache {
     }
 }
 
-
 /// Whether a skill's conditions can be met on a course under these conditions (ground, weather,
 /// season, time of day, as the simulator numbers them) for one running style, by the simulator's
 /// condition engine. `None` when the simulator lacks the skill (mostly scenario skills).
-pub(crate) fn skill_can_activate(data: &crate::sim::data::SimData, course: &crate::sim::course::Course, conditions: [u8; 4], stats: [f64; 5], strategy: i32, id: u32) -> Option<bool> {
+pub(crate) fn skill_can_activate(
+    data: &crate::sim::data::SimData,
+    course: &crate::sim::course::Course,
+    conditions: [u8; 4],
+    stats: [f64; 5],
+    strategy: i32,
+    id: u32,
+) -> Option<bool> {
     if !data.skills.contains_key(&id) {
         return None;
     }
@@ -833,8 +1097,21 @@ pub(crate) fn skill_can_activate(data: &crate::sim::data::SimData, course: &crat
         mood: 2,
     };
     let horse = crate::sim::params::base_stats(&desc);
-    let built = crate::sim::builder::build_skill_data(data, &horse, &race, course, id, crate::sim::solver::Perspective::Mine, 1).ok()?;
-    Some(built.iter().any(|sd| sd.regions.first().is_some_and(|r| r.start < 9999.0)))
+    let built = crate::sim::builder::build_skill_data(
+        data,
+        &horse,
+        &race,
+        course,
+        id,
+        crate::sim::solver::Perspective::Mine,
+        1,
+    )
+    .ok()?;
+    Some(
+        built
+            .iter()
+            .any(|sd| sd.regions.first().is_some_and(|r| r.start < 9999.0)),
+    )
 }
 
 #[cfg(test)]
@@ -858,17 +1135,30 @@ mod tests {
         let picks = a.recommend_deck(true);
         assert_eq!(picks.len(), 6);
         for pick in &picks {
-            eprintln!("{:5.1} {} [{}]: {}", pick.score, a.kb.cards[&pick.id].uma, a.kb.cards[&pick.id].title, pick.reason);
+            eprintln!(
+                "{:5.1} {} [{}]: {}",
+                pick.score, a.kb.cards[&pick.id].uma, a.kb.cards[&pick.id].title, pick.reason
+            );
         }
         let deck: Vec<u32> = a.planner.plan.deck.iter().flatten().copied().collect();
         assert_eq!(deck.len(), 5);
-        let mut names: Vec<String> = deck.iter().chain(a.planner.plan.friend.iter()).map(|id| a.kb.cards[id].uma.clone()).collect();
-        assert!(!names.contains(&"Narita Brian".to_string()), "trainee's own card in deck: {names:?}");
+        let mut names: Vec<String> = deck
+            .iter()
+            .chain(a.planner.plan.friend.iter())
+            .map(|id| a.kb.cards[id].uma.clone())
+            .collect();
+        assert!(
+            !names.contains(&"Narita Brian".to_string()),
+            "trainee's own card in deck: {names:?}"
+        );
         names.sort();
         let n = names.len();
         names.dedup();
         assert_eq!(names.len(), n, "two cards of one character");
-        assert!(deck.iter().all(|id| a.owned_card(*id).is_some()), "deck slots must be owned cards");
+        assert!(
+            deck.iter().all(|id| a.owned_card(*id).is_some()),
+            "deck slots must be owned cards"
+        );
         assert_eq!(a.planner.plan.friend_lb, 4);
     }
 
@@ -879,12 +1169,22 @@ mod tests {
             let mut a = app_for(101601, distance, Style::Pace);
             a.planner.plan.target = target;
             let picks = a.slot_candidates(0);
-            picks.iter().position(|p| a.kb.cards[&p.id].kind == "Stamina").unwrap_or(picks.len())
+            picks
+                .iter()
+                .position(|p| a.kb.cards[&p.id].kind == "Stamina")
+                .unwrap_or(picks.len())
         };
         let long = stamina_rank(Distance::Long, [1200, 1000, 1000, 500, 900]);
         let sprint = stamina_rank(Distance::Sprint, [1600, 450, 1100, 900, 1100]);
-        eprintln!("best Stamina card: #{} for Long, #{} for Sprint", long + 1, sprint + 1);
-        assert!(long < sprint, "Stamina cards should rank higher for a Long target");
+        eprintln!(
+            "best Stamina card: #{} for Long, #{} for Sprint",
+            long + 1,
+            sprint + 1
+        );
+        assert!(
+            long < sprint,
+            "Stamina cards should rank higher for a Long target"
+        );
     }
 
     /// The UI's background ranking gives the same order as ranking on the spot, and fills every slot.
@@ -900,7 +1200,10 @@ mod tests {
                 if let Some(picks) = a.slot_candidates_ready(slot, &ctx) {
                     return picks;
                 }
-                assert!(start.elapsed().as_secs() < 120, "background ranking never finished");
+                assert!(
+                    start.elapsed().as_secs() < 120,
+                    "background ranking never finished"
+                );
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
         };
@@ -923,11 +1226,24 @@ mod tests {
         a.planner.plan.target = [1200, 1000, 1000, 500, 900];
         eprintln!("scenario {}", a.plan_scenario_name());
         for p in a.slot_candidates(0).iter().take(25) {
-            eprintln!("{:6.1} {:8} {} [{}]: {}", p.score, a.kb.cards[&p.id].kind, a.kb.cards[&p.id].uma, a.kb.cards[&p.id].title, p.reason);
+            eprintln!(
+                "{:6.1} {:8} {} [{}]: {}",
+                p.score,
+                a.kb.cards[&p.id].kind,
+                a.kb.cards[&p.id].uma,
+                a.kb.cards[&p.id].title,
+                p.reason
+            );
         }
         a.recommend_deck(true);
         let c = a.plan_career().unwrap();
-        eprintln!("deck stats {:?} sp {:.0} trainings {:.0} races {:.0}", c.stats_mean.map(|v| v.round()), c.sp_mean, c.trainings_mean, c.races_mean);
+        eprintln!(
+            "deck stats {:?} sp {:.0} trainings {:.0} races {:.0}",
+            c.stats_mean.map(|v| v.round()),
+            c.sp_mean,
+            c.trainings_mean,
+            c.races_mean
+        );
     }
 
     #[test]
@@ -936,7 +1252,10 @@ mod tests {
         let mut a = app_for(100601, Distance::Sprint, Style::Pace);
         a.planner.plan.target = [1600, 450, 1100, 900, 1100];
         let picks = a.recommend_deck(true);
-        let stamina = picks.iter().filter(|p| a.kb.cards[&p.id].kind == "Stamina").count();
+        let stamina = picks
+            .iter()
+            .filter(|p| a.kb.cards[&p.id].kind == "Stamina")
+            .count();
         assert!(stamina <= 1, "sprint deck with {stamina} stamina cards");
     }
 
@@ -948,7 +1267,15 @@ mod tests {
             a.planner.plan.target = [1200, 800, 1000, 600, 900];
             a.planner.plan.scenario = scenario.into();
             let picks = a.slot_candidates(5);
-            picks.iter().take(10).map(|p| a.kb.cards[&p.id].effect(crate::knowledge::effect::RACE, 50).unwrap_or(0)).sum::<i32>()
+            picks
+                .iter()
+                .take(10)
+                .map(|p| {
+                    a.kb.cards[&p.id]
+                        .effect(crate::knowledge::effect::RACE, 50)
+                        .unwrap_or(0)
+                })
+                .sum::<i32>()
         };
         let (tb, ura) = (top_race_bonus("Trackblazer"), top_race_bonus("URA Finale"));
         eprintln!("race bonus in the top 10: Trackblazer {tb}, URA {ura}");
@@ -970,13 +1297,21 @@ mod tests {
         let best = a.trainee_candidates()[0];
         let apt = &a.kb.umas[&best].aptitude;
         let at_least_a = |g: &str| crate::knowledge::grade_rank(g) >= 7;
-        assert!(at_least_a(&apt.long) && at_least_a(&apt.turf) && at_least_a(&apt.pace), "best Long Turf Pace fit is {best}");
+        assert!(
+            at_least_a(&apt.long) && at_least_a(&apt.turf) && at_least_a(&apt.pace),
+            "best Long Turf Pace fit is {best}"
+        );
     }
 
     #[test]
     fn knapsack_respects_budget_and_groups() {
         // Gold 201 (gain 1.0, cost 300) and its white 202 (0.4, 150) share a group.
-        let items = [(201, 1.0, 300.0), (202, 0.4, 150.0), (301, 0.5, 160.0), (401, 0.2, 200.0)];
+        let items = [
+            (201, 1.0, 300.0),
+            (202, 0.4, 150.0),
+            (301, 0.5, 160.0),
+            (401, 0.2, 200.0),
+        ];
         let picked = super::knapsack(&items, 470.0, |id| id / 10);
         assert_eq!(picked, vec![201, 301]);
         // 1.0 L alone beats the white plus the other skill (0.9 L) when 320 SP fits only one pair.

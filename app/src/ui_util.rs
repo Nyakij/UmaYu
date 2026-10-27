@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, FontFamily, FontId, Margin, Painter, Pos2, Rect, Response, RichText, Sense, Shape, Stroke,
-    StrokeKind, Vec2, vec2,
+    self, Align2, Color32, CornerRadius, FontFamily, FontId, Margin, Painter, Pos2, Rect, Response,
+    RichText, Sense, Shape, Stroke, StrokeKind, Vec2, vec2,
 };
 
 use crate::data::CardType;
@@ -86,23 +86,30 @@ pub fn grade_color(g: &str) -> Color32 {
 
 /// Text in the semibold heading face.
 pub fn semibold(text: impl Into<String>, size: f32) -> RichText {
-    RichText::new(text).family(FontFamily::Name(SEMIBOLD.into())).size(size)
+    RichText::new(text)
+        .family(FontFamily::Name(SEMIBOLD.into()))
+        .size(size)
 }
 
 /// The title block every page starts with: the title, actions on the right, and one plain line
 /// on what the page is for. Same size and spacing on every tab, so pages line up.
-pub fn page_header(ui: &mut egui::Ui, title: &str, subtitle: &str, actions: impl FnOnce(&mut egui::Ui)) {
+pub fn page_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    actions: impl FnOnce(&mut egui::Ui),
+) {
     let weak = pal(ui).weak;
     ui.horizontal(|ui| {
         ui.set_min_height(30.0);
-        ui.label(semibold(title, size::XL));
+        ui.label(semibold(t!(title), size::XL));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             header_chibi(ui);
             actions(ui);
         });
     });
     if !subtitle.is_empty() {
-        ui.label(RichText::new(subtitle).size(13.0).color(weak));
+        ui.label(RichText::new(t!(subtitle)).size(13.0).color(weak));
     }
     ui.add_space(10.0);
 }
@@ -110,9 +117,15 @@ pub fn page_header(ui: &mut egui::Ui, title: &str, subtitle: &str, actions: impl
 /// A rounded rectangle shading from `from` (top left) to `to` (bottom right).
 pub fn gradient_rect(painter: &Painter, rect: Rect, radius: f32, from: Color32, to: Color32) {
     let r = radius.min(rect.width() / 2.0).min(rect.height() / 2.0);
-    let corners = [(rect.right_bottom() - vec2(r, r), 0.0), (rect.left_bottom() + vec2(r, -r), 0.5), (rect.left_top() + vec2(r, r), 1.0), (rect.right_top() + vec2(-r, r), 1.5)];
+    let corners = [
+        (rect.right_bottom() - vec2(r, r), 0.0),
+        (rect.left_bottom() + vec2(r, -r), 0.5),
+        (rect.left_top() + vec2(r, r), 1.0),
+        (rect.right_top() + vec2(-r, r), 1.5),
+    ];
     let shade = |q: Pos2| {
-        let t = (((q.x - rect.left()) / rect.width() + (q.y - rect.top()) / rect.height()) / 2.0).clamp(0.0, 1.0);
+        let t = (((q.x - rect.left()) / rect.width() + (q.y - rect.top()) / rect.height()) / 2.0)
+            .clamp(0.0, 1.0);
         from.lerp_to_gamma(to, t)
     };
     let mut mesh = egui::Mesh::default();
@@ -164,58 +177,97 @@ pub fn chibi(ui: &mut egui::Ui, pose: u8, size: f32) -> Response {
 /// Call it first inside the header's right-to-left section.
 pub fn header_chibi(ui: &mut egui::Ui) {
     if crate::theme::chibi() == crate::theme::Chibi::Everywhere {
-        chibi(ui, pose(), 44.0).on_hover_text("Seiun Sky. ⚙ Settings moves or hides her.");
+        chibi(ui, pose(), 44.0).on_hover_text(t!("Seiun Sky. ⚙ Settings moves or hides her."));
     }
 }
 
 /// A row of mutually exclusive choices in one rounded track, like sub-tabs.
-pub fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, String, &str)]) {
+pub fn segmented<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    options: &[(T, String, &str)],
+) {
     let p = pal(ui);
-    egui::Frame::new().fill(p.input).stroke(Stroke::new(1.0, p.border)).corner_radius(CornerRadius::same(10)).inner_margin(Margin::same(3)).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            // In a right-to-left row the first one added sits rightmost: add them backwards.
-            let ordered: Vec<&(T, String, &str)> = if ui.layout().prefer_right_to_left() { options.iter().rev().collect() } else { options.iter().collect() };
-            for (v, label, hover) in ordered {
-                let on = *value == *v;
-                let text = RichText::new(label).size(14.0).color(if on { p.text } else { p.weak });
-                let b = egui::Button::new(text)
-                    .fill(if on { p.raised } else { Color32::TRANSPARENT })
-                    .stroke(if on { Stroke::new(1.0, p.accent.gamma_multiply(0.7)) } else { Stroke::NONE })
-                    .corner_radius(CornerRadius::same(8))
-                    .min_size(vec2(0.0, 28.0));
-                let mut r = ui.add(b);
-                if !hover.is_empty() {
-                    r = r.on_hover_text(*hover);
+    egui::Frame::new()
+        .fill(p.input)
+        .stroke(Stroke::new(1.0, p.border))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::same(3))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                // In a right-to-left row the first one added sits rightmost: add them backwards.
+                let ordered: Vec<&(T, String, &str)> = if ui.layout().prefer_right_to_left() {
+                    options.iter().rev().collect()
+                } else {
+                    options.iter().collect()
+                };
+                for (v, label, hover) in ordered {
+                    let on = *value == *v;
+                    let text =
+                        RichText::new(t!(label))
+                            .size(14.0)
+                            .color(if on { p.text } else { p.weak });
+                    let b = egui::Button::new(text)
+                        .fill(if on { p.raised } else { Color32::TRANSPARENT })
+                        .stroke(if on {
+                            Stroke::new(1.0, p.accent.gamma_multiply(0.7))
+                        } else {
+                            Stroke::NONE
+                        })
+                        .corner_radius(CornerRadius::same(8))
+                        .min_size(vec2(0.0, 28.0));
+                    let mut r = ui.add(b);
+                    if !hover.is_empty() {
+                        r = r.on_hover_text(t!(*hover));
+                    }
+                    if r.clicked() {
+                        *value = *v;
+                    }
                 }
-                if r.clicked() {
-                    *value = *v;
-                }
-            }
+            });
         });
-    });
 }
 
 /// A small uppercase heading for a group of controls, with an ⓘ that explains it on hover.
 pub fn section_label(ui: &mut egui::Ui, text: &str, help: &str) {
     let weak = pal(ui).weak;
     ui.add_space(12.0);
-    let r = ui.label(RichText::new(if help.is_empty() { text.to_uppercase() } else { format!("{}  ⓘ", text.to_uppercase()) }).size(11.5).color(weak));
+    let r = ui.label(
+        RichText::new(if help.is_empty() {
+            t!(text).to_uppercase()
+        } else {
+            format!("{}  ⓘ", t!(text).to_uppercase())
+        })
+        .size(11.5)
+        .color(weak),
+    );
     if !help.is_empty() {
-        r.on_hover_text(help);
+        r.on_hover_text(t!(help));
     }
     ui.add_space(2.0);
 }
 
 /// Lay `n` equal tiles out in rows that fill the width exactly: the gaps stretch so the left
 /// and right edges of every row line up. `add` draws tile `i`.
-pub fn tile_grid(ui: &mut egui::Ui, n: usize, tile: Vec2, min_gap: f32, row_gap: f32, mut add: impl FnMut(&mut egui::Ui, usize)) {
+pub fn tile_grid(
+    ui: &mut egui::Ui,
+    n: usize,
+    tile: Vec2,
+    min_gap: f32,
+    row_gap: f32,
+    mut add: impl FnMut(&mut egui::Ui, usize),
+) {
     if n == 0 {
         return;
     }
     let w = ui.available_width();
     let cols = (((w + min_gap) / (tile.x + min_gap)).floor() as usize).max(1);
-    let gap = if cols > 1 { ((w - cols as f32 * tile.x) / (cols - 1) as f32).clamp(min_gap, min_gap * 2.5) } else { 0.0 };
+    let gap = if cols > 1 {
+        ((w - cols as f32 * tile.x) / (cols - 1) as f32).clamp(min_gap, min_gap * 2.5)
+    } else {
+        0.0
+    };
     for row in 0..n.div_ceil(cols) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -237,7 +289,11 @@ pub trait UiExt {
 
 impl UiExt for egui::Ui {
     fn small_btn(&mut self, text: impl Into<egui::WidgetText>) -> egui::Response {
-        self.add(egui::Button::new(text).small().min_size(egui::vec2(24.0, 24.0)))
+        self.add(
+            egui::Button::new(text)
+                .small()
+                .min_size(egui::vec2(24.0, 24.0)),
+        )
     }
 
     fn tick(&mut self, checked: &mut bool, text: impl Into<egui::WidgetText>) -> egui::Response {
@@ -252,7 +308,8 @@ impl UiExt for egui::Ui {
 
 pub fn primary_button(ui: &egui::Ui, text: impl Into<String>, size: f32) -> egui::Button<'static> {
     let p = pal(ui);
-    egui::Button::new(semibold(text, size).color(p.on_accent)).fill(p.accent)
+    let text_str = text.into();
+    egui::Button::new(semibold(t!(&text_str), size).color(p.on_accent)).fill(p.accent)
 }
 
 /// A rounded surface that groups related content, full width of the parent.
@@ -276,11 +333,16 @@ pub fn card_titled<R>(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui
 }
 
 /// A card with a title line and a short plain-language line under it.
-pub fn card_explained<R>(ui: &mut egui::Ui, title: &str, explain: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+pub fn card_explained<R>(
+    ui: &mut egui::Ui,
+    title: &str,
+    explain: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
     let r = card(ui, |ui| {
-        ui.label(semibold(title, 15.5));
+        ui.label(semibold(t!(title), 15.5));
         if !explain.is_empty() {
-            ui.label(RichText::new(explain).size(12.5).color(pal(ui).weak));
+            ui.label(RichText::new(t!(explain)).size(12.5).color(pal(ui).weak));
         }
         ui.add_space(4.0);
         add(ui)
@@ -292,7 +354,12 @@ pub fn card_explained<R>(ui: &mut egui::Ui, title: &str, explain: &str, add: imp
 /// Columns whose last cards end at the same height. `add` draws column `i`, stretching its last
 /// card down to the given y with `card_titled_to`, and returns where it would end on its own.
 /// The tallest column from the last frame sets the line.
-pub fn equal_columns(ui: &mut egui::Ui, id: &str, n: usize, mut add: impl FnMut(&mut egui::Ui, usize, f32) -> f32) {
+pub fn equal_columns(
+    ui: &mut egui::Ui,
+    id: &str,
+    n: usize,
+    mut add: impl FnMut(&mut egui::Ui, usize, f32) -> f32,
+) {
     let key = ui.make_persistent_id(id);
     let height: f32 = ui.data(|d| d.get_temp(key)).unwrap_or(0.0);
     let top = ui.cursor().top();
@@ -310,7 +377,12 @@ pub fn equal_columns(ui: &mut egui::Ui, id: &str, n: usize, mut add: impl FnMut(
 
 /// A titled card whose frame reaches down to `bottom` (a y on screen) when its content is
 /// shorter. Returns the y where it would end on its own, for `equal_columns`.
-pub fn card_titled_to(ui: &mut egui::Ui, title: &str, bottom: f32, add: impl FnOnce(&mut egui::Ui)) -> f32 {
+pub fn card_titled_to(
+    ui: &mut egui::Ui,
+    title: &str,
+    bottom: f32,
+    add: impl FnOnce(&mut egui::Ui),
+) -> f32 {
     let p = pal(ui);
     let mut natural = 0.0;
     egui::Frame::new()
@@ -320,7 +392,7 @@ pub fn card_titled_to(ui: &mut egui::Ui, title: &str, bottom: f32, add: impl FnO
         .inner_margin(Margin::same(14))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(semibold(title, 15.5));
+            ui.label(semibold(t!(title), 15.5));
             ui.add_space(4.0);
             add(ui);
             // Inner margin and stroke below the content.
@@ -338,8 +410,16 @@ pub fn card_titled_to(ui: &mut egui::Ui, title: &str, bottom: f32, add: impl FnO
 /// Small tinted pill with coloured text.
 /// Drawn as one widget, so it keeps its size in any layout (a table cell's included).
 pub fn badge(ui: &mut egui::Ui, text: impl Into<String>, color: Color32) -> Response {
-    let text = RichText::new(text.into()).color(readable(ui, color)).size(size::SM);
-    pill_padded(ui, text, color.gamma_multiply(0.16), Stroke::new(1.0, color.gamma_multiply(0.45)), vec2(16.0, 4.0))
+    let text = RichText::new(text.into())
+        .color(readable(ui, color))
+        .size(size::SM);
+    pill_padded(
+        ui,
+        text,
+        color.gamma_multiply(0.16),
+        Stroke::new(1.0, color.gamma_multiply(0.45)),
+        vec2(16.0, 4.0),
+    )
 }
 
 /// `color` as text: unchanged in dark mode; in light mode darkened until it reads on a card
@@ -354,7 +434,11 @@ pub fn readable(ui: &egui::Ui, color: Color32) -> Color32 {
         if crate::theme::contrast(c, p.surface) >= 4.5 && crate::theme::contrast(c, p.bg) >= 4.5 {
             break;
         }
-        c = Color32::from_rgb((f32::from(c.r()) * 0.88) as u8, (f32::from(c.g()) * 0.88) as u8, (f32::from(c.b()) * 0.88) as u8);
+        c = Color32::from_rgb(
+            (f32::from(c.r()) * 0.88) as u8,
+            (f32::from(c.g()) * 0.88) as u8,
+            (f32::from(c.b()) * 0.88) as u8,
+        );
     }
     c
 }
@@ -365,13 +449,31 @@ pub fn pill(ui: &mut egui::Ui, text: RichText, fill: Color32, stroke: Stroke) ->
     pill_padded(ui, text, fill, stroke, vec2(16.0, 6.0))
 }
 
-fn pill_padded(ui: &mut egui::Ui, text: RichText, fill: Color32, stroke: Stroke, pad: Vec2) -> Response {
-    let galley = egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
+fn pill_padded(
+    ui: &mut egui::Ui,
+    text: RichText,
+    fill: Color32,
+    stroke: Stroke,
+    pad: Vec2,
+) -> Response {
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
+    );
     let size = galley.size() + pad;
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     if ui.is_rect_visible(rect) {
-        ui.painter().rect(rect, CornerRadius::same(10), fill, stroke, StrokeKind::Inside);
-        ui.painter().galley(rect.center() - galley.size() / 2.0, galley, pal(ui).text);
+        ui.painter().rect(
+            rect,
+            CornerRadius::same(10),
+            fill,
+            stroke,
+            StrokeKind::Inside,
+        );
+        ui.painter()
+            .galley(rect.center() - galley.size() / 2.0, galley, pal(ui).text);
     }
     resp
 }
@@ -383,7 +485,8 @@ pub fn grade_badge(ui: &mut egui::Ui, label: &str, grade: &str) {
         ui.set_width(52.0);
         ui.label(RichText::new(label).size(11.5).color(weak));
         let (rect, _) = ui.allocate_exact_size(vec2(30.0, 24.0), Sense::hover());
-        ui.painter().rect_filled(rect, CornerRadius::same(6), grade_color(grade));
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(6), grade_color(grade));
         ui.painter().text(
             rect.center(),
             Align2::CENTER_CENTER,
@@ -399,10 +502,23 @@ pub fn grade_tile(ui: &mut egui::Ui, grade: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(26.0, 22.0), Sense::hover());
     if ui.is_rect_visible(rect) {
         if grade.is_empty() || grade == "-" {
-            ui.painter().text(rect.center(), Align2::CENTER_CENTER, "—", FontId::proportional(size::SM), pal(ui).weak);
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "—",
+                FontId::proportional(size::SM),
+                pal(ui).weak,
+            );
         } else {
-            ui.painter().rect_filled(rect, CornerRadius::same(5), grade_color(grade));
-            ui.painter().text(rect.center(), Align2::CENTER_CENTER, grade, FontId::new(size::BODY, FontFamily::Name(SEMIBOLD.into())), Color32::from_rgb(20, 22, 28));
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(5), grade_color(grade));
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                grade,
+                FontId::new(size::BODY, FontFamily::Name(SEMIBOLD.into())),
+                Color32::from_rgb(20, 22, 28),
+            );
         }
     }
     resp
@@ -430,7 +546,10 @@ pub fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}…", s.chars().take(max.saturating_sub(1)).collect::<String>())
+        format!(
+            "{}…",
+            s.chars().take(max.saturating_sub(1)).collect::<String>()
+        )
     }
 }
 
@@ -444,7 +563,9 @@ pub fn web_link(ui: &mut egui::Ui, label: &str, url: &str) {
 
 pub fn open_url(url: &str) {
     #[cfg(windows)]
-    let result = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    let result = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
     #[cfg(target_os = "macos")]
     let result = std::process::Command::new("open").arg(url).spawn();
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -465,7 +586,15 @@ pub fn stat_row(ui: &mut egui::Ui, tiles: &[(&str, &str, String, String, Color32
 }
 
 /// A headline number with a caption, its content at least `width` wide.
-pub fn stat_tile_w(ui: &mut egui::Ui, width: f32, icon: &str, label: &str, value: &str, sub: &str, accent: Color32) {
+pub fn stat_tile_w(
+    ui: &mut egui::Ui,
+    width: f32,
+    icon: &str,
+    label: &str,
+    value: &str,
+    sub: &str,
+    accent: Color32,
+) {
     let p = pal(ui);
     egui::Frame::new()
         .fill(p.surface)
@@ -494,7 +623,13 @@ pub fn empty_state(ui: &mut egui::Ui, icon: &str, title: &str, body: &str) {
 }
 
 /// An empty state with a button for the obvious next step. Returns true when it's clicked.
-pub fn empty_state_action(ui: &mut egui::Ui, icon: &str, title: &str, body: &str, action: Option<&str>) -> bool {
+pub fn empty_state_action(
+    ui: &mut egui::Ui,
+    icon: &str,
+    title: &str,
+    body: &str,
+    action: Option<&str>,
+) -> bool {
     let weak = pal(ui).weak;
     let mut clicked = false;
     ui.vertical_centered(|ui| {
@@ -504,11 +639,11 @@ pub fn empty_state_action(ui: &mut egui::Ui, icon: &str, title: &str, body: &str
         } else {
             chibi(ui, 5, 120.0);
         }
-        ui.label(semibold(title, size::LG));
-        ui.label(RichText::new(body).color(weak));
+        ui.label(semibold(t!(title), size::LG));
+        ui.label(RichText::new(t!(body)).color(weak));
         if let Some(text) = action {
             ui.add_space(6.0);
-            clicked = ui.add(primary_button(ui, text, size::BODY)).clicked();
+            clicked = ui.add(primary_button(ui, t!(text), size::BODY)).clicked();
         }
     });
     clicked
@@ -517,11 +652,19 @@ pub fn empty_state_action(ui: &mut egui::Ui, icon: &str, title: &str, body: &str
 /// A grey placeholder bar that pulses gently while background work runs.
 pub fn skeleton(ui: &mut egui::Ui, width: f32, height: f32) -> Response {
     let p = pal(ui);
-    let (rect, resp) = ui.allocate_exact_size(vec2(width.min(ui.available_width()), height), Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(
+        vec2(width.min(ui.available_width()), height),
+        Sense::hover(),
+    );
     let t = ui.input(|i| i.time) as f32;
     let pulse = 0.55 + 0.25 * (t * 2.4).sin();
-    ui.painter().rect_filled(rect, CornerRadius::same(6), p.raised.gamma_multiply(pulse + 0.2));
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius::same(6),
+        p.raised.gamma_multiply(pulse + 0.2),
+    );
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(50));
     resp
 }
 
@@ -536,7 +679,13 @@ pub fn skeleton_lines(ui: &mut egui::Ui, lines: usize) {
 
 pub fn placeholder(p: &Painter, rect: Rect, color: Color32, text: &str) {
     p.rect_filled(rect, CornerRadius::same(6), color.gamma_multiply(0.35));
-    p.text(rect.center(), Align2::CENTER_CENTER, text, FontId::proportional(12.0), Color32::WHITE);
+    p.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(12.0),
+        Color32::WHITE,
+    );
 }
 
 /// Hover/selection ring around a tile image.
@@ -545,20 +694,41 @@ pub fn tile_ring(ui: &egui::Ui, rect: Rect, selected: bool, hovered: bool, radiu
         return;
     }
     let p = pal(ui);
-    let (w, c) = if selected { (2.5, p.accent) } else { (1.5, p.weak) };
-    ui.painter().rect_stroke(rect.expand(2.5), CornerRadius::same(radius), Stroke::new(w, c), StrokeKind::Outside);
+    let (w, c) = if selected {
+        (2.5, p.accent)
+    } else {
+        (1.5, p.weak)
+    };
+    ui.painter().rect_stroke(
+        rect.expand(2.5),
+        CornerRadius::same(radius),
+        Stroke::new(w, c),
+        StrokeKind::Outside,
+    );
 }
 
 /// Unlit stars and diamonds: dark grey on dark, light grey on light.
 fn dim(p: &Painter) -> Color32 {
-    if p.ctx().global_style().visuals.dark_mode { DIM } else { Color32::from_gray(200) }
+    if p.ctx().global_style().visuals.dark_mode {
+        DIM
+    } else {
+        Color32::from_gray(200)
+    }
 }
 
 /// Four LB diamonds starting at `left_center`, filled up to `lb`.
 pub fn draw_lb(p: &Painter, left_center: Pos2, lb: u8, r: f32) {
     for i in 0..4u8 {
-        let c = Pos2::new(left_center.x + r + f32::from(i) * (2.0 * r + 2.5), left_center.y);
-        let pts = vec![c + vec2(0.0, -r), c + vec2(r * 0.8, 0.0), c + vec2(0.0, r), c + vec2(-r * 0.8, 0.0)];
+        let c = Pos2::new(
+            left_center.x + r + f32::from(i) * (2.0 * r + 2.5),
+            left_center.y,
+        );
+        let pts = vec![
+            c + vec2(0.0, -r),
+            c + vec2(r * 0.8, 0.0),
+            c + vec2(0.0, r),
+            c + vec2(-r * 0.8, 0.0),
+        ];
         let fill = if i < lb { LB_ON } else { dim(p) };
         p.add(Shape::convex_polygon(pts, fill, Stroke::NONE));
     }
@@ -566,7 +736,8 @@ pub fn draw_lb(p: &Painter, left_center: Pos2, lb: u8, r: f32) {
 
 /// LB diamonds as a widget.
 pub fn lb_widget(ui: &mut egui::Ui, lb: u8, r: f32) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(4.0 * (2.0 * r + 2.5), 2.0 * r + 2.0), Sense::hover());
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(4.0 * (2.0 * r + 2.5), 2.0 * r + 2.0), Sense::hover());
     draw_lb(ui.painter(), rect.left_center(), lb, r);
     resp
 }
@@ -582,7 +753,8 @@ pub fn draw_stars(p: &Painter, center: Pos2, n: u8, r: f32) {
 }
 
 pub fn stars_widget(ui: &mut egui::Ui, n: u8, r: f32) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(5.0 * (2.0 * r + 1.5), 2.0 * r + 2.0), Sense::hover());
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(5.0 * (2.0 * r + 1.5), 2.0 * r + 2.0), Sense::hover());
     draw_stars(ui.painter(), rect.center(), n, r);
     resp
 }
@@ -600,10 +772,18 @@ fn draw_star(p: &Painter, c: Pos2, r: f32, color: Color32) {
         c + Vec2::angled(a) * radius
     };
     let inner_pts: Vec<Pos2> = (0..5).map(|k| point(inner, (2 * k + 1) as f32)).collect();
-    p.add(Shape::convex_polygon(inner_pts.clone(), color, Stroke::NONE));
+    p.add(Shape::convex_polygon(
+        inner_pts.clone(),
+        color,
+        Stroke::NONE,
+    ));
     for k in 0..5 {
         let tip = point(r, (2 * k) as f32);
-        p.add(Shape::convex_polygon(vec![tip, inner_pts[k], inner_pts[(k + 4) % 5]], color, Stroke::NONE));
+        p.add(Shape::convex_polygon(
+            vec![tip, inner_pts[k], inner_pts[(k + 4) % 5]],
+            color,
+            Stroke::NONE,
+        ));
     }
 }
 
@@ -615,13 +795,21 @@ pub fn potential_badge(p: &Painter, bottom_right: Pos2, potential: u8) {
         (Color32::from_gray(60), Color32::from_gray(220))
     };
     p.rect_filled(rect, CornerRadius::same(4), fill);
-    p.text(rect.center(), Align2::CENTER_CENTER, format!("P{potential}"), FontId::proportional(11.0), text);
+    p.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        format!("P{potential}"),
+        FontId::proportional(11.0),
+        text,
+    );
 }
 
 /// Whether every word of `query` appears in `text`, ignoring case.
 pub fn matches_query(text: &str, query: &str) -> bool {
     let t = text.to_lowercase();
-    query.split_whitespace().all(|w| t.contains(&w.to_lowercase()))
+    query
+        .split_whitespace()
+        .all(|w| t.contains(&w.to_lowercase()))
 }
 
 /// A dropdown row: (key, label, hover); a key of `None` is a heading row.
@@ -656,7 +844,11 @@ pub fn search_combo<K: Clone + PartialEq>(
             if let Some(h) = ui.data(|d| d.get_temp::<f32>(full_h)) {
                 ui.set_min_height(h);
             }
-            let edit = ui.add(egui::TextEdit::singleline(&mut query).hint_text("🔍 Type to search…").desired_width(f32::INFINITY));
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut query)
+                    .hint_text(t!("🔍 Type to search…"))
+                    .desired_width(f32::INFINITY),
+            );
             let opened = id.with("opened");
             if ui.data(|d| d.get_temp::<bool>(opened)).is_none() {
                 edit.request_focus();
@@ -678,7 +870,11 @@ pub fn search_combo<K: Clone + PartialEq>(
                 }
                 shown += 1;
                 if shown > 400 {
-                    ui.label(RichText::new("…more; keep typing to narrow it down").size(11.5).color(weak));
+                    ui.label(
+                        RichText::new(t!("…more; keep typing to narrow it down"))
+                            .size(11.5)
+                            .color(weak),
+                    );
                     break;
                 }
                 let mut r = ui.selectable_label(current == Some(k), label);
@@ -690,7 +886,7 @@ pub fn search_combo<K: Clone + PartialEq>(
                 }
             }
             if shown == 0 {
-                ui.label(RichText::new("No match.").color(weak));
+                ui.label(RichText::new(t!("No match.")).color(weak));
             }
             if query.is_empty() {
                 let natural = ui.cursor().top() - start;
@@ -715,24 +911,55 @@ pub fn search_combo<K: Clone + PartialEq>(
 pub fn chip(ui: &mut egui::Ui, on: bool, label: &str, count: Option<usize>) -> Response {
     let p = pal(ui);
     let text_color = if on { p.text } else { p.weak };
-    let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(13.0), text_color);
-    let count_galley = count.map(|n| ui.painter().layout_no_wrap(n.to_string(), FontId::proportional(size::XS), p.weak));
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), FontId::proportional(13.0), text_color);
+    let count_galley = count.map(|n| {
+        ui.painter()
+            .layout_no_wrap(n.to_string(), FontId::proportional(size::XS), p.weak)
+    });
     let count_w = count_galley.as_ref().map_or(0.0, |g| g.size().x + 12.0);
-    let (rect, resp) = ui.allocate_exact_size(vec2(galley.size().x + count_w + 22.0, 26.0), Sense::click());
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(galley.size().x + count_w + 22.0, 26.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let radius = CornerRadius::same(13);
         if on {
-            painter.rect_filled(rect, radius, p.accent.gamma_multiply(if ui.visuals().dark_mode { 0.28 } else { 0.16 }));
-            painter.rect_stroke(rect, radius, Stroke::new(1.0, p.accent_strong), StrokeKind::Inside);
+            painter.rect_filled(
+                rect,
+                radius,
+                p.accent
+                    .gamma_multiply(if ui.visuals().dark_mode { 0.28 } else { 0.16 }),
+            );
+            painter.rect_stroke(
+                rect,
+                radius,
+                Stroke::new(1.0, p.accent_strong),
+                StrokeKind::Inside,
+            );
         } else {
-            painter.rect_filled(rect, radius, if resp.hovered() { p.hover } else { Color32::TRANSPARENT });
+            painter.rect_filled(
+                rect,
+                radius,
+                if resp.hovered() {
+                    p.hover
+                } else {
+                    Color32::TRANSPARENT
+                },
+            );
             painter.rect_stroke(rect, radius, Stroke::new(1.0, p.border), StrokeKind::Inside);
         }
-        painter.galley(egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y / 2.0), galley, text_color);
+        painter.galley(
+            egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            text_color,
+        );
         if let Some(g) = count_galley {
             let x = rect.right() - 11.0 - g.size().x;
-            let pill = Rect::from_min_size(egui::pos2(x - 5.0, rect.center().y - 8.0), vec2(g.size().x + 10.0, 16.0));
+            let pill = Rect::from_min_size(
+                egui::pos2(x - 5.0, rect.center().y - 8.0),
+                vec2(g.size().x + 10.0, 16.0),
+            );
             painter.rect_filled(pill, CornerRadius::same(8), p.raised);
             painter.galley(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, p.weak);
         }
@@ -751,7 +978,12 @@ pub struct FilterSection<'a> {
 
 impl<'a> FilterSection<'a> {
     pub fn new(title: &'a str) -> Self {
-        Self { title, help: "", active: 0, default_open: true }
+        Self {
+            title,
+            help: "",
+            active: 0,
+            default_open: true,
+        }
     }
 
     pub fn help(mut self, help: &'a str) -> Self {
@@ -769,24 +1001,44 @@ impl<'a> FilterSection<'a> {
     pub fn show(self, ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) -> bool {
         let p = pal(ui);
         let id = ui.make_persistent_id(("filter_section", self.title));
-        let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(self.default_open);
+        let mut open = ui
+            .data(|d| d.get_temp::<bool>(id))
+            .unwrap_or(self.default_open);
         let mut clear = false;
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 5.0;
-            let title = format!("{} {}", if open { "▾" } else { "▸" }, self.title.to_uppercase());
-            let r = ui.add(egui::Label::new(semibold(title, size::XS).color(p.weak)).sense(Sense::click()).selectable(false));
+            let title = format!(
+                "{} {}",
+                if open { "▾" } else { "▸" },
+                t!(self.title).to_uppercase()
+            );
+            let r = ui.add(
+                egui::Label::new(semibold(title, size::XS).color(p.weak))
+                    .sense(Sense::click())
+                    .selectable(false),
+            );
             if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 open = !open;
             }
             if !self.help.is_empty() {
-                ui.add(egui::Label::new(RichText::new("ⓘ").size(size::XS).color(p.weak)).selectable(false)).on_hover_text(self.help);
+                ui.add(
+                    egui::Label::new(RichText::new("ⓘ").size(size::XS).color(p.weak))
+                        .selectable(false),
+                )
+                .on_hover_text(t!(self.help));
             }
             if self.active > 0 {
                 count_badge(ui, self.active);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let b = egui::Button::new(RichText::new("Clear").size(size::XS).color(p.link)).frame(false);
-                    if ui.add(b).on_hover_text("Turn off this section's filters").clicked() {
+                    let b =
+                        egui::Button::new(RichText::new(t!("Clear")).size(size::XS).color(p.link))
+                            .frame(false);
+                    if ui
+                        .add(b)
+                        .on_hover_text(t!("Turn off this section's filters"))
+                        .clicked()
+                    {
                         clear = true;
                     }
                 });
@@ -805,10 +1057,19 @@ impl<'a> FilterSection<'a> {
 pub fn count_badge(ui: &mut egui::Ui, n: usize) -> Response {
     let p = pal(ui);
     let text = n.to_string();
-    let galley = ui.painter().layout_no_wrap(text, FontId::new(size::XS, FontFamily::Name(SEMIBOLD.into())), p.on_accent);
-    let (rect, resp) = ui.allocate_exact_size(vec2((galley.size().x + 10.0).max(18.0), 18.0), Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(9), p.accent);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
+    let galley = ui.painter().layout_no_wrap(
+        text,
+        FontId::new(size::XS, FontFamily::Name(SEMIBOLD.into())),
+        p.on_accent,
+    );
+    let (rect, resp) = ui.allocate_exact_size(
+        vec2((galley.size().x + 10.0).max(18.0), 18.0),
+        Sense::hover(),
+    );
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(9), p.accent);
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, p.on_accent);
     resp
 }
 
@@ -831,12 +1092,24 @@ pub fn active_filter_bar(ui: &mut egui::Ui, active: &[String]) -> Option<FilterB
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
         for (i, label) in active.iter().enumerate() {
-            if chip(ui, true, &format!("{label}  ✕"), None).on_hover_text("Remove this filter").clicked() {
+            if chip(ui, true, &format!("{label}  ✕"), None)
+                .on_hover_text(t!("Remove this filter"))
+                .clicked()
+            {
                 out = Some(FilterBarAction::Remove(i));
             }
         }
-        let reset = egui::Button::new(RichText::new(format!("Reset all ({})", active.len())).size(size::SM).color(p.link)).frame(false);
-        if ui.add(reset).on_hover_text("Turn off every filter").clicked() {
+        let reset = egui::Button::new(
+            RichText::new(tf!("Reset all ({})", active.len()))
+                .size(size::SM)
+                .color(p.link),
+        )
+        .frame(false);
+        if ui
+            .add(reset)
+            .on_hover_text(t!("Turn off every filter"))
+            .clicked()
+        {
             out = Some(FilterBarAction::ResetAll);
         }
     });
@@ -976,7 +1249,15 @@ pub struct DataTable<'a> {
 
 impl<'a> DataTable<'a> {
     pub fn new(id: &'a str, cols: &'a [TableCol]) -> Self {
-        Self { id, cols, sort: None, row_height: 34.0, selected: None, scroll_to: None, max_height: None }
+        Self {
+            id,
+            cols,
+            sort: None,
+            row_height: 34.0,
+            selected: None,
+            scroll_to: None,
+            max_height: None,
+        }
     }
 
     /// Scroll inside this height (for a table in a card) rather than taking the rest of the page.
@@ -1008,10 +1289,19 @@ impl<'a> DataTable<'a> {
     }
 
     /// Draws the table; `cell(ui, row, key)` draws one cell.
-    pub fn show(self, ui: &mut egui::Ui, rows: usize, mut cell: impl FnMut(&mut egui::Ui, usize, &str)) -> TableOut {
+    pub fn show(
+        self,
+        ui: &mut egui::Ui,
+        rows: usize,
+        mut cell: impl FnMut(&mut egui::Ui, usize, &str),
+    ) -> TableOut {
         let p = pal(ui);
         let hidden = hidden_columns(ui.ctx(), self.id, self.cols);
-        let visible: Vec<&TableCol> = self.cols.iter().filter(|c| !hidden.contains(c.key)).collect();
+        let visible: Vec<&TableCol> = self
+            .cols
+            .iter()
+            .filter(|c| !hidden.contains(c.key))
+            .collect();
         let current = self.sort.as_deref().copied();
         let mut clicked_col: Option<&TableCol> = None;
         let mut out = TableOut::default();
@@ -1028,7 +1318,10 @@ impl<'a> DataTable<'a> {
             builder = builder.scroll_to_row(r, Some(egui::Align::Center));
         }
         if let Some(h) = self.max_height {
-            builder = builder.max_scroll_height(h).min_scrolled_height(h).auto_shrink([false, true]);
+            builder = builder
+                .max_scroll_height(h)
+                .min_scrolled_height(h)
+                .auto_shrink([false, true]);
         }
         let selected = self.selected;
         let row_height = self.row_height;
@@ -1044,17 +1337,51 @@ impl<'a> DataTable<'a> {
                         if let Some(g) = c.group
                             && visible.get(n + 1).is_none_or(|next| next.group != Some(g))
                         {
-                            let first = (0..=n).rev().take_while(|&i| visible[i].group == Some(g)).last().unwrap_or(n);
-                            let span = Rect::from_min_max(cells[first].left_top(), egui::pos2(cell.right(), cell.top() + 20.0));
+                            let first = (0..=n)
+                                .rev()
+                                .take_while(|&i| visible[i].group == Some(g))
+                                .last()
+                                .unwrap_or(n);
+                            let span = Rect::from_min_max(
+                                cells[first].left_top(),
+                                egui::pos2(cell.right(), cell.top() + 20.0),
+                            );
                             // A painter of its own: the cell's would clip the label to this one column.
-                            let painter = egui::Painter::new(ui.ctx().clone(), ui.layer_id(), span.expand(1.0));
-                            painter.text(span.center(), Align2::CENTER_CENTER, g.to_uppercase(), FontId::new(size::XS, FontFamily::Name(SEMIBOLD.into())), p.weak);
+                            let painter = egui::Painter::new(
+                                ui.ctx().clone(),
+                                ui.layer_id(),
+                                span.expand(1.0),
+                            );
+                            painter.text(
+                                span.center(),
+                                Align2::CENTER_CENTER,
+                                g.to_uppercase(),
+                                FontId::new(size::XS, FontFamily::Name(SEMIBOLD.into())),
+                                p.weak,
+                            );
                             let y = span.bottom() - 1.0;
-                            painter.line_segment([egui::pos2(span.left() + 6.0, y), egui::pos2(span.right() - 6.0, y)], Stroke::new(1.0, p.border));
+                            painter.line_segment(
+                                [
+                                    egui::pos2(span.left() + 6.0, y),
+                                    egui::pos2(span.right() - 6.0, y),
+                                ],
+                                Stroke::new(1.0, p.border),
+                            );
                         }
                         // With groups, every title sits on the lower line so the baselines match.
-                        let lower = if grouped { Rect::from_min_max(egui::pos2(cell.left(), cell.bottom() - 28.0), cell.right_bottom()) } else { cell };
-                        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(lower).layout(egui::Layout::left_to_right(egui::Align::Center)));
+                        let lower = if grouped {
+                            Rect::from_min_max(
+                                egui::pos2(cell.left(), cell.bottom() - 28.0),
+                                cell.right_bottom(),
+                            )
+                        } else {
+                            cell
+                        };
+                        let mut ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(lower)
+                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        );
                         let ui = &mut ui;
                         with_align(ui, c.align, |ui| {
                             let on = current.is_some_and(|s| s.key == c.key);
@@ -1068,22 +1395,29 @@ impl<'a> DataTable<'a> {
                                 }
                                 _ => "",
                             };
-                            let text = semibold(format!("{}{arrow}", c.title), size::SM).color(if on { p.text } else { p.weak });
+                            let text = semibold(format!("{}{arrow}", t!(&c.title)), size::SM)
+                                .color(if on { p.text } else { p.weak });
                             let label = egui::Label::new(text).selectable(false).truncate();
                             if c.sortable {
                                 let mut hover = c.hover.clone();
                                 if !hover.is_empty() {
                                     hover.push_str("\n\n");
                                 }
-                                hover.push_str(&format!("Click to sort by {}.", c.title.to_lowercase()));
-                                let r = ui.add(label.sense(Sense::click())).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(hover);
+                                hover.push_str(&tf!(
+                                    "Click to sort by {}.",
+                                    t!(&c.title).to_lowercase()
+                                ));
+                                let r = ui
+                                    .add(label.sense(Sense::click()))
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(hover);
                                 if r.clicked() {
                                     clicked_col = Some(*c);
                                 }
                             } else {
                                 let r = ui.add(label);
                                 if !c.hover.is_empty() {
-                                    r.on_hover_text(&c.hover);
+                                    r.on_hover_text(t!(&c.hover));
                                 }
                             }
                         });
@@ -1099,8 +1433,12 @@ impl<'a> DataTable<'a> {
                         row.col(|ui| {
                             if is_selected && n == 0 {
                                 let r = ui.max_rect();
-                                let bar = Rect::from_min_max(egui::pos2(r.left() - 4.0, r.top() + 4.0), egui::pos2(r.left() - 1.0, r.bottom() - 4.0));
-                                ui.painter().rect_filled(bar, CornerRadius::same(2), p.accent);
+                                let bar = Rect::from_min_max(
+                                    egui::pos2(r.left() - 4.0, r.top() + 4.0),
+                                    egui::pos2(r.left() - 1.0, r.bottom() - 4.0),
+                                );
+                                ui.painter()
+                                    .rect_filled(bar, CornerRadius::same(2), p.accent);
                             }
                             with_align(ui, c.align, |ui| cell(ui, i, c.key));
                         });
@@ -1122,7 +1460,9 @@ impl<'a> DataTable<'a> {
 fn with_align(ui: &mut egui::Ui, align: egui::Align, add: impl FnOnce(&mut egui::Ui)) {
     let layout = match align {
         egui::Align::Min => egui::Layout::left_to_right(egui::Align::Center),
-        egui::Align::Center => egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Center),
+        egui::Align::Center => {
+            egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Center)
+        }
         egui::Align::Max => egui::Layout::right_to_left(egui::Align::Center),
     };
     ui.with_layout(layout, add);
@@ -1135,10 +1475,19 @@ pub fn hidden_columns(ctx: &egui::Context, table: &str, cols: &[TableCol]) -> Ha
     if let Some(h) = ctx.data(|d| d.get_temp::<HashSet<String>>(id)) {
         return h;
     }
-    let saved = crate::settings::get("columns").and_then(|v| v.get(table).cloned()).and_then(|v| serde_json::from_value::<Vec<String>>(v).ok());
+    let saved = crate::settings::get("columns")
+        .and_then(|v| v.get(table).cloned())
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok());
     let hidden: HashSet<String> = match saved {
-        Some(keys) => keys.into_iter().filter(|k| cols.iter().any(|c| c.optional && c.key == k)).collect(),
-        None => cols.iter().filter(|c| c.optional && c.hidden).map(|c| c.key.to_string()).collect(),
+        Some(keys) => keys
+            .into_iter()
+            .filter(|k| cols.iter().any(|c| c.optional && c.key == k))
+            .collect(),
+        None => cols
+            .iter()
+            .filter(|c| c.optional && c.hidden)
+            .map(|c| c.key.to_string())
+            .collect(),
     };
     ctx.data_mut(|d| d.insert_temp(id, hidden.clone()));
     hidden
@@ -1147,7 +1496,9 @@ pub fn hidden_columns(ctx: &egui::Context, table: &str, cols: &[TableCol]) -> Ha
 fn set_hidden_columns(ctx: &egui::Context, table: &str, hidden: HashSet<String>) {
     let mut keys: Vec<&String> = hidden.iter().collect();
     keys.sort();
-    let mut all = crate::settings::get("columns").filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({}));
+    let mut all = crate::settings::get("columns")
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
     all[table] = serde_json::json!(keys);
     crate::settings::set("columns", all);
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("table_hidden", table)), hidden));
@@ -1157,12 +1508,12 @@ fn set_hidden_columns(ctx: &egui::Context, table: &str, hidden: HashSet<String>)
 pub fn columns_menu(ui: &mut egui::Ui, table: &str, cols: &[TableCol]) {
     let mut hidden = hidden_columns(ui.ctx(), table, cols);
     let mut changed = false;
-    ui.menu_button("☰ Columns", |ui| {
+    ui.menu_button(t!("☰ Columns"), |ui| {
         for c in cols.iter().filter(|c| c.optional) {
             let mut on = !hidden.contains(c.key);
-            let mut r = ui.tick(&mut on, &c.title);
+            let mut r = ui.tick(&mut on, t!(&c.title));
             if !c.hover.is_empty() {
-                r = r.on_hover_text(&c.hover);
+                r = r.on_hover_text(t!(&c.hover));
             }
             if r.changed() {
                 toggle(&mut hidden, c.key.to_string(), !on);
@@ -1171,7 +1522,7 @@ pub fn columns_menu(ui: &mut egui::Ui, table: &str, cols: &[TableCol]) {
         }
     })
     .response
-    .on_hover_text("Show or hide columns");
+    .on_hover_text(t!("Show or hide columns"));
     if changed {
         set_hidden_columns(ui.ctx(), table, hidden);
     }
@@ -1180,15 +1531,31 @@ pub fn columns_menu(ui: &mut egui::Ui, table: &str, cols: &[TableCol]) {
 /// Rows as CSV (RFC 4180): a field with a comma, quote or line break is quoted.
 pub fn to_csv(rows: &[Vec<String>]) -> String {
     let field = |f: &String| {
-        if f.contains([',', '"', '\n', '\r']) { format!("\"{}\"", f.replace('"', "\"\"")) } else { f.clone() }
+        if f.contains([',', '"', '\n', '\r']) {
+            format!("\"{}\"", f.replace('"', "\"\""))
+        } else {
+            f.clone()
+        }
     };
-    rows.iter().map(|r| r.iter().map(field).collect::<Vec<_>>().join(",")).map(|l| l + "\r\n").collect()
+    rows.iter()
+        .map(|r| r.iter().map(field).collect::<Vec<_>>().join(","))
+        .map(|l| l + "\r\n")
+        .collect()
 }
 
 /// A table's visible columns as CSV, headers first; `text(row, key)` gives a cell's text.
-pub fn table_csv(ctx: &egui::Context, table: &str, cols: &[TableCol], rows: usize, text: impl Fn(usize, &str) -> String) -> String {
+pub fn table_csv(
+    ctx: &egui::Context,
+    table: &str,
+    cols: &[TableCol],
+    rows: usize,
+    text: impl Fn(usize, &str) -> String,
+) -> String {
     let hidden = hidden_columns(ctx, table, cols);
-    let visible: Vec<&TableCol> = cols.iter().filter(|c| !hidden.contains(c.key) && !c.title.is_empty()).collect();
+    let visible: Vec<&TableCol> = cols
+        .iter()
+        .filter(|c| !hidden.contains(c.key) && !c.title.is_empty())
+        .collect();
     let mut out = vec![visible.iter().map(|c| c.title.clone()).collect::<Vec<_>>()];
     out.extend((0..rows).map(|r| visible.iter().map(|c| text(r, c.key)).collect()));
     to_csv(&out)
@@ -1295,12 +1662,36 @@ fn toast_id() -> egui::Id {
 
 /// Show a short message at the bottom of the window for a few seconds.
 pub fn toast(ctx: &egui::Context, text: impl Into<String>, kind: ToastKind) {
-    push_toast(ctx, Toast { text: text.into(), kind, action: None, shown: 0.0, last: None });
+    push_toast(
+        ctx,
+        Toast {
+            text: text.into(),
+            kind,
+            action: None,
+            shown: 0.0,
+            last: None,
+        },
+    );
 }
 
 /// A toast with a button, e.g. "Open" or "Undo".
-pub fn toast_action(ctx: &egui::Context, text: impl Into<String>, kind: ToastKind, label: &str, action: ToastAction) {
-    push_toast(ctx, Toast { text: text.into(), kind, action: Some((label.to_string(), action)), shown: 0.0, last: None });
+pub fn toast_action(
+    ctx: &egui::Context,
+    text: impl Into<String>,
+    kind: ToastKind,
+    label: &str,
+    action: ToastAction,
+) {
+    push_toast(
+        ctx,
+        Toast {
+            text: text.into(),
+            kind,
+            action: Some((label.to_string(), action)),
+            shown: 0.0,
+            last: None,
+        },
+    );
 }
 
 fn push_toast(ctx: &egui::Context, t: Toast) {
@@ -1317,7 +1708,11 @@ fn push_toast(ctx: &egui::Context, t: Toast) {
 
 /// One frame in a test. Its texture uploads are dropped: debug builds check they were handled.
 #[cfg(test)]
-pub fn test_frame(ctx: &egui::Context, input: egui::RawInput, run_ui: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
+pub fn test_frame(
+    ctx: &egui::Context,
+    input: egui::RawInput,
+    run_ui: impl FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
     let mut out = ctx.run_ui(input, run_ui);
     out.textures_delta.clear();
     out
@@ -1326,7 +1721,11 @@ pub fn test_frame(ctx: &egui::Context, input: egui::RawInput, run_ui: impl FnMut
 /// The messages showing now, oldest first (for tests).
 #[cfg(test)]
 pub fn toasts_now(ctx: &egui::Context) -> Vec<(String, ToastKind)> {
-    ctx.data(|d| d.get_temp::<Vec<Toast>>(toast_id())).unwrap_or_default().into_iter().map(|t| (t.text, t.kind)).collect()
+    ctx.data(|d| d.get_temp::<Vec<Toast>>(toast_id()))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| (t.text, t.kind))
+        .collect()
 }
 
 /// Draw the toasts over everything; returns the action of a toast button clicked this frame.
@@ -1361,19 +1760,42 @@ pub fn show_toasts(ctx: &egui::Context) -> Option<ToastAction> {
                         .stroke(Stroke::new(1.0, color.gamma_multiply(0.7)))
                         .corner_radius(CornerRadius::same(10))
                         .inner_margin(Margin::symmetric(14, 9))
-                        .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_black_alpha(60) })
+                        .shadow(egui::Shadow {
+                            offset: [0, 4],
+                            blur: 16,
+                            spread: 0,
+                            color: Color32::from_black_alpha(60),
+                        })
                         .show(ui, |ui| {
                             ui.set_max_width(560.0);
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(icon).size(size::MD).color(color));
-                                ui.add(egui::Label::new(RichText::new(&t.text).color(p.text)).wrap());
+                                ui.add(
+                                    egui::Label::new(RichText::new(t!(&t.text)).color(p.text))
+                                        .wrap(),
+                                );
                                 if let Some((label, action)) = &t.action
-                                    && ui.add(egui::Button::new(semibold(label.as_str(), size::BODY).color(p.link)).frame(false)).clicked()
+                                    && ui
+                                        .add(
+                                            egui::Button::new(
+                                                semibold(t!(label.as_str()), size::BODY)
+                                                    .color(p.link),
+                                            )
+                                            .frame(false),
+                                        )
+                                        .clicked()
                                 {
                                     picked = Some(action.clone());
                                     closed.push(i);
                                 }
-                                if ui.add(egui::Button::new(RichText::new("✕").color(p.weak)).frame(false)).on_hover_text("Dismiss").clicked() {
+                                if ui
+                                    .add(
+                                        egui::Button::new(RichText::new("✕").color(p.weak))
+                                            .frame(false),
+                                    )
+                                    .on_hover_text(t!("Dismiss"))
+                                    .clicked()
+                                {
                                     closed.push(i);
                                 }
                             });
@@ -1425,7 +1847,10 @@ pub fn stepper(ui: &mut egui::Ui, steps: &[&str], at: usize) -> Option<usize> {
     let painter = ui.painter();
     for i in 0..n.saturating_sub(1) {
         let color = if i < at { p.accent } else { p.border };
-        painter.line_segment([center(i) + vec2(16.0, 0.0), center(i + 1) - vec2(16.0, 0.0)], Stroke::new(2.0, color));
+        painter.line_segment(
+            [center(i) + vec2(16.0, 0.0), center(i + 1) - vec2(16.0, 0.0)],
+            Stroke::new(2.0, color),
+        );
     }
     let mut clicked = None;
     for (i, label) in steps.iter().enumerate() {
@@ -1433,20 +1858,51 @@ pub fn stepper(ui: &mut egui::Ui, steps: &[&str], at: usize) -> Option<usize> {
         let bold = FontId::new(size::SM, FontFamily::Name(SEMIBOLD.into()));
         if i < at {
             painter.circle_filled(c, 12.0, p.accent);
-            painter.text(c, Align2::CENTER_CENTER, "✔", FontId::proportional(size::SM), p.on_accent);
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                "✔",
+                FontId::proportional(size::SM),
+                p.on_accent,
+            );
         } else if i == at {
             painter.circle(c, 12.0, p.surface, Stroke::new(2.0, p.accent));
-            painter.text(c, Align2::CENTER_CENTER, (i + 1).to_string(), bold.clone(), p.accent_strong);
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                (i + 1).to_string(),
+                bold.clone(),
+                p.accent_strong,
+            );
         } else {
             painter.circle(c, 12.0, p.surface, Stroke::new(1.0, p.border));
-            painter.text(c, Align2::CENTER_CENTER, (i + 1).to_string(), bold.clone(), p.weak);
+            painter.text(
+                c,
+                Align2::CENTER_CENTER,
+                (i + 1).to_string(),
+                bold.clone(),
+                p.weak,
+            );
         }
         let text_color = if i <= at { p.text } else { p.weak };
-        let font = if i == at { bold } else { FontId::proportional(size::SM) };
-        painter.text(c + vec2(0.0, 26.0), Align2::CENTER_CENTER, *label, font, text_color);
+        let font = if i == at {
+            bold
+        } else {
+            FontId::proportional(size::SM)
+        };
+        painter.text(
+            c + vec2(0.0, 26.0),
+            Align2::CENTER_CENTER,
+            t!(*label),
+            font,
+            text_color,
+        );
         if i < at {
             let hit = Rect::from_center_size(c + vec2(0.0, 12.0), vec2(seg.min(140.0), 44.0));
-            let r = ui.interact(hit, ui.make_persistent_id(("step", i)), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("Back to {label}"));
+            let r = ui
+                .interact(hit, ui.make_persistent_id(("step", i)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(tf!("Back to {}", t!(*label)));
             if r.clicked() {
                 clicked = Some(i);
             }
@@ -1464,7 +1920,10 @@ pub fn local_today() -> String {
 
 /// Today's date (UTC) as YYYY-MM-DD, without a date crate.
 pub fn today() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let days = (secs / 86_400) as i64;
     // Howard Hinnant's civil_from_days.
     let z = days + 719_468;
@@ -1487,10 +1946,16 @@ mod tests {
     #[test]
     fn search_combo_list_returns_after_clearing() {
         let ctx = egui::Context::default();
-        let items: Vec<(Option<u32>, String, String)> = (0..40).map(|i| (Some(i), format!("Item {i:02}"), String::new())).collect();
+        let items: Vec<(Option<u32>, String, String)> = (0..40)
+            .map(|i| (Some(i), format!("Item {i:02}"), String::new()))
+            .collect();
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 900.0));
         let frame = |events: Vec<egui::Event>| {
-            let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            };
             let out = crate::ui_util::test_frame(&ctx, input, |ui| {
                 super::search_combo(ui, "t", "Pick one", 200.0, || items.clone(), None);
             });
@@ -1499,13 +1964,24 @@ mod tests {
         };
         frame(vec![]);
         let at = egui::pos2(60.0, 18.0);
-        let click = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let click = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
         frame(vec![egui::Event::PointerMoved(at), click(true)]);
         frame(vec![click(false)]);
         let open = (0..3).map(|_| frame(vec![])).last().unwrap();
         frame(vec![egui::Event::Text("Item 1".into())]);
         let filtered = (0..3).map(|_| frame(vec![])).last().unwrap();
-        let backspace = || egui::Event::Key { key: egui::Key::Backspace, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+        let backspace = || egui::Event::Key {
+            key: egui::Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
         frame((0..6).map(|_| backspace()).collect());
         let cleared = (0..3).map(|_| frame(vec![])).last().unwrap();
         // A search that matches nothing shrinks the list to "No match."; it must still come back.
@@ -1513,12 +1989,20 @@ mod tests {
         let none = (0..3).map(|_| frame(vec![])).last().unwrap();
         frame((0..3).map(|_| backspace()).collect());
         let back = (0..3).map(|_| frame(vec![])).last().unwrap();
-        eprintln!("rows: open {open}, filtered {filtered}, cleared {cleared}, no match {none}, back {back}");
+        eprintln!(
+            "rows: open {open}, filtered {filtered}, cleared {cleared}, no match {none}, back {back}"
+        );
         assert!(open > 10, "the dropdown should open: {open}");
         assert!(filtered < open, "typing should filter: {filtered}");
-        assert_eq!(cleared, open, "clearing the search should bring the rows back");
+        assert_eq!(
+            cleared, open,
+            "clearing the search should bring the rows back"
+        );
         assert_eq!(none, 0);
-        assert_eq!(back, open, "clearing a search with no matches should bring the rows back");
+        assert_eq!(
+            back, open,
+            "clearing a search with no matches should bring the rows back"
+        );
     }
 
     #[test]
@@ -1528,7 +2012,10 @@ mod tests {
             vec!["Kitasan Black".to_string(), "MLB, Lv 50".to_string()],
             vec!["Say \"hi\"".to_string(), "two\nlines".to_string()],
         ];
-        assert_eq!(super::to_csv(&rows), "Card,Note\r\nKitasan Black,\"MLB, Lv 50\"\r\n\"Say \"\"hi\"\"\",\"two\nlines\"\r\n");
+        assert_eq!(
+            super::to_csv(&rows),
+            "Card,Note\r\nKitasan Black,\"MLB, Lv 50\"\r\n\"Say \"\"hi\"\"\",\"two\nlines\"\r\n"
+        );
     }
 
     #[test]
@@ -1536,25 +2023,57 @@ mod tests {
         use super::{SortKey, sort_rows};
         let mut rows = vec![("b", 2.0), ("a", 1.0), ("c", 2.0), ("d", 3.0)];
         sort_rows(&mut rows, true, |r| SortKey::Num(r.1));
-        assert_eq!(rows.iter().map(|r| r.0).collect::<String>(), "dbca", "ties keep their order");
+        assert_eq!(
+            rows.iter().map(|r| r.0).collect::<String>(),
+            "dbca",
+            "ties keep their order"
+        );
         sort_rows(&mut rows, false, |r| SortKey::Num(r.1));
         assert_eq!(rows.iter().map(|r| r.0).collect::<String>(), "abcd");
         let mut names = vec!["oguri Cap", "Lv 10", "Agnes", "Lv 9", "lv 9"];
         sort_rows(&mut names, false, |n| SortKey::Text(n.to_string()));
-        assert_eq!(names, ["Agnes", "Lv 9", "lv 9", "Lv 10", "oguri Cap"], "case-insensitive, numbers by value");
+        assert_eq!(
+            names,
+            ["Agnes", "Lv 9", "lv 9", "Lv 10", "oguri Cap"],
+            "case-insensitive, numbers by value"
+        );
     }
 
     #[test]
     fn table_sort_header_clicks() {
         let name = super::TableCol::new("name", "Uma").sort_asc();
         let stars = super::TableCol::new("stars", "Stars").sort_desc();
-        let mut sort = super::TableSort { key: "name", desc: false };
+        let mut sort = super::TableSort {
+            key: "name",
+            desc: false,
+        };
         sort.click(&name);
-        assert_eq!(sort, super::TableSort { key: "name", desc: true }, "same column flips");
+        assert_eq!(
+            sort,
+            super::TableSort {
+                key: "name",
+                desc: true
+            },
+            "same column flips"
+        );
         sort.click(&stars);
-        assert_eq!(sort, super::TableSort { key: "stars", desc: true }, "a number column starts highest first");
+        assert_eq!(
+            sort,
+            super::TableSort {
+                key: "stars",
+                desc: true
+            },
+            "a number column starts highest first"
+        );
         sort.click(&name);
-        assert_eq!(sort, super::TableSort { key: "name", desc: false }, "a name column starts A to Z");
+        assert_eq!(
+            sort,
+            super::TableSort {
+                key: "name",
+                desc: false
+            },
+            "a name column starts A to Z"
+        );
     }
 
     /// Toasts stack, the same message doesn't repeat, and they go away by themselves.
@@ -1565,7 +2084,11 @@ mod tests {
         let mut t = 0.0;
         let mut frame = |dt: f64| {
             t += dt;
-            let input = egui::RawInput { screen_rect: Some(screen), time: Some(t), ..Default::default() };
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                time: Some(t),
+                ..Default::default()
+            };
             let _ = crate::ui_util::test_frame(&ctx, input, |ui| {
                 super::show_toasts(ui.ctx());
             });
@@ -1579,7 +2102,11 @@ mod tests {
             frame(0.2);
         }
         // After 6 s the success is gone; the error stays its 6 s, then goes too.
-        assert!(super::toasts_now(&ctx).is_empty(), "{:?}", super::toasts_now(&ctx));
+        assert!(
+            super::toasts_now(&ctx).is_empty(),
+            "{:?}",
+            super::toasts_now(&ctx)
+        );
     }
 
     /// The new widgets draw without panicking, headless.
@@ -1593,23 +2120,61 @@ mod tests {
             super::TableCol::new("lv", "Level").right().sort_desc(),
             super::TableCol::new("note", "Notes").optional(true),
         ];
-        let mut sort = super::TableSort { key: "name", desc: false };
-        let grouped = vec![super::TableCol::new("turf", "Turf").center().group("Surface"), super::TableCol::new("dirt", "Dirt").center().group("Surface")];
+        let mut sort = super::TableSort {
+            key: "name",
+            desc: false,
+        };
+        let grouped = vec![
+            super::TableCol::new("turf", "Turf")
+                .center()
+                .group("Surface"),
+            super::TableCol::new("dirt", "Dirt")
+                .center()
+                .group("Surface"),
+        ];
         let mut set = std::collections::BTreeSet::from([1u8]);
         let mut one = Some(0);
-        let mut sort2 = super::TableSort { key: "stars", desc: true };
+        let mut sort2 = super::TableSort {
+            key: "stars",
+            desc: true,
+        };
         for _ in 0..2 {
-            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            };
             let _ = crate::ui_util::test_frame(&ctx, input, |ui| {
-                crate::collection_kit::chip_set(ui, &mut set, &[(1, "5★".into(), Some(3), None, "Five stars".into()), (2, "4★".into(), None, None, String::new())]);
+                crate::collection_kit::chip_set(
+                    ui,
+                    &mut set,
+                    &[
+                        (1, "5★".into(), Some(3), None, "Five stars".into()),
+                        (2, "4★".into(), None, None, String::new()),
+                    ],
+                );
                 crate::collection_kit::option_chips(ui, &mut one, &[(0, "Any"), (1, "P5")]);
-                ui.horizontal(|ui| crate::collection_kit::sort_picker(ui, "s", &mut sort2, &[("stars", "Stars", true), ("name", "Name", false)]));
-                super::DataTable::new("g", &grouped).show(ui, 2, |ui, _, key| _ = super::grade_tile(ui, if key == "turf" { "A" } else { "G" }));
-                super::FilterSection::new("Stars").help("How many").active(1).show(ui, |ui| _ = ui.label("inside"));
+                ui.horizontal(|ui| {
+                    crate::collection_kit::sort_picker(
+                        ui,
+                        "s",
+                        &mut sort2,
+                        &[("stars", "Stars", true), ("name", "Name", false)],
+                    )
+                });
+                super::DataTable::new("g", &grouped).show(ui, 2, |ui, _, key| {
+                    _ = super::grade_tile(ui, if key == "turf" { "A" } else { "G" })
+                });
+                super::FilterSection::new("Stars")
+                    .help("How many")
+                    .active(1)
+                    .show(ui, |ui| _ = ui.label("inside"));
                 super::active_filter_bar(ui, &["Long ≥ A".to_string()]);
                 super::stepper(ui, &["Welcome", "You", "Umas", "Cards", "Done"], 2);
                 super::skeleton_lines(ui, 2);
-                super::DataTable::new("t", &cols).sort(&mut sort).selected(Some(1)).show(ui, 3, |ui, r, key| _ = ui.label(format!("{key} {r}")));
+                super::DataTable::new("t", &cols)
+                    .sort(&mut sort)
+                    .selected(Some(1))
+                    .show(ui, 3, |ui, r, key| _ = ui.label(format!("{key} {r}")));
             });
         }
         let csv = super::table_csv(&ctx, "t", &cols, 2, |r, k| format!("{k}{r}"));

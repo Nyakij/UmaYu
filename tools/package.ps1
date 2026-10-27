@@ -1,8 +1,8 @@
-# Builds dist\umaLord-<date>.zip to share: the app, roster, game data and the (empty) notes
+# Builds dist\UmaYu-<date>.zip to share: the app, roster, game data and the (empty) notes
 # and logs. Leaves out build output, the toolchain hardlinks in app\.cargo, and profiles\
 # (saved accounts and backups). -IncludeProfile puts one profile in the zip's profiles\ folder,
 # so whoever gets it can load it from the first-run setup with one click.
-# -Version v0.1.1 names the zip umaLord-v0.1.1.zip (the release workflow passes the tag);
+# -Version v0.1.1 names the zip UmaYu-v0.1.1.zip (the release workflow passes the tag);
 # without it the zip is named by date.
 #   powershell -ExecutionPolicy Bypass -File tools\package.ps1 [-Build] [-Version v0.1.1] [-IncludeProfile profiles\<name>.umalord.json]
 param([switch]$Build, [string]$Version, [string]$IncludeProfile)
@@ -16,11 +16,11 @@ if ($Build) {
     Pop-Location
     if ($code) { throw 'cargo build failed' }
 }
-$exe = Join-Path $root 'app\target\release\umalord.exe'
+$exe = Join-Path $root 'app\target\release\umayu.exe'
 if (-not (Test-Path $exe)) { throw 'No release build. Run "cargo build --release" in app\, or pass -Build.' }
 
 $dist = Join-Path $root 'dist'
-$stage = Join-Path $dist 'umaLord'
+$stage = Join-Path $dist 'UmaYu'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
@@ -47,7 +47,7 @@ if ($IncludeProfile) {
 }
 
 $label = if ($Version) { $Version } else { Get-Date -Format yyyy-MM-dd }
-$zip = Join-Path $dist "umaLord-$label.zip"
+$zip = Join-Path $dist "UmaYu-$label.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $stage -DestinationPath $zip
 '{0}  ({1:N1} MB, {2} files)' -f $zip, ((Get-Item $zip).Length / 1MB), (Get-ChildItem $stage -Recurse -File).Count

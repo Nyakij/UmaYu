@@ -10,7 +10,9 @@ use eframe::egui;
 use crate::App;
 use crate::sim::builder::build_skill_data;
 use crate::sim::params::strategy_name;
-use crate::sim::run::{ChartRow, Progress, UmaBuild, chart_options, race_params, run_chart, run_comparison};
+use crate::sim::run::{
+    ChartRow, Progress, UmaBuild, chart_options, race_params, run_chart, run_comparison,
+};
 use crate::sim::solver::Perspective;
 use crate::tab_planner::{SkillJob, SkillValues, umalator_hash};
 use crate::tab_sim::{conditions_text, game_time};
@@ -54,47 +56,92 @@ impl App {
     fn plan_skill_pool(&self) -> Vec<u32> {
         let mut ids: BTreeSet<u32> = BTreeSet::new();
         let p = &self.planner.plan;
-        if let (Some(info), Some(owned)) = (p.trainee.and_then(|t| self.kb.umas.get(&t)), p.trainee.and_then(|t| self.owned_uma(t))) {
-            ids.extend(info.skills.iter().filter(|s| s.potential <= owned.potential).map(|s| s.id));
+        if let (Some(info), Some(owned)) = (
+            p.trainee.and_then(|t| self.kb.umas.get(&t)),
+            p.trainee.and_then(|t| self.owned_uma(t)),
+        ) {
+            ids.extend(
+                info.skills
+                    .iter()
+                    .filter(|s| s.potential <= owned.potential)
+                    .map(|s| s.id),
+            );
             ids.extend(info.event_skills.iter().copied());
         }
-        for c in self.roster.cards.iter().filter_map(|c| self.kb.cards.get(&c.id)).chain(p.friend.and_then(|f| self.kb.cards.get(&f))) {
+        for c in self
+            .roster
+            .cards
+            .iter()
+            .filter_map(|c| self.kb.cards.get(&c.id))
+            .chain(p.friend.and_then(|f| self.kb.cards.get(&f)))
+        {
             ids.extend(c.hints.iter().chain(&c.event_skills).copied());
         }
         if let Some(sc) = self.plan_scenario() {
             for name in sc.link_golds.values() {
-                ids.extend(self.kb.skill_order.iter().filter(|id| self.kb.skills[*id].name == *name));
+                ids.extend(
+                    self.kb
+                        .skill_order
+                        .iter()
+                        .filter(|id| self.kb.skills[*id].name == *name),
+                );
             }
         }
         // Lower versions, so a gold's cost and white fallback both have values.
-        let lower: Vec<u32> = ids.iter().filter_map(|id| self.lower_version(*id)).collect();
+        let lower: Vec<u32> = ids
+            .iter()
+            .filter_map(|id| self.lower_version(*id))
+            .collect();
         ids.extend(lower);
         ids.into_iter().collect()
     }
 
     /// Simulate every pool skill on the plan's course (Moomoolator's skill chart), plus +50 Speed
     /// to price a length in stats. `then_pick` chooses skills when it finishes.
-    pub(crate) fn start_skill_values(&mut self, ctx: &egui::Context, then_pick: bool) -> Result<(), String> {
+    pub(crate) fn start_skill_values(
+        &mut self,
+        ctx: &egui::Context,
+        then_pick: bool,
+    ) -> Result<(), String> {
         if self.planner.skill_job.is_some() {
             return Ok(());
         }
-        let data = self.sim_data.clone().ok_or("No simulator data; run tools/update_knowledge.py --only umalator.")?;
+        let data = self.sim_data.clone().ok_or_else(|| {
+            t!("No simulator data; run tools/update_knowledge.py --only umalator.").to_string()
+        })?;
         let base = self.plan_sim_build(false)?;
         let setup = self.plan_race_setup();
-        let course_id = setup.course.ok_or("Pick a course or Champions Meeting for the plan first.")?;
-        let course = Arc::new(data.courses.get(&course_id).cloned().ok_or("That course isn't in the simulator's data.")?);
-        let (g, w, s, t) = (i32::from(setup.ground.unwrap_or(1)), i32::from(setup.weather.unwrap_or(1)), i32::from(setup.season.unwrap_or(1)), i32::from(setup.time.unwrap_or(2)));
+        let course_id = setup.course.ok_or_else(|| {
+            t!("Pick a course or Champions Meeting for the plan first.").to_string()
+        })?;
+        let course = Arc::new(
+            data.courses
+                .get(&course_id)
+                .cloned()
+                .ok_or_else(|| t!("That course isn't in the simulator's data.").to_string())?,
+        );
+        let (g, w, s, t) = (
+            i32::from(setup.ground.unwrap_or(1)),
+            i32::from(setup.weather.unwrap_or(1)),
+            i32::from(setup.season.unwrap_or(1)),
+            i32::from(setup.time.unwrap_or(2)),
+        );
         let race = race_params(g, w, s, t, Some(base.desc.strategy));
         let horse = crate::sim::params::base_stats(&base.desc);
         let skills: Vec<u32> = self
             .plan_skill_pool()
             .into_iter()
             .filter(|id| {
-                let Some(def) = data.skills.get(id) else { return false };
+                let Some(def) = data.skills.get(id) else {
+                    return false;
+                };
                 (def.rarity == 1 || def.rarity == 2)
                     && self.kb.skills.get(id).is_some_and(|k| k.sp > 0)
                     && build_skill_data(&data, &horse, &race, &course, *id, Perspective::Mine, 1)
-                        .is_ok_and(|v| v.iter().any(|sd| sd.regions.first().is_some_and(|r| r.start < 9999.0)))
+                        .is_ok_and(|v| {
+                            v.iter()
+                                .any(|sd| sd.regions.first().is_some_and(|r| r.start < 9999.0))
+                        })
             })
             .collect();
         let progress = Arc::new(Progress::default());
@@ -102,21 +149,44 @@ impl App {
         let p2 = progress.clone();
         let repaint = ctx.clone();
         let count = skills.len();
-        let label = format!("{} · {}", data.course_name(course_id), conditions_text(g, w, s, t));
+        let label = format!(
+            "{} · {}",
+            data.course_name(course_id),
+            conditions_text(g, w, s, t)
+        );
         std::thread::spawn(move || {
             let rows = run_chart(&data, &course, &race, &base, &skills, 1234.0, true, &p2);
             let mut faster = base.clone();
             faster.desc.speed += 50.0;
-            let r = run_comparison(&data, &course, &race, &base, &faster, &chart_options(1234.0, 300), false, false, None);
+            let r = run_comparison(
+                &data,
+                &course,
+                &race,
+                &base,
+                &faster,
+                &chart_options(1234.0, 300),
+                false,
+                false,
+                None,
+            );
             let _ = tx.send((rows, (r.mean > 0.01).then_some(r.mean)));
             repaint.request_repaint();
         });
-        self.planner.skill_job = Some(SkillJob::new(self.plan_key(), progress, rx, count, label, then_pick));
+        self.planner.skill_job = Some(SkillJob::new(
+            self.plan_key(),
+            progress,
+            rx,
+            count,
+            label,
+            then_pick,
+        ));
         Ok(())
     }
 
     pub(crate) fn planner_poll(&mut self, ctx: &egui::Context) {
-        let Some(job) = &self.planner.skill_job else { return };
+        let Some(job) = &self.planner.skill_job else {
+            return;
+        };
         match job.rx().try_recv() {
             Ok((rows, speed_gain)) => {
                 let job = self.planner.skill_job.take().expect("job present");
@@ -133,25 +203,37 @@ impl App {
                     .collect();
                 eff.sort_by(|a, b| b.total_cmp(a));
                 let top = &eff[..eff.len().min(10)];
-                let sp_value = (!top.is_empty()).then(|| top.iter().sum::<f64>() / top.len() as f64 * 0.5 * stats_per_length.unwrap_or(60.0));
+                let sp_value = (!top.is_empty()).then(|| {
+                    top.iter().sum::<f64>() / top.len() as f64
+                        * 0.5
+                        * stats_per_length.unwrap_or(60.0)
+                });
                 self.planner.skill_values = Some(SkillValues {
                     key: job.key(),
-                    rows: rows.into_iter().map(|r| (r.id, r)).collect::<HashMap<u32, ChartRow>>(),
+                    rows: rows
+                        .into_iter()
+                        .map(|r| (r.id, r))
+                        .collect::<HashMap<u32, ChartRow>>(),
                     stats_per_length,
                     sp_value,
                     label: job.label().to_string(),
                 });
                 self.planner.rank_cache.borrow_mut().clear();
-                let mut msg = format!("Simulated {} skills on {}.", job.count(), job.label());
+                let mut msg = tf!("Simulated {} skills on {}.", job.count(), job.label());
                 if job.then_pick() {
                     msg = format!("{msg} {}", self.auto_pick_skills());
                 }
                 self.planner.skill_status = Some((msg, false));
             }
-            Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(150)),
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(150))
+            }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.planner.skill_job = None;
-                self.planner.skill_status = Some(("The skill simulation stopped unexpectedly.".into(), true));
+                self.planner.skill_status = Some((
+                    t!("The skill simulation stopped unexpectedly.").into(),
+                    true,
+                ));
             }
         }
     }
@@ -160,14 +242,27 @@ impl App {
     /// seed), and write the results into its ## Simulation section.
     pub(crate) fn simulate_plan_file(&mut self, path: &std::path::Path) -> Result<String, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let json = text.split(crate::tab_planner::PLAN_MARKER).nth(1).and_then(|t| t.split("-->").next()).ok_or("No umalord-plan block in that file.")?;
+        let json = text
+            .split(crate::tab_planner::PLAN_MARKER)
+            .nth(1)
+            .and_then(|t| t.split("-->").next())
+            .ok_or("No umalord-plan block in that file.")?;
         self.planner.plan = serde_json::from_str(json).map_err(|e| format!("Plan data: {e}"))?;
         self.planner.open_file = Some(path.to_path_buf());
         self.load_plan_into_sim()?;
         let data = self.sim_data.clone().ok_or("No simulator data.")?;
-        let course = Arc::new(data.courses.get(&self.sim.course).cloned().ok_or("Unknown course.")?);
+        let course = Arc::new(
+            data.courses
+                .get(&self.sim.course)
+                .cloned()
+                .ok_or("Unknown course.")?,
+        );
         let s = &mut self.sim;
-        s.opts = crate::sim::run::SimOptions { samples: 1000, seed: 12345.0, ..Default::default() };
+        s.opts = crate::sim::run::SimOptions {
+            samples: 1000,
+            seed: 12345.0,
+            ..Default::default()
+        };
         for u in &mut s.umas {
             u.normalise(&data);
         }
@@ -179,10 +274,17 @@ impl App {
             opts: s.opts.clone(),
             race: (s.ground, s.weather, s.season, s.time),
         });
-        let r = run_comparison(&data, &course, &race, &s.umas[0], &s.umas[1], &s.opts, true, true, None);
+        let r = run_comparison(
+            &data, &course, &race, &s.umas[0], &s.umas[1], &s.opts, true, true, None,
+        );
         let summary = format!(
             "Gap {:+.2} L mean, {:+.2} median; full spurt {:.0}%/{:.0}%; survival {:.0}%/{:.0}%.",
-            r.mean, r.median, r.umas[0].full_spurt_rate, r.umas[1].full_spurt_rate, r.umas[0].survival_rate, r.umas[1].survival_rate
+            r.mean,
+            r.median,
+            r.umas[0].full_spurt_rate,
+            r.umas[1].full_spurt_rate,
+            r.umas[0].survival_rate,
+            r.umas[1].survival_rate
         );
         s.compare = Some(r);
         let msg = self.save_sim_to_plan()?;
@@ -195,27 +297,48 @@ impl App {
         if self.planner.open_file.is_none() {
             self.save_plan();
         }
-        let path = self.planner.open_file.clone().ok_or("Save the plan first.")?;
+        let path = self
+            .planner
+            .open_file
+            .clone()
+            .ok_or_else(|| t!("Save the plan first.").to_string())?;
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        let start = text.find("## Simulation").ok_or("The plan file has no ## Simulation section.")?;
-        let end = text[start + 3..].find("\n## ").map_or(text.len(), |i| start + 3 + i + 1);
+        let start = text
+            .find("## Simulation")
+            .ok_or_else(|| t!("The plan file has no ## Simulation section.").to_string())?;
+        let end = text[start + 3..]
+            .find("\n## ")
+            .map_or(text.len(), |i| start + 3 + i + 1);
         let new = format!("{}{}{}", &text[..start], md, &text[end..]);
-        std::fs::write(&path, new).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
-        Ok(format!("Wrote the results into {}.", path.display()))
+        std::fs::write(&path, new).map_err(|e| tf!("Couldn't write {}: {}.", path.display(), e))?;
+        Ok(tf!("Wrote the results into {}.", path.display()))
     }
 
     /// The Race sim's last Compare as markdown: setup, results and a link to reproduce it.
     pub(crate) fn sim_markdown(&self) -> Result<String, String> {
         use std::fmt::Write;
-        let r = self.sim.compare.clone().ok_or("Run the simulation first.")?;
+        let r = self
+            .sim
+            .compare
+            .clone()
+            .ok_or("Run the simulation first.")?;
         let ran = self.sim.ran.clone().ok_or("Run the simulation first.")?;
         let data = self.sim_data.clone().ok_or("No simulator data.")?;
         let o = &ran.opts;
         let onoff = |b: bool| if b { "on" } else { "off" };
         let mut md = String::new();
         let _ = writeln!(md, "## Simulation\n");
-        let _ = writeln!(md, "Simulated {} in umaLord's Race sim (a native port of Moomoolator's engine v2). Simulator output, not game data.\n", today());
-        let _ = writeln!(md, "- Course: {}; conditions: {}", data.course_name(ran.course), ran.conditions);
+        let _ = writeln!(
+            md,
+            "Simulated {} in UmaYu's Race sim (a native port of Moomoolator's engine v2). Simulator output, not game data.\n",
+            today()
+        );
+        let _ = writeln!(
+            md,
+            "- Course: {}; conditions: {}",
+            data.course_name(ran.course),
+            ran.conditions
+        );
         let _ = writeln!(
             md,
             "- Runs: {}, seed {}; sync RNG {}, wit check {}, rushed {}, lane movement {}, spot struggle {}, dueling {}",
@@ -243,19 +366,43 @@ impl App {
                 crate::sim::params::APTITUDES[u.desc.distance_apt.min(7)],
                 crate::sim::params::APTITUDES[u.desc.surface_apt.min(7)],
                 crate::sim::params::APTITUDES[u.desc.strategy_apt.min(7)],
-                if skills.is_empty() { "none".into() } else { skills.join(", ") }
+                if skills.is_empty() {
+                    "none".into()
+                } else {
+                    skills.join(", ")
+                }
             );
         }
-        let _ = writeln!(md, "\nGap, Uma 2 ahead of Uma 1 in lengths: mean {:+.2}, median {:+.2}, min {:+.2}, max {:+.2}.\n", r.mean, r.median, r.min, r.max);
+        let _ = writeln!(
+            md,
+            "\nGap, Uma 2 ahead of Uma 1 in lengths: mean {:+.2}, median {:+.2}, min {:+.2}, max {:+.2}.\n",
+            r.mean, r.median, r.min, r.max
+        );
         let _ = writeln!(md, "| | Uma 1 | Uma 2 |\n|---|---|---|");
-        let row = |md: &mut String, label: &str, f: &dyn Fn(&crate::sim::run::UmaStats) -> String| {
-            let _ = writeln!(md, "| {label} | {} | {} |", f(&r.umas[0]), f(&r.umas[1]));
-        };
+        let row =
+            |md: &mut String, label: &str, f: &dyn Fn(&crate::sim::run::UmaStats) -> String| {
+                let _ = writeln!(md, "| {label} | {} | {} |", f(&r.umas[0]), f(&r.umas[1]));
+            };
         row(&mut md, "Finish (game clock)", &|u| game_time(u.mean_time));
-        row(&mut md, "Full spurt", &|u| format!("{:.1}%", u.full_spurt_rate));
-        row(&mut md, "HP survival", &|u| format!("{:.1}%", u.survival_rate));
+        row(&mut md, "Full spurt", &|u| {
+            format!("{:.1}%", u.full_spurt_rate)
+        });
+        row(&mut md, "HP survival", &|u| {
+            format!("{:.1}%", u.survival_rate)
+        });
         row(&mut md, "Rushed", &|u| format!("{:.1}%", u.rushed_rate));
-        let acts: Vec<String> = r.umas[1].skills.iter().map(|s| format!("{} {:.0}% at {:.0} m", self.kb.skill_name(s.id), s.rate, s.mean_start)).collect();
+        let acts: Vec<String> = r.umas[1]
+            .skills
+            .iter()
+            .map(|s| {
+                format!(
+                    "{} {:.0}% at {:.0} m",
+                    self.kb.skill_name(s.id),
+                    s.rate,
+                    s.mean_start
+                )
+            })
+            .collect();
         if !acts.is_empty() {
             let _ = writeln!(md, "\nUma 2's skill activations: {}.", acts.join("; "));
         }
@@ -265,14 +412,32 @@ impl App {
             "uma1": umalator_uma_json(&ran.umas[0]),
             "uma2": umalator_uma_json(&ran.umas[1]),
         });
-        let _ = writeln!(md, "\nReproduce in Moomoolator: https://umalator.app/#{}\n", umalator_hash(&state));
+        let _ = writeln!(
+            md,
+            "\nReproduce in Moomoolator: https://umalator.app/#{}\n",
+            umalator_hash(&state)
+        );
         Ok(md)
     }
 }
 
 impl SkillJob {
-    pub fn new(key: u64, progress: Arc<Progress>, rx: mpsc::Receiver<(Vec<ChartRow>, Option<f64>)>, count: usize, label: String, then_pick: bool) -> Self {
-        SkillJob { key, progress, rx, count, label, then_pick }
+    pub fn new(
+        key: u64,
+        progress: Arc<Progress>,
+        rx: mpsc::Receiver<(Vec<ChartRow>, Option<f64>)>,
+        count: usize,
+        label: String,
+        then_pick: bool,
+    ) -> Self {
+        SkillJob {
+            key,
+            progress,
+            rx,
+            count,
+            label,
+            then_pick,
+        }
     }
     pub fn rx(&self) -> &mpsc::Receiver<(Vec<ChartRow>, Option<f64>)> {
         &self.rx

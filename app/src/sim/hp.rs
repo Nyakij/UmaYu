@@ -58,7 +58,8 @@ impl GameHp {
     }
 
     fn init(&mut self, h: &Horse) {
-        self.max_hp = 0.8 * STRATEGY_COEF[h.strategy.clamp(1, 5) as usize] * h.stamina + self.distance;
+        self.max_hp =
+            0.8 * STRATEGY_COEF[h.strategy.clamp(1, 5) as usize] * h.stamina + self.distance;
         self.hp = self.max_hp;
         self.guts_mod = 1.0 + 200.0 / (600.0 * h.guts).sqrt();
         self.subpar_accept = ((15.0 + 0.05 * h.wisdom) * 1000.0 + 0.5).floor();
@@ -89,11 +90,21 @@ impl GameHp {
 
     pub fn hp_per_second(&self, s: &HpState, velocity: f64) -> f64 {
         let guts = if s.phase >= 2 { self.guts_mod } else { 1.0 };
-        20.0 * (velocity - self.base_speed + 12.0).powi(2) / 144.0 * Self::status_mod(s) * self.ground_mod * guts
+        20.0 * (velocity - self.base_speed + 12.0).powi(2) / 144.0
+            * Self::status_mod(s)
+            * self.ground_mod
+            * guts
     }
 
     fn last_leg(s: &HpState) -> HpState {
-        HpState { phase: 2, pos_keep: PK_NONE, rushed: false, downhill: false, lead_competition: false, ..*s }
+        HpState {
+            phase: 2,
+            pos_keep: PK_NONE,
+            rushed: false,
+            downhill: false,
+            lead_competition: false,
+            ..*s
+        }
     }
 
     fn last_spurt_pair(&mut self, s: &HpState, max_speed: f64, bts2: f64) -> (f64, f64) {
@@ -110,7 +121,10 @@ impl GameHp {
         let base_drain = self.hp_per_second(&leg, bts2);
         while speed >= bts2 {
             let drain = self.hp_per_second(&leg, speed);
-            let spurt_secs = (remain / speed).min(((bts2 * self.hp - base_drain * remain) / (bts2 * drain - base_drain * speed)).max(0.0));
+            let spurt_secs = (remain / speed).min(
+                ((bts2 * self.hp - base_drain * remain) / (bts2 * drain - base_drain * speed))
+                    .max(0.0),
+            );
             candidates.push((self.distance - spurt_secs * speed - 60.0, speed));
             speed -= 0.1;
         }
@@ -130,7 +144,13 @@ pub enum Hp {
     Noop,
     Game(GameHp),
     /// Stamina mode: optionally forces a full spurt and tracks HP saved on downhills.
-    ForceFull { hp: GameHp, force: bool, balance: f64, was_full: bool, downhill_save: f64 },
+    ForceFull {
+        hp: GameHp,
+        force: bool,
+        balance: f64,
+        was_full: bool,
+        downhill_save: f64,
+    },
     /// Stamina mode's second solver: counts HP used up to the start of the last spurt.
     CalcRequired(GameHp),
 }
@@ -151,10 +171,16 @@ impl Hp {
         match self {
             Hp::Noop => {}
             Hp::Game(g) | Hp::CalcRequired(g) => g.hp -= g.hp_per_second(s, s.speed) * dt,
-            Hp::ForceFull { hp, downhill_save, .. } => {
+            Hp::ForceFull {
+                hp, downhill_save, ..
+            } => {
                 if s.downhill {
-                    let flat = HpState { downhill: false, ..*s };
-                    *downhill_save += hp.hp_per_second(&flat, s.speed) * dt - hp.hp_per_second(s, s.speed) * dt;
+                    let flat = HpState {
+                        downhill: false,
+                        ..*s
+                    };
+                    *downhill_save +=
+                        hp.hp_per_second(&flat, s.speed) * dt - hp.hp_per_second(s, s.speed) * dt;
                 }
                 hp.hp -= hp.hp_per_second(s, s.speed) * dt;
             }
@@ -178,7 +204,9 @@ impl Hp {
     pub fn recover(&mut self, m: f64) {
         match self {
             Hp::Noop => {}
-            Hp::Game(g) | Hp::ForceFull { hp: g, .. } | Hp::CalcRequired(g) => g.hp = g.max_hp.min(g.hp + g.max_hp * m),
+            Hp::Game(g) | Hp::ForceFull { hp: g, .. } | Hp::CalcRequired(g) => {
+                g.hp = g.max_hp.min(g.hp + g.max_hp * m)
+            }
         }
     }
 
@@ -206,12 +234,22 @@ impl Hp {
         match self {
             Hp::Noop => (-1.0, max_speed),
             Hp::Game(g) => g.last_spurt_pair(s, max_speed, bts2),
-            Hp::ForceFull { hp, force, balance, was_full, .. } => {
+            Hp::ForceFull {
+                hp,
+                force,
+                balance,
+                was_full,
+                ..
+            } => {
                 let max_dist = hp.distance - phase_start(hp.distance, 2);
                 let secs = (max_dist - 60.0) / max_speed;
                 *balance = hp.hp - hp.hp_per_second(&GameHp::last_leg(s), max_speed) * secs;
                 *was_full = *balance >= 0.0;
-                if *force { (-1.0, max_speed) } else { hp.last_spurt_pair(s, max_speed, bts2) }
+                if *force {
+                    (-1.0, max_speed)
+                } else {
+                    hp.last_spurt_pair(s, max_speed, bts2)
+                }
             }
             Hp::CalcRequired(g) => {
                 let max_dist = g.distance - phase_start(g.distance, 2);

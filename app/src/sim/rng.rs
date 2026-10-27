@@ -20,7 +20,9 @@ pub struct Rng {
 impl Rng {
     pub fn new(seed: f64) -> Self {
         // Prando's getSafeSeed maps 0 to 1 before the first xorshift converts it to an int32.
-        Rng { value: to_int32(if seed == 0.0 { 1.0 } else { seed }) }
+        Rng {
+            value: to_int32(if seed == 0.0 { 1.0 } else { seed }),
+        }
     }
 
     fn recalculate(&mut self) {

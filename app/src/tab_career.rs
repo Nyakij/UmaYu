@@ -9,7 +9,12 @@ use crate::{App, CareerTab};
 impl App {
     pub(crate) fn career_page(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("career_bar")
-            .frame(egui::Frame::new().inner_margin(Margin { left: 14, right: 18, top: 12, bottom: 10 }))
+            .frame(egui::Frame::new().inner_margin(Margin {
+                left: 14,
+                right: 18,
+                top: 12,
+                bottom: 10,
+            }))
             .show(ui, |ui| self.career_bar(ui));
         match self.career_tab {
             CareerTab::Plan => self.planner_tab(ui),
@@ -24,21 +29,31 @@ impl App {
         let busy = self.sim.job.is_some();
         ui.horizontal(|ui| {
             ui.set_min_height(34.0);
-            ui.label(semibold("🏇 Career", 22.0));
+            ui.label(semibold(t!("🏇 Career"), 22.0));
             ui.add_space(14.0);
-            let options: Vec<(CareerTab, String, &str)> = [CareerTab::Plan, CareerTab::Race, CareerTab::Results]
-                .into_iter()
-                .map(|page| {
-                    let (icon, label, what) = page.info();
-                    // A race running in the background shows on its sub-tab.
-                    let label = if page == CareerTab::Race && busy { format!("{icon} {label} ⏳") } else { format!("{icon} {label}") };
-                    (page, label, what)
-                })
-                .collect();
+            let options: Vec<(CareerTab, String, &str)> =
+                [CareerTab::Plan, CareerTab::Race, CareerTab::Results]
+                    .into_iter()
+                    .map(|page| {
+                        let (icon, label, what) = page.info();
+                        let label = t!(label);
+                        // A race running in the background shows on its sub-tab.
+                        let label = if page == CareerTab::Race && busy {
+                            format!("{icon} {label} ⏳")
+                        } else {
+                            format!("{icon} {label}")
+                        };
+                        (page, label, what)
+                    })
+                    .collect();
             segmented(ui, &mut self.career_tab, &options);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 crate::ui_util::header_chibi(ui);
-                ui.label(RichText::new("Plan it → race it → log what happened").size(13.0).color(weak));
+                ui.label(
+                    RichText::new(t!("Plan it → race it → log what happened"))
+                        .size(13.0)
+                        .color(weak),
+                );
             });
         });
     }

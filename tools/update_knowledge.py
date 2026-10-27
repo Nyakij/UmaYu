@@ -33,7 +33,7 @@ import urllib.request
 SITE = "https://uma.guide"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "knowledge", "data")
-UA = {"User-Agent": "umaLord-knowledge-builder/1.0 (personal use)"}
+UA = {"User-Agent": "UmaYu-knowledge-builder/1.0 (personal use)"}
 CHUNKS = ("uma-data", "event-rewards-data", "jp-support-events", "jp-dict-data")
 
 # ---------------------------------------------------------------------------

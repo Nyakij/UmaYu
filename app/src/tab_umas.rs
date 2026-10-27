@@ -2,18 +2,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, RichText, Sense, Stroke, StrokeKind, pos2, vec2};
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, Response, RichText, Sense, Stroke,
+    StrokeKind, pos2, vec2,
+};
 use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 
 use crate::collection_kit::{self as kit, SortOption, TileGroup};
-use crate::ui_util::UiExt;
 use crate::data::Uma;
 use crate::knowledge::{Aptitude, grade_rank};
 use crate::theme::{pal, size};
+use crate::ui_util::UiExt;
 use crate::ui_util::{
-    DataTable, FilterBarAction, FilterSection, SortKey, TableCol, active_filter_bar, badge, card, card_explained, card_titled, draw_stars,
-    empty_state, grade_badge, grade_color, grade_tile, placeholder, potential_badge, section_label, semibold, sort_rows, stars_widget, tile_ring,
+    DataTable, FilterBarAction, FilterSection, SortKey, TableCol, active_filter_bar, badge, card,
+    card_explained, card_titled, draw_stars, empty_state, grade_badge, grade_color, grade_tile,
+    placeholder, potential_badge, section_label, semibold, sort_rows, stars_widget, tile_ring,
     truncate, web_link,
 };
 use crate::{App, Jump, View};
@@ -37,7 +41,18 @@ pub(crate) enum Apt {
 }
 
 impl Apt {
-    pub const ALL: [Apt; 10] = [Apt::Turf, Apt::Dirt, Apt::Sprint, Apt::Mile, Apt::Medium, Apt::Long, Apt::Front, Apt::Pace, Apt::Late, Apt::End];
+    pub const ALL: [Apt; 10] = [
+        Apt::Turf,
+        Apt::Dirt,
+        Apt::Sprint,
+        Apt::Mile,
+        Apt::Medium,
+        Apt::Long,
+        Apt::Front,
+        Apt::Pace,
+        Apt::Late,
+        Apt::End,
+    ];
 
     /// The table column and sort key.
     pub fn key(self) -> &'static str {
@@ -123,7 +138,11 @@ pub(crate) struct UmaFilter {
 
 impl UmaFilter {
     pub fn count(&self) -> usize {
-        self.stars.len() + self.potential.len() + self.apt.len() + usize::from(self.evolved) + usize::from(self.recent)
+        self.stars.len()
+            + self.potential.len()
+            + self.apt.len()
+            + usize::from(self.evolved)
+            + usize::from(self.recent)
     }
 }
 
@@ -136,7 +155,15 @@ pub(crate) struct UmasState {
 
 impl Default for UmasState {
     fn default() -> Self {
-        Self { search: String::new(), filter: UmaFilter::default(), sort: crate::ui_util::TableSort { key: "stars", desc: true }, selected: None }
+        Self {
+            search: String::new(),
+            filter: UmaFilter::default(),
+            sort: crate::ui_util::TableSort {
+                key: "stars",
+                desc: true,
+            },
+            selected: None,
+        }
     }
 }
 
@@ -151,8 +178,13 @@ enum UmaChip {
     Recent,
 }
 
-const GROWTH: [(&str, &str, &str); 5] =
-    [("g_spd", "Spd %", "Speed"), ("g_sta", "Sta %", "Stamina"), ("g_pow", "Pow %", "Power"), ("g_gut", "Gut %", "Guts"), ("g_wit", "Wit %", "Wit")];
+const GROWTH: [(&str, &str, &str); 5] = [
+    ("g_spd", "Spd %", "Speed"),
+    ("g_sta", "Sta %", "Stamina"),
+    ("g_pow", "Pow %", "Power"),
+    ("g_gut", "Gut %", "Guts"),
+    ("g_wit", "Wit %", "Wit"),
+];
 
 /// The Umas sort dropdown: every sortable column, plus "Best fit".
 const UMA_SORTS: [SortOption; 22] = [
@@ -193,7 +225,7 @@ fn min_label(min: Option<u8>) -> &'static str {
     match min {
         Some(8) => "S",
         Some(_) => "A+",
-        None => "any",
+        None => t!("any"),
     }
 }
 
@@ -208,45 +240,77 @@ impl App {
         // A narrow window with the details open, or with a table: fold the filters so the list
         // keeps its room.
         let table_fold = self.view == View::Table && !kit::opened_by_hand(&ctx, "umas");
-        let auto_fold = !collapsed && ui.available_width() < 1100.0 && !self.focus_search.get() && (self.umas.selected.is_some() || table_fold);
+        let auto_fold = !collapsed
+            && ui.available_width() < 1100.0
+            && !self.focus_search.get()
+            && (self.umas.selected.is_some() || table_fold);
         collapsed |= auto_fold;
         let active = self.umas.filter.count() + usize::from(!self.umas.search.trim().is_empty());
         if collapsed {
-            egui::Panel::left("uma_filters_rail").resizable(false).exact_size(kit::RAIL_W).frame(kit::rail_frame()).show(ui, |ui| {
-                if kit::rail(ui, active, &[("🔍", "Search"), ("★", "Stars"), ("P", "Potential"), ("A", "Aptitudes")]) {
-                    if auto_fold {
-                        self.umas.selected = None;
-                        kit::open_by_hand(&ctx, "umas");
-                    } else {
-                        kit::set_rail(&ctx, "umas", false);
+            egui::Panel::left("uma_filters_rail")
+                .resizable(false)
+                .exact_size(kit::RAIL_W)
+                .frame(kit::rail_frame())
+                .show(ui, |ui| {
+                    if kit::rail(
+                        ui,
+                        active,
+                        &[
+                            ("🔍", "Search"),
+                            ("★", "Stars"),
+                            ("P", "Potential"),
+                            ("A", "Aptitudes"),
+                        ],
+                    ) {
+                        if auto_fold {
+                            self.umas.selected = None;
+                            kit::open_by_hand(&ctx, "umas");
+                        } else {
+                            kit::set_rail(&ctx, "umas", false);
+                        }
                     }
-                }
-            });
+                });
         } else {
-            egui::Panel::left("uma_filters").resizable(false).exact_size(FILTER_W).frame(crate::side_frame()).show(ui, |ui| {
-                if kit::sidebar_head(ui, active) {
-                    kit::set_rail(&ctx, "umas", true);
-                }
-                egui::ScrollArea::vertical().show(ui, |ui| self.uma_filters(ui));
-            });
+            egui::Panel::left("uma_filters")
+                .resizable(false)
+                .exact_size(FILTER_W)
+                .frame(crate::side_frame())
+                .show(ui, |ui| {
+                    if kit::sidebar_head(ui, active) {
+                        kit::set_rail(&ctx, "umas", true);
+                    }
+                    egui::ScrollArea::vertical().show(ui, |ui| self.uma_filters(ui));
+                });
         }
-        if let Some(uma) = self.umas.selected.and_then(|id| self.owned_uma(id)).cloned() {
-            egui::Panel::right("uma_detail").resizable(true).default_size(440.0).min_size(340.0).frame(crate::side_frame()).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.uma_detail(ui, &uma));
-            });
+        if let Some(uma) = self
+            .umas
+            .selected
+            .and_then(|id| self.owned_uma(id))
+            .cloned()
+        {
+            egui::Panel::right("uma_detail")
+                .resizable(true)
+                .default_size(440.0)
+                .min_size(340.0)
+                .frame(crate::side_frame())
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.uma_detail(ui, &uma));
+                });
         }
         let list = self.filtered_umas();
-        egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-            self.uma_results_header(ui, &list);
-            if list.is_empty() {
-                empty_state(ui, "🔍", "No umas match", "Loosen or clear the filters.");
-                return;
-            }
-            match self.view {
-                View::Grid => self.uma_grid(ui, &list),
-                View::Table => self.uma_table(ui, &list),
-            }
-        });
+        egui::CentralPanel::default()
+            .frame(crate::page_frame())
+            .show(ui, |ui| {
+                self.uma_results_header(ui, &list);
+                if list.is_empty() {
+                    empty_state(ui, "🔍", "No umas match", "Loosen or clear the filters.");
+                    return;
+                }
+                match self.view {
+                    View::Grid => self.uma_grid(ui, &list),
+                    View::Table => self.uma_table(ui, &list),
+                }
+            });
     }
 
     /// "Showing 12 of 57 umas · Sort […] · S M L · Pictures | Table", then the filters that are on.
@@ -254,13 +318,20 @@ impl App {
         let cols = self.uma_cols();
         let shown = list.len();
         // Too narrow for one line: the view tools go on a second.
-        let narrow = ui.available_width() < if self.view == View::Grid { 640.0 } else { 730.0 };
+        let narrow = ui.available_width()
+            < if self.view == View::Grid {
+                640.0
+            } else {
+                730.0
+            };
         let tools = |app: &mut App, ui: &mut egui::Ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 app.view_switch(ui);
                 match app.view {
                     View::Grid => kit::tile_size_switch(ui),
-                    View::Table => app.table_tools(ui, "umas", &cols, shown, |app, (r, k)| app.uma_text(&app.roster.umas[list[r]], k)),
+                    View::Table => app.table_tools(ui, "umas", &cols, shown, |app, (r, k)| {
+                        app.uma_text(&app.roster.umas[list[r]], k)
+                    }),
                 }
             });
         };
@@ -295,14 +366,32 @@ impl App {
         if !self.umas.search.trim().is_empty() {
             out.push((format!("“{}”", self.umas.search.trim()), UmaChip::Search));
         }
-        out.extend(f.stars.iter().rev().map(|s| (format!("{s}★"), UmaChip::Stars(*s))));
-        out.extend(f.potential.iter().map(|s| (format!("P{s}"), UmaChip::Potential(*s))));
-        out.extend(f.apt.iter().map(|(a, m)| (format!("{} {}", a.label(), if *m >= 8 { "S" } else { "A or better" }), UmaChip::Apt(*a))));
+        out.extend(
+            f.stars
+                .iter()
+                .rev()
+                .map(|s| (format!("{s}★"), UmaChip::Stars(*s))),
+        );
+        out.extend(
+            f.potential
+                .iter()
+                .map(|s| (format!("P{s}"), UmaChip::Potential(*s))),
+        );
+        out.extend(f.apt.iter().map(|(a, m)| {
+            (
+                format!(
+                    "{} {}",
+                    a.label(),
+                    if *m >= 8 { "S" } else { t!("A or better") }
+                ),
+                UmaChip::Apt(*a),
+            )
+        }));
         if f.evolved {
-            out.push(("Has an evolved skill".into(), UmaChip::Evolved));
+            out.push((t!("Has an evolved skill").into(), UmaChip::Evolved));
         }
         if f.recent {
-            out.push(("Released in the last 60 days".into(), UmaChip::Recent));
+            out.push((t!("Released in the last 60 days").into(), UmaChip::Recent));
         }
         out
     }
@@ -327,12 +416,45 @@ impl App {
 
     fn uma_filters(&mut self, ui: &mut egui::Ui) {
         let focus = self.focus_search.take();
-        kit::search_box(ui, &mut self.umas.search, "🔍 Search name, outfit or note (Ctrl+F)", focus);
+        kit::search_box(
+            ui,
+            &mut self.umas.search,
+            t!("🔍 Search name, outfit or note (Ctrl+F)"),
+            focus,
+        );
         let builtins = [
-            ("Maxed potential", "Umas at P5: every skill of their own unlocked", UmaFilter { potential: [5].into(), ..Default::default() }),
-            ("Needs potential", "Umas below P5: potential still to raise", UmaFilter { potential: [1, 2, 3, 4].into(), ..Default::default() }),
-            ("Long A+", "Umas with A or better at Long distance", UmaFilter { apt: [(Apt::Long, 7)].into(), ..Default::default() }),
-            ("Dirt A+", "Umas with A or better on dirt", UmaFilter { apt: [(Apt::Dirt, 7)].into(), ..Default::default() }),
+            (
+                "Maxed potential",
+                "Umas at P5: every skill of their own unlocked",
+                UmaFilter {
+                    potential: [5].into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Needs potential",
+                "Umas below P5: potential still to raise",
+                UmaFilter {
+                    potential: [1, 2, 3, 4].into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Long A+",
+                "Umas with A or better at Long distance",
+                UmaFilter {
+                    apt: [(Apt::Long, 7)].into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Dirt A+",
+                "Umas with A or better on dirt",
+                UmaFilter {
+                    apt: [(Apt::Dirt, 7)].into(),
+                    ..Default::default()
+                },
+            ),
         ];
         kit::quick_views(ui, "umas", &mut self.umas.filter, &builtins);
 
@@ -342,22 +464,52 @@ impl App {
             .rev()
             .filter_map(|n| {
                 let count = umas.iter().filter(|u| u.stars == n).count();
-                (count > 0 || f.stars.contains(&n)).then(|| (n, format!("{n}★"), Some(count), Some(crate::ui_util::GOLD), String::new()))
+                (count > 0 || f.stars.contains(&n)).then(|| {
+                    (
+                        n,
+                        format!("{n}★"),
+                        Some(count),
+                        Some(crate::ui_util::GOLD),
+                        String::new(),
+                    )
+                })
             })
             .collect();
-        if FilterSection::new("Stars").help("Star rank, 1–5★. Higher stars make an uma stronger, including her unique skill.").active(f.stars.len()).show(ui, |ui| {
-            kit::chip_set(ui, &mut f.stars, &stars);
-        }) {
+        if FilterSection::new("Stars")
+            .help("Star rank, 1–5★. Higher stars make an uma stronger, including her unique skill.")
+            .active(f.stars.len())
+            .show(ui, |ui| {
+                kit::chip_set(ui, &mut f.stars, &stars);
+            })
+        {
             f.stars.clear();
         }
         let pots: Vec<_> = (1..=5u8)
             .map(|n| (n, umas.iter().filter(|u| u.potential == n).count()))
             .filter(|(n, count)| *count > 0 || f.potential.contains(n))
-            .map(|(n, count)| (n, format!("P{n}"), Some(count), None, if n == 5 { "Maxed: every potential skill unlocked".to_string() } else { String::new() }))
+            .map(|(n, count)| {
+                (
+                    n,
+                    format!("P{n}"),
+                    Some(count),
+                    None,
+                    if n == 5 {
+                        "Maxed: every potential skill unlocked".to_string()
+                    } else {
+                        String::new()
+                    },
+                )
+            })
             .collect();
-        if FilterSection::new("Potential").help("Potential unlocks an uma's own skills, P1 to P5. At P5 all of them can be bought.").active(f.potential.len()).show(ui, |ui| {
-            kit::chip_set(ui, &mut f.potential, &pots);
-        }) {
+        if FilterSection::new("Potential")
+            .help(
+                "Potential unlocks an uma's own skills, P1 to P5. At P5 all of them can be bought.",
+            )
+            .active(f.potential.len())
+            .show(ui, |ui| {
+                kit::chip_set(ui, &mut f.potential, &pots);
+            })
+        {
             f.potential.clear();
         }
         if FilterSection::new("Aptitudes")
@@ -369,8 +521,18 @@ impl App {
         }
         let more = usize::from(f.evolved) + usize::from(f.recent);
         if FilterSection::new("More").active(more).show(ui, |ui| {
-            kit::toggle_row(ui, &mut f.evolved, "Has an evolved skill", "Umas whose skills can evolve into stronger versions during a career");
-            kit::toggle_row(ui, &mut f.recent, "Released in the last 60 days", "Outfits that came out on Global in the last two months");
+            kit::toggle_row(
+                ui,
+                &mut f.evolved,
+                "Has an evolved skill",
+                "Umas whose skills can evolve into stronger versions during a career",
+            );
+            kit::toggle_row(
+                ui,
+                &mut f.recent,
+                "Released in the last 60 days",
+                "Outfits that came out on Global in the last two months",
+            );
         }) {
             f.evolved = false;
             f.recent = false;
@@ -384,10 +546,18 @@ impl App {
         let info = self.kb.umas.get(&u.id);
         (f.stars.is_empty() || f.stars.contains(&u.stars))
             && (f.potential.is_empty() || f.potential.contains(&u.potential))
-            && f.apt.iter().all(|(a, min)| info.is_some_and(|i| grade_rank(a.grade(&i.aptitude)) >= *min))
+            && f.apt
+                .iter()
+                .all(|(a, min)| info.is_some_and(|i| grade_rank(a.grade(&i.aptitude)) >= *min))
             && (!f.evolved || info.is_some_and(|i| !i.evolved.is_empty()))
-            && (!f.recent || info.is_some_and(|i| (0..=60).contains(&(today - crate::tab_planner::day_number(&i.release)))))
-            && (q.is_empty() || [u.name.as_str(), u.outfit.as_str(), u.notes.as_str()].iter().any(|t| t.to_lowercase().contains(q)))
+            && (!f.recent
+                || info.is_some_and(|i| {
+                    (0..=60).contains(&(today - crate::tab_planner::day_number(&i.release)))
+                }))
+            && (q.is_empty()
+                || [u.name.as_str(), u.outfit.as_str(), u.notes.as_str()]
+                    .iter()
+                    .any(|t| t.to_lowercase().contains(q)))
     }
 
     /// What a column sorts by.
@@ -400,9 +570,20 @@ impl App {
             "stars" => num(f64::from(u.stars) * 10.0 + f64::from(u.potential)),
             "potential" => num(f64::from(u.potential) * 10.0 + f64::from(u.stars)),
             "release" => SortKey::Text(info.map(|i| i.release.clone()).unwrap_or_default()),
-            "unique" => SortKey::Text(info.and_then(|i| i.unique_skill).map(|s| self.kb.skill_name(s)).unwrap_or_default()),
+            "unique" => SortKey::Text(
+                info.and_then(|i| i.unique_skill)
+                    .map(|s| self.kb.skill_name(s))
+                    .unwrap_or_default(),
+            ),
             "notes" => SortKey::Text(u.notes.clone()),
-            "fit" => num(self.umas.filter.apt.keys().map(|a| info.map_or(0, |i| grade_rank(a.grade(&i.aptitude)) as u32)).sum::<u32>().into()),
+            "fit" => num(self
+                .umas
+                .filter
+                .apt
+                .keys()
+                .map(|a| info.map_or(0, |i| grade_rank(a.grade(&i.aptitude)) as u32))
+                .sum::<u32>()
+                .into()),
             k => {
                 if let Some(a) = Apt::ALL.iter().find(|a| a.key() == k) {
                     num(info.map_or(0.0, |i| f64::from(grade_rank(a.grade(&i.aptitude)))))
@@ -420,18 +601,31 @@ impl App {
         let q = self.umas.search.trim().to_lowercase();
         let today = crate::tab_planner::day_number(&crate::ui_util::today());
         let umas = &self.roster.umas;
-        let mut idx: Vec<usize> = (0..umas.len()).filter(|&i| self.uma_passes(&umas[i], &q, today)).collect();
+        let mut idx: Vec<usize> = (0..umas.len())
+            .filter(|&i| self.uma_passes(&umas[i], &q, today))
+            .collect();
         // Ties keep name order, then id.
-        idx.sort_by(|&a, &b| umas[a].name.cmp(&umas[b].name).then(umas[a].id.cmp(&umas[b].id)));
+        idx.sort_by(|&a, &b| {
+            umas[a]
+                .name
+                .cmp(&umas[b].name)
+                .then(umas[a].id.cmp(&umas[b].id))
+        });
         let sort = self.umas.sort;
-        sort_rows(&mut idx, sort.desc, |&i| self.uma_sort_key(&umas[i], sort.key));
+        sort_rows(&mut idx, sort.desc, |&i| {
+            self.uma_sort_key(&umas[i], sort.key)
+        });
         idx
     }
 
     fn uma_grid(&mut self, ui: &mut egui::Ui, list: &[usize]) {
         let scale = kit::tile_size(ui.ctx()).scale();
         let icon = ICON * scale;
-        let extra = if self.umas.filter.apt.is_empty() { 0.0 } else { 14.0 };
+        let extra = if self.umas.filter.apt.is_empty() {
+            0.0
+        } else {
+            14.0
+        };
         let tile = vec2(icon, icon + 38.0 + extra);
         // Groups by stars or potential when sorted by them.
         let group_of = |u: &Uma| match self.umas.sort.key {
@@ -453,12 +647,16 @@ impl App {
             .map(|(k, v)| TileGroup {
                 title: match (self.umas.sort.key, k) {
                     ("stars", Some(n)) => format!("{n}★"),
-                    ("potential", Some(5)) => "P5 · maxed".to_string(),
+                    ("potential", Some(5)) => t!("P5 · maxed").to_string(),
                     (_, Some(n)) => format!("P{n}"),
                     _ => String::new(),
                 },
-                color: if self.umas.sort.key == "stars" { p.gold } else { p.text },
-                note: format!("{} uma{}", v.len(), if v.len() == 1 { "" } else { "s" }),
+                color: if self.umas.sort.key == "stars" {
+                    p.gold
+                } else {
+                    p.text
+                },
+                note: tf!("{} uma{}", v.len(), if v.len() == 1 { "" } else { "s" }),
                 len: v.len(),
             })
             .collect();
@@ -499,12 +697,26 @@ impl App {
 
     /// The aptitude letters for the active aptitude filters, e.g. "Long A · Pace A".
     fn filter_grades(&self, id: u32) -> String {
-        let Some(info) = self.kb.umas.get(&id) else { return String::new() };
-        self.umas.filter.apt.keys().map(|a| format!("{} {}", a.short(), a.grade(&info.aptitude))).collect::<Vec<_>>().join(" · ")
+        let Some(info) = self.kb.umas.get(&id) else {
+            return String::new();
+        };
+        self.umas
+            .filter
+            .apt
+            .keys()
+            .map(|a| format!("{} {}", a.short(), a.grade(&info.aptitude)))
+            .collect::<Vec<_>>()
+            .join(" · ")
     }
 
     /// One picture tile. Returns its response, and true when its "Plan with her" button was clicked.
-    fn uma_tile(&self, ui: &mut egui::Ui, uma: &Uma, icon: f32, tile: egui::Vec2) -> (Response, bool) {
+    fn uma_tile(
+        &self,
+        ui: &mut egui::Ui,
+        uma: &Uma,
+        icon: f32,
+        tile: egui::Vec2,
+    ) -> (Response, bool) {
         let grades = self.filter_grades(uma.id);
         let (rect, resp) = ui.allocate_exact_size(tile, Sense::click());
         let img = Rect::from_min_size(rect.min, vec2(icon, icon));
@@ -513,16 +725,41 @@ impl App {
         if ui.is_rect_visible(rect) {
             let p = ui.painter();
             match self.art_uri("umas", uma.id) {
-                Some(uri) => egui::Image::new(uri).corner_radius(CornerRadius::same(10)).paint_at(ui, img),
+                Some(uri) => egui::Image::new(uri)
+                    .corner_radius(CornerRadius::same(10))
+                    .paint_at(ui, img),
                 None => placeholder(p, img, Color32::from_gray(70), &uma.name),
             }
             potential_badge(p, img.right_bottom() - vec2(4.0, 4.0), uma.potential);
-            draw_stars(p, Pos2::new(img.center().x, img.bottom() + 11.0), uma.stars, 6.0);
-            p.text(Pos2::new(img.center().x, img.bottom() + 28.0), Align2::CENTER_CENTER, truncate(&uma.name, (15.0 * icon / ICON) as usize), FontId::proportional(12.5), ui.visuals().text_color());
+            draw_stars(
+                p,
+                Pos2::new(img.center().x, img.bottom() + 11.0),
+                uma.stars,
+                6.0,
+            );
+            p.text(
+                Pos2::new(img.center().x, img.bottom() + 28.0),
+                Align2::CENTER_CENTER,
+                truncate(&uma.name, (15.0 * icon / ICON) as usize),
+                FontId::proportional(12.5),
+                ui.visuals().text_color(),
+            );
             if !grades.is_empty() {
-                p.text(Pos2::new(img.center().x, img.bottom() + 43.0), Align2::CENTER_CENTER, &grades, FontId::proportional(11.0), pal(ui).gold);
+                p.text(
+                    Pos2::new(img.center().x, img.bottom() + 43.0),
+                    Align2::CENTER_CENTER,
+                    &grades,
+                    FontId::proportional(11.0),
+                    pal(ui).gold,
+                );
             }
-            tile_ring(ui, img, self.umas.selected == Some(uma.id), resp.hovered(), 12);
+            tile_ring(
+                ui,
+                img,
+                self.umas.selected == Some(uma.id),
+                resp.hovered(),
+                12,
+            );
             if resp.hovered() {
                 let hot = kit::over(ui, plan_at);
                 kit::corner_button(ui, plan_at, "📋", hot);
@@ -530,17 +767,17 @@ impl App {
             }
         }
         let resp = if resp.hovered() && kit::over(ui, plan_at) {
-            resp.on_hover_text("Plan a career with her")
+            resp.on_hover_text(t!("Plan a career with her"))
         } else {
             resp.on_hover_ui(|ui| self.uma_hover_card(ui, uma))
         };
         let mut menu_plan = false;
         resp.context_menu(|ui| {
-            if ui.button("📋 Plan a career with her").clicked() {
+            if ui.button(t!("📋 Plan a career with her")).clicked() {
                 menu_plan = true;
                 ui.close();
             }
-            if ui.button("🔍 Open details").clicked() {
+            if ui.button(t!("🔍 Open details")).clicked() {
                 self.jump.set(Some(Jump::Uma(uma.id)));
                 ui.close();
             }
@@ -553,28 +790,70 @@ impl App {
         let p = pal(ui);
         ui.set_max_width(300.0);
         ui.label(semibold(&uma.name, size::MD));
-        ui.label(RichText::new(format!("[{}]", uma.outfit)).italics().color(p.weak));
-        ui.label(format!("{}★ · Potential {}{}", uma.stars, uma.potential, if uma.potential >= 5 { " (maxed)" } else { "" }));
-        if let Some(info) = self.kb.umas.get(&uma.id) {
-            let best: Vec<String> = Apt::ALL.iter().filter(|a| grade_rank(a.grade(&info.aptitude)) >= 7).map(|a| format!("{} {}", a.label(), a.grade(&info.aptitude))).collect();
-            if !best.is_empty() {
-                ui.label(RichText::new(format!("A or better: {}", best.join(" · "))).size(size::SM));
+        ui.label(
+            RichText::new(format!("[{}]", uma.outfit))
+                .italics()
+                .color(p.weak),
+        );
+        ui.label(tf!(
+            "{}★ · Potential {}{}",
+            uma.stars,
+            uma.potential,
+            if uma.potential >= 5 {
+                t!(" (maxed)")
+            } else {
+                ""
             }
-            let growth: Vec<String> = GROWTH.iter().zip(info.growth).filter(|(_, v)| *v > 0).map(|((_, _, n), v)| format!("+{v}% {n}")).collect();
+        ));
+        if let Some(info) = self.kb.umas.get(&uma.id) {
+            let best: Vec<String> = Apt::ALL
+                .iter()
+                .filter(|a| grade_rank(a.grade(&info.aptitude)) >= 7)
+                .map(|a| format!("{} {}", a.label(), a.grade(&info.aptitude)))
+                .collect();
+            if !best.is_empty() {
+                ui.label(RichText::new(tf!("A or better: {}", best.join(" · "))).size(size::SM));
+            }
+            let growth: Vec<String> = GROWTH
+                .iter()
+                .zip(info.growth)
+                .filter(|(_, v)| *v > 0)
+                .map(|((_, _, n), v)| format!("+{v}% {n}"))
+                .collect();
             if !growth.is_empty() {
-                ui.label(RichText::new(format!("Growth: {}", growth.join(" · "))).size(size::SM).color(p.weak));
+                ui.label(
+                    RichText::new(tf!("Growth: {}", growth.join(" · ")))
+                        .size(size::SM)
+                        .color(p.weak),
+                );
             }
         }
-        ui.label(RichText::new("Click for details · right-click for more").size(size::XS).color(p.weak));
+        ui.label(
+            RichText::new(t!("Click for details · right-click for more"))
+                .size(size::XS)
+                .color(p.weak),
+        );
     }
 
     fn uma_cols(&self) -> Vec<TableCol> {
         let mut cols = vec![
             TableCol::new("art", "").width(Column::exact(34.0)),
-            TableCol::new("name", "Uma").width(Column::initial(150.0).at_least(110.0).clip(true)).sort_asc(),
-            TableCol::new("outfit", "Outfit").width(Column::initial(170.0).at_least(100.0).clip(true)).sort_asc(),
-            TableCol::new("stars", "Stars").width(Column::exact(86.0)).center().sort_desc().hover("Star rank, 1–5★"),
-            TableCol::new("potential", "Potential").width(Column::exact(76.0)).center().sort_desc().hover("P1 to P5: how many of her own skills are unlocked"),
+            TableCol::new("name", "Uma")
+                .width(Column::initial(150.0).at_least(110.0).clip(true))
+                .sort_asc(),
+            TableCol::new("outfit", "Outfit")
+                .width(Column::initial(170.0).at_least(100.0).clip(true))
+                .sort_asc(),
+            TableCol::new("stars", "Stars")
+                .width(Column::exact(86.0))
+                .center()
+                .sort_desc()
+                .hover("Star rank, 1–5★"),
+            TableCol::new("potential", "Potential")
+                .width(Column::exact(76.0))
+                .center()
+                .sort_desc()
+                .hover("P1 to P5: how many of her own skills are unlocked"),
         ];
         for a in Apt::ALL {
             cols.push(
@@ -583,7 +862,10 @@ impl App {
                     .center()
                     .sort_desc()
                     .group(a.group())
-                    .hover(format!("{} aptitude: S is best, then A, B, C… down to G", a.label())),
+                    .hover(tf!(
+                        "{} aptitude: S is best, then A, B, C… down to G",
+                        a.label()
+                    )),
             );
         }
         for (key, title, stat) in GROWTH {
@@ -594,13 +876,29 @@ impl App {
                     .sort_desc()
                     .group("Growth")
                     .optional(true)
-                    .hover(format!("Growth: a bonus to what training adds to {stat}")),
+                    .hover(tf!("Growth: a bonus to what training adds to {}", stat)),
             );
         }
-        cols.push(TableCol::new("unique", "Unique skill").width(Column::initial(190.0).clip(true)).sort_asc().optional(true).hover("Her own skill, from 1★"));
-        cols.push(TableCol::new("release", "Released").width(Column::exact(96.0)).sort_desc().optional(true).hover("When this outfit came out on Global"));
+        cols.push(
+            TableCol::new("unique", "Unique skill")
+                .width(Column::initial(190.0).clip(true))
+                .sort_asc()
+                .optional(true)
+                .hover("Her own skill, from 1★"),
+        );
+        cols.push(
+            TableCol::new("release", "Released")
+                .width(Column::exact(96.0))
+                .sort_desc()
+                .optional(true)
+                .hover("When this outfit came out on Global"),
+        );
         if self.roster.umas.iter().any(|u| !u.notes.trim().is_empty()) {
-            cols.push(TableCol::new("notes", "Notes").width(Column::remainder().at_least(100.0).clip(true)).sort_asc());
+            cols.push(
+                TableCol::new("notes", "Notes")
+                    .width(Column::remainder().at_least(100.0).clip(true))
+                    .sort_asc(),
+            );
         }
         cols
     }
@@ -613,12 +911,16 @@ impl App {
             "outfit" => u.outfit.clone(),
             "stars" => u.stars.to_string(),
             "potential" => format!("P{}", u.potential),
-            "unique" => info.and_then(|i| i.unique_skill).map(|s| self.kb.skill_name(s)).unwrap_or_default(),
+            "unique" => info
+                .and_then(|i| i.unique_skill)
+                .map(|s| self.kb.skill_name(s))
+                .unwrap_or_default(),
             "release" => info.map(|i| i.release.clone()).unwrap_or_default(),
             "notes" => u.notes.clone(),
             k => {
                 if let Some(a) = Apt::ALL.iter().find(|a| a.key() == k) {
-                    info.map(|i| a.grade(&i.aptitude).to_string()).unwrap_or_default()
+                    info.map(|i| a.grade(&i.aptitude).to_string())
+                        .unwrap_or_default()
                 } else if let Some(n) = GROWTH.iter().position(|(g, _, _)| *g == k) {
                     info.map(|i| i.growth[n].to_string()).unwrap_or_default()
                 } else {
@@ -630,58 +932,88 @@ impl App {
 
     fn uma_table(&mut self, ui: &mut egui::Ui, list: &[usize]) {
         let cols = self.uma_cols();
-        let selected = self.umas.selected.and_then(|id| list.iter().position(|&i| self.roster.umas[i].id == id));
+        let selected = self
+            .umas
+            .selected
+            .and_then(|id| list.iter().position(|&i| self.roster.umas[i].id == id));
         let mut sort = self.umas.sort;
         let out = egui::ScrollArea::horizontal()
             .id_salt("uma_table_h")
             .show(ui, |ui| {
-                DataTable::new("umas", &cols).sort(&mut sort).row_height(36.0).selected(selected).show(ui, list.len(), |ui, r, key| {
-                    let uma = &self.roster.umas[list[r]];
-                    let info = self.kb.umas.get(&uma.id);
-                    match key {
-                        "art" => {
-                            if let Some(uri) = self.art_uri("umas", uma.id) {
-                                ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(28.0, 28.0)).corner_radius(CornerRadius::same(6)));
+                DataTable::new("umas", &cols)
+                    .sort(&mut sort)
+                    .row_height(36.0)
+                    .selected(selected)
+                    .show(ui, list.len(), |ui, r, key| {
+                        let uma = &self.roster.umas[list[r]];
+                        let info = self.kb.umas.get(&uma.id);
+                        match key {
+                            "art" => {
+                                if let Some(uri) = self.art_uri("umas", uma.id) {
+                                    ui.add(
+                                        egui::Image::new(uri)
+                                            .fit_to_exact_size(vec2(28.0, 28.0))
+                                            .corner_radius(CornerRadius::same(6)),
+                                    );
+                                }
                             }
-                        }
-                        "name" => {
-                            ui.add(egui::Label::new(&uma.name).truncate());
-                        }
-                        "outfit" => {
-                            ui.add(egui::Label::new(RichText::new(&uma.outfit).color(pal(ui).weak)).truncate());
-                        }
-                        "stars" => {
-                            stars_widget(ui, uma.stars, 5.5);
-                        }
-                        "potential" => {
-                            let text = semibold(format!("P{}", uma.potential), size::BODY);
-                            ui.label(if uma.potential >= 5 { text.color(pal(ui).gold) } else { text });
-                        }
-                        "unique" => {
-                            if let Some(s) = info.and_then(|i| i.unique_skill) {
-                                ui.add(egui::Label::new(self.kb.skill_name(s)).truncate());
+                            "name" => {
+                                ui.add(egui::Label::new(&uma.name).truncate());
                             }
-                        }
-                        "release" => {
-                            ui.label(RichText::new(info.map(|i| i.release.as_str()).unwrap_or("")).color(pal(ui).weak));
-                        }
-                        "notes" => {
-                            ui.add(egui::Label::new(RichText::new(&uma.notes).color(pal(ui).weak)).truncate());
-                        }
-                        k => {
-                            if let Some(a) = Apt::ALL.iter().find(|a| a.key() == k) {
-                                grade_tile(ui, info.map_or("", |i| a.grade(&i.aptitude)));
-                            } else if let Some(n) = GROWTH.iter().position(|(g, _, _)| *g == k) {
-                                let v = info.map_or(0, |i| i.growth[n]);
-                                if v == 0 {
-                                    ui.label(RichText::new("—").color(pal(ui).weak));
+                            "outfit" => {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(&uma.outfit).color(pal(ui).weak),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                            "stars" => {
+                                stars_widget(ui, uma.stars, 5.5);
+                            }
+                            "potential" => {
+                                let text = semibold(format!("P{}", uma.potential), size::BODY);
+                                ui.label(if uma.potential >= 5 {
+                                    text.color(pal(ui).gold)
                                 } else {
-                                    ui.label(semibold(format!("+{v}%"), size::BODY).color(pal(ui).gold));
+                                    text
+                                });
+                            }
+                            "unique" => {
+                                if let Some(s) = info.and_then(|i| i.unique_skill) {
+                                    ui.add(egui::Label::new(self.kb.skill_name(s)).truncate());
+                                }
+                            }
+                            "release" => {
+                                ui.label(
+                                    RichText::new(info.map(|i| i.release.as_str()).unwrap_or(""))
+                                        .color(pal(ui).weak),
+                                );
+                            }
+                            "notes" => {
+                                ui.add(
+                                    egui::Label::new(RichText::new(&uma.notes).color(pal(ui).weak))
+                                        .truncate(),
+                                );
+                            }
+                            k => {
+                                if let Some(a) = Apt::ALL.iter().find(|a| a.key() == k) {
+                                    grade_tile(ui, info.map_or("", |i| a.grade(&i.aptitude)));
+                                } else if let Some(n) = GROWTH.iter().position(|(g, _, _)| *g == k)
+                                {
+                                    let v = info.map_or(0, |i| i.growth[n]);
+                                    if v == 0 {
+                                        ui.label(RichText::new("—").color(pal(ui).weak));
+                                    } else {
+                                        ui.label(
+                                            semibold(format!("+{v}%"), size::BODY)
+                                                .color(pal(ui).gold),
+                                        );
+                                    }
                                 }
                             }
                         }
-                    }
-                })
+                    })
             })
             .inner;
         self.umas.sort = sort;
@@ -693,17 +1025,49 @@ impl App {
 
     /// The Pictures | Table switch.
     pub(crate) fn view_switch(&mut self, ui: &mut egui::Ui) {
-        let views = [(View::Grid, "▦ Pictures".to_string(), "Show art tiles"), (View::Table, "☰ Table".to_string(), "Show a sortable table with more columns")];
+        let views = [
+            (
+                View::Grid,
+                t!("▦ Pictures").to_string(),
+                t!("Show art tiles"),
+            ),
+            (
+                View::Table,
+                t!("☰ Table").to_string(),
+                t!("Show a sortable table with more columns"),
+            ),
+        ];
         crate::ui_util::segmented(ui, &mut self.view, &views);
     }
 
     /// In table view: "☰ Columns" and "⧉ Copy as CSV". `text(app, (row, key))` gives a cell's text.
-    pub(crate) fn table_tools(&mut self, ui: &mut egui::Ui, table: &str, cols: &[TableCol], rows: usize, text: impl Fn(&App, (usize, &str)) -> String) {
+    pub(crate) fn table_tools(
+        &mut self,
+        ui: &mut egui::Ui,
+        table: &str,
+        cols: &[TableCol],
+        rows: usize,
+        text: impl Fn(&App, (usize, &str)) -> String,
+    ) {
         let compact = ui.available_width() < 520.0;
-        if ui.button(if compact { "⧉" } else { "⧉ Copy as CSV" }).on_hover_text("Copy the rows shown, with the columns shown, to paste into a spreadsheet").clicked() {
-            let csv = crate::ui_util::table_csv(ui.ctx(), table, cols, rows, |r, k| text(self, (r, k)));
+        if ui
+            .button(if compact {
+                "⧉"
+            } else {
+                t!("⧉ Copy as CSV")
+            })
+            .on_hover_text(t!(
+                "Copy the rows shown, with the columns shown, to paste into a spreadsheet"
+            ))
+            .clicked()
+        {
+            let csv =
+                crate::ui_util::table_csv(ui.ctx(), table, cols, rows, |r, k| text(self, (r, k)));
             ui.ctx().copy_text(csv);
-            self.toast(format!("Copied {rows} rows. Paste them into a spreadsheet."), crate::ui_util::ToastKind::Success);
+            self.toast(
+                tf!("Copied {} rows. Paste them into a spreadsheet.", rows),
+                crate::ui_util::ToastKind::Success,
+            );
         }
         if cols.iter().any(|c| c.optional) {
             crate::ui_util::columns_menu(ui, table, cols);
@@ -719,32 +1083,46 @@ impl App {
         card(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(uri) = self.art_uri("umas", uma.id) {
-                    ui.add(egui::Image::new(uri).fit_to_exact_size(vec2(108.0, 108.0)).corner_radius(CornerRadius::same(14)));
+                    ui.add(
+                        egui::Image::new(uri)
+                            .fit_to_exact_size(vec2(108.0, 108.0))
+                            .corner_radius(CornerRadius::same(14)),
+                    );
                 }
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(semibold(&uma.name, 22.0));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            if ui.small_btn("✖").on_hover_text("Close").clicked() {
+                            if ui.small_btn("✖").on_hover_text(t!("Close")).clicked() {
                                 self.umas.selected = None;
                             }
                         });
                     });
-                    ui.label(RichText::new(format!("[{}]", uma.outfit)).italics().color(p.weak));
+                    ui.label(
+                        RichText::new(format!("[{}]", uma.outfit))
+                            .italics()
+                            .color(p.weak),
+                    );
                     ui.add_space(2.0);
                     stars_widget(ui, uma.stars, 7.5);
                     ui.add_space(2.0);
                     ui.horizontal_wrapped(|ui| {
                         if uma.potential >= 5 {
-                            badge(ui, "Potential 5 (maxed)", p.accent).on_hover_text("All her potential skills are unlocked");
+                            badge(ui, t!("Potential 5 (maxed)"), p.accent)
+                                .on_hover_text(t!("All her potential skills are unlocked"));
                         } else {
-                            badge(ui, format!("Potential {} of 5", uma.potential), pal(ui).warn).on_hover_text("Some of her potential skills are still locked");
+                            badge(ui, tf!("Potential {} of 5", uma.potential), pal(ui).warn)
+                                .on_hover_text(t!("Some of her potential skills are still locked"));
                         }
                         if let Some(i) = &info {
                             if i.release == crate::knowledge::GLOBAL_LAUNCH {
-                                badge(ui, "On Global since launch", p.weak).on_hover_text(format!("She was there when the Global server opened, {}.", i.release));
+                                badge(ui, t!("On Global since launch"), p.weak).on_hover_text(tf!(
+                                    "She was there when the Global server opened, {}.",
+                                    i.release
+                                ));
                             } else {
-                                badge(ui, format!("Released {}", i.release), p.weak).on_hover_text("When she arrived on the Global server.");
+                                badge(ui, tf!("Released {}", i.release), p.weak)
+                                    .on_hover_text(t!("When she arrived on the Global server."));
                             }
                         }
                     });
@@ -752,7 +1130,11 @@ impl App {
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                if ui.button("📋 Plan a career with her").on_hover_text("Open the Planner with this uma as the trainee").clicked() {
+                if ui
+                    .button(t!("📋 Plan a career with her"))
+                    .on_hover_text(t!("Open the Planner with this uma as the trainee"))
+                    .clicked()
+                {
                     self.planner.plan.trainee = Some(uma.id);
                     if let Some(i) = &info {
                         self.planner.plan.style = i.aptitude.best_style();
@@ -770,143 +1152,258 @@ impl App {
         ui.add_space(8.0);
 
         let Some(info) = info else {
-            ui.label(RichText::new("No knowledge data for this outfit yet. Rebuild knowledge/data.").color(pal(ui).warn));
+            ui.label(
+                RichText::new(t!(
+                    "No knowledge data for this outfit yet. Rebuild knowledge/data."
+                ))
+                .color(pal(ui).warn),
+            );
             return;
         };
 
-        card_explained(ui, "Aptitudes", "S and A are ideal. Below A she runs slower there, unless parents' pink sparks raise the grade.", |ui| {
-            let a = &info.aptitude;
-            let rows: [(&str, Vec<(&str, &str)>); 3] = [
-                ("Track", vec![("Turf", &a.turf), ("Dirt", &a.dirt)]),
-                ("Distance", vec![("Sprint", &a.sprint), ("Mile", &a.mile), ("Medium", &a.medium), ("Long", &a.long)]),
-                ("Style", vec![("Front", &a.front), ("Pace", &a.pace), ("Late", &a.late), ("End", &a.end)]),
-            ];
-            for (title, cells) in rows {
-                ui.horizontal(|ui| {
-                    ui.add_sized([70.0, 40.0], egui::Label::new(RichText::new(title).color(p.weak)));
-                    for (label, g) in cells {
-                        grade_badge(ui, label, g);
-                    }
-                });
-            }
-        });
-
-        card_explained(ui, "Stats", "Base: her starting stats. Growth: a bonus to what training adds to that stat.", |ui| {
-            egui::Grid::new("uma_stats").num_columns(6).spacing([16.0, 6.0]).show(ui, |ui| {
-                ui.label("");
-                for h in ["Speed", "Stamina", "Power", "Guts", "Wit"] {
-                    ui.label(RichText::new(h).color(p.weak));
-                }
-                ui.end_row();
-                ui.label(RichText::new("Base").color(p.weak));
-                for v in info.base {
-                    ui.label(semibold(v.to_string(), 15.0));
-                }
-                ui.end_row();
-                ui.label(RichText::new("Growth").color(p.weak));
-                for v in info.growth {
-                    if v == 0 {
-                        ui.label(RichText::new("·").color(p.weak));
-                    } else {
-                        ui.label(semibold(format!("+{v}%"), 14.0).color(p.gold));
-                    }
-                }
-                ui.end_row();
-            });
-        });
-
-        card_explained(ui, "Skills", "Click a skill to see what it does. Potential skills above her current potential are locked.", |ui| {
-            if let Some(u) = info.unique_skill {
-                ui.label(RichText::new("UNIQUE").size(11.0).color(p.weak));
-                self.skill_link(ui, u, false);
-                if let Some(s) = self.kb.skills.get(&u) {
-                    ui.label(RichText::new(&s.summary).size(12.0).color(p.weak));
-                }
-                ui.add_space(6.0);
-            }
-            let mut levels: Vec<u8> = info.skills.iter().map(|s| s.potential).collect();
-            levels.dedup();
-            for lvl in levels {
-                let locked = lvl > uma.potential;
-                let title = if lvl <= 1 { "INNATE".to_string() } else { format!("POTENTIAL {lvl}{}", if locked { "  🔒 locked" } else { "" }) };
-                ui.label(RichText::new(title).size(11.0).color(if locked { pal(ui).warn } else { p.weak }));
-                ui.horizontal_wrapped(|ui| {
-                    for s in info.skills.iter().filter(|s| s.potential == lvl) {
-                        self.skill_link(ui, s.id, locked);
-                    }
-                });
-                ui.add_space(4.0);
-            }
-            if !info.event_skills.is_empty() {
-                ui.label(RichText::new("FROM HER EVENTS").size(11.0).color(p.weak));
-                ui.horizontal_wrapped(|ui| {
-                    for &s in &info.event_skills {
-                        self.skill_link(ui, s, false);
-                    }
-                });
-            }
-        });
-
-        if !info.evolved.is_empty() {
-            card_explained(ui, "Evolved skills", "Stronger versions of her skills, unlocked in a career when the conditions are met.", |ui| {
-                for e in &info.evolved {
-                    ui.horizontal_wrapped(|ui| {
-                        self.skill_link(ui, e.base, false);
-                        ui.label(RichText::new("➜").color(p.weak));
-                        self.skill_link(ui, e.evolved, false);
-                    });
-                    let alts: Vec<String> = e.conditions.iter().map(|all| all.join(" + ")).collect();
-                    if !alts.is_empty() {
-                        ui.label(RichText::new(format!("Needs: {}", alts.join("  OR  "))).size(12.0).color(p.weak));
-                    }
-                    ui.add_space(4.0);
-                }
-            });
-        }
-
-        if !info.objectives.is_empty() {
-            card_explained(ui, "Career objectives", "Goals she must meet during her career. Missing one ends the career early.", |ui| {
-                egui::Grid::new("uma_obj").num_columns(3).spacing([12.0, 5.0]).striped(true).show(ui, |ui| {
-                    for o in &info.objectives {
-                        ui.label(RichText::new(&o.when).color(p.weak));
-                        ui.label(title_case(&o.race));
-                        ui.label(semibold(&o.goal, 13.5));
-                        ui.end_row();
-                    }
-                });
-            });
-        }
-
-        if !info.events.is_empty() {
-            card_explained(ui, &format!("Events ({})", info.events.len()), "Story events in her career and what each choice gives. Click one to open it.", |ui| {
-                for (i, e) in info.events.iter().enumerate() {
-                    egui::CollapsingHeader::new(RichText::new(&e.name)).id_salt(("uma_ev", uma.id, i)).show(ui, |ui| {
-                        ui.label(RichText::new(&e.kind).size(11.5).color(p.weak));
-                        for (n, o) in e.options.iter().enumerate() {
-                            let label = if e.options.len() > 1 { format!("Option {}", n + 1) } else { "Outcome".to_string() };
-                            ui.label(RichText::new(label).strong()).on_hover_text(&o.label);
-                            for out in &o.outcomes {
-                                ui.label(format!("  • {}", out.replace('\n', ", ")));
-                            }
+        card_explained(
+            ui,
+            "Aptitudes",
+            "S and A are ideal. Below A she runs slower there, unless parents' pink sparks raise the grade.",
+            |ui| {
+                let a = &info.aptitude;
+                let rows: [(&str, Vec<(&str, &str)>); 3] = [
+                    ("Track", vec![("Turf", &a.turf), ("Dirt", &a.dirt)]),
+                    (
+                        "Distance",
+                        vec![
+                            ("Sprint", &a.sprint),
+                            ("Mile", &a.mile),
+                            ("Medium", &a.medium),
+                            ("Long", &a.long),
+                        ],
+                    ),
+                    (
+                        "Style",
+                        vec![
+                            ("Front", &a.front),
+                            ("Pace", &a.pace),
+                            ("Late", &a.late),
+                            ("End", &a.end),
+                        ],
+                    ),
+                ];
+                for (title, cells) in rows {
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [70.0, 40.0],
+                            egui::Label::new(RichText::new(t!(title)).color(p.weak)),
+                        );
+                        for (label, g) in cells {
+                            grade_badge(ui, label, g);
                         }
                     });
                 }
-            });
+            },
+        );
+
+        card_explained(
+            ui,
+            "Stats",
+            "Base: her starting stats. Growth: a bonus to what training adds to that stat.",
+            |ui| {
+                egui::Grid::new("uma_stats")
+                    .num_columns(6)
+                    .spacing([16.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label("");
+                        for h in ["Speed", "Stamina", "Power", "Guts", "Wit"] {
+                            ui.label(RichText::new(h).color(p.weak));
+                        }
+                        ui.end_row();
+                        ui.label(RichText::new(t!("Base")).color(p.weak));
+                        for v in info.base {
+                            ui.label(semibold(v.to_string(), 15.0));
+                        }
+                        ui.end_row();
+                        ui.label(RichText::new(t!("Growth")).color(p.weak));
+                        for v in info.growth {
+                            if v == 0 {
+                                ui.label(RichText::new("·").color(p.weak));
+                            } else {
+                                ui.label(semibold(format!("+{v}%"), 14.0).color(p.gold));
+                            }
+                        }
+                        ui.end_row();
+                    });
+            },
+        );
+
+        card_explained(
+            ui,
+            "Skills",
+            "Click a skill to see what it does. Potential skills above her current potential are locked.",
+            |ui| {
+                if let Some(u) = info.unique_skill {
+                    ui.label(RichText::new(t!("UNIQUE")).size(11.0).color(p.weak));
+                    self.skill_link(ui, u, false);
+                    if let Some(s) = self.kb.skills.get(&u) {
+                        ui.label(RichText::new(&s.summary).size(12.0).color(p.weak));
+                    }
+                    ui.add_space(6.0);
+                }
+                let mut levels: Vec<u8> = info.skills.iter().map(|s| s.potential).collect();
+                levels.dedup();
+                for lvl in levels {
+                    let locked = lvl > uma.potential;
+                    let title = if lvl <= 1 {
+                        t!("INNATE").to_string()
+                    } else {
+                        tf!(
+                            "POTENTIAL {}{}",
+                            lvl,
+                            if locked { t!("  🔒 locked") } else { "" }
+                        )
+                    };
+                    ui.label(RichText::new(title).size(11.0).color(if locked {
+                        pal(ui).warn
+                    } else {
+                        p.weak
+                    }));
+                    ui.horizontal_wrapped(|ui| {
+                        for s in info.skills.iter().filter(|s| s.potential == lvl) {
+                            self.skill_link(ui, s.id, locked);
+                        }
+                    });
+                    ui.add_space(4.0);
+                }
+                if !info.event_skills.is_empty() {
+                    ui.label(
+                        RichText::new(t!("FROM HER EVENTS"))
+                            .size(11.0)
+                            .color(p.weak),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        for &s in &info.event_skills {
+                            self.skill_link(ui, s, false);
+                        }
+                    });
+                }
+            },
+        );
+
+        if !info.evolved.is_empty() {
+            card_explained(
+                ui,
+                "Evolved skills",
+                "Stronger versions of her skills, unlocked in a career when the conditions are met.",
+                |ui| {
+                    for e in &info.evolved {
+                        ui.horizontal_wrapped(|ui| {
+                            self.skill_link(ui, e.base, false);
+                            ui.label(RichText::new("➜").color(p.weak));
+                            self.skill_link(ui, e.evolved, false);
+                        });
+                        let alts: Vec<String> =
+                            e.conditions.iter().map(|all| all.join(" + ")).collect();
+                        if !alts.is_empty() {
+                            ui.label(
+                                RichText::new(tf!("Needs: {}", alts.join("  OR  ")))
+                                    .size(12.0)
+                                    .color(p.weak),
+                            );
+                        }
+                        ui.add_space(4.0);
+                    }
+                },
+            );
         }
 
-        let outfits: Vec<&Uma> = self.roster.umas.iter().filter(|u| u.name == uma.name && u.id != uma.id).collect();
-        let own_cards: Vec<_> = self.roster.cards.iter().filter(|c| c.uma == uma.name).collect();
+        if !info.objectives.is_empty() {
+            card_explained(
+                ui,
+                "Career objectives",
+                "Goals she must meet during her career. Missing one ends the career early.",
+                |ui| {
+                    egui::Grid::new("uma_obj")
+                        .num_columns(3)
+                        .spacing([12.0, 5.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for o in &info.objectives {
+                                ui.label(RichText::new(&o.when).color(p.weak));
+                                ui.label(title_case(&o.race));
+                                ui.label(semibold(&o.goal, 13.5));
+                                ui.end_row();
+                            }
+                        });
+                },
+            );
+        }
+
+        if !info.events.is_empty() {
+            card_explained(
+                ui,
+                &tf!("Events ({})", info.events.len()),
+                "Story events in her career and what each choice gives. Click one to open it.",
+                |ui| {
+                    for (i, e) in info.events.iter().enumerate() {
+                        egui::CollapsingHeader::new(RichText::new(&e.name))
+                            .id_salt(("uma_ev", uma.id, i))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new(&e.kind).size(11.5).color(p.weak));
+                                for (n, o) in e.options.iter().enumerate() {
+                                    let label = if e.options.len() > 1 {
+                                        tf!("Option {}", n + 1)
+                                    } else {
+                                        t!("Outcome").to_string()
+                                    };
+                                    ui.label(RichText::new(label).strong())
+                                        .on_hover_text(&o.label);
+                                    for out in &o.outcomes {
+                                        ui.label(format!("  • {}", out.replace('\n', ", ")));
+                                    }
+                                }
+                            });
+                    }
+                },
+            );
+        }
+
+        let outfits: Vec<&Uma> = self
+            .roster
+            .umas
+            .iter()
+            .filter(|u| u.name == uma.name && u.id != uma.id)
+            .collect();
+        let own_cards: Vec<_> = self
+            .roster
+            .cards
+            .iter()
+            .filter(|c| c.uma == uma.name)
+            .collect();
         if !outfits.is_empty() || !own_cards.is_empty() {
             card_titled(ui, "Related", |ui| {
                 for u in outfits {
-                    if ui.link(format!("🐴 [{}] {}★ P{}", u.outfit, u.stars, u.potential)).clicked() {
+                    if ui
+                        .link(format!("🐴 [{}] {}★ P{}", u.outfit, u.stars, u.potential))
+                        .clicked()
+                    {
                         self.jump.set(Some(Jump::Uma(u.id)));
                     }
                 }
                 if !own_cards.is_empty() {
-                    ui.label(RichText::new(format!("Your {} cards can't go in her own deck.", uma.name)).size(12.0).color(p.weak));
+                    ui.label(
+                        RichText::new(tf!("Your {} cards can't go in her own deck.", uma.name))
+                            .size(12.0)
+                            .color(p.weak),
+                    );
                     for c in own_cards {
-                        if ui.link(format!("🃏 {} {} [{}] LB{}", c.rarity.label(), c.card_type.label(), c.title, c.lb)).clicked() {
+                        if ui
+                            .link(format!(
+                                "🃏 {} {} [{}] LB{}",
+                                c.rarity.label(),
+                                c.card_type.label(),
+                                c.title,
+                                c.lb
+                            ))
+                            .clicked()
+                        {
                             self.jump.set(Some(Jump::Card(c.id)));
                         }
                     }
@@ -921,7 +1418,9 @@ fn title_case(s: &str) -> String {
     s.split(' ')
         .map(|w| {
             let mut c = w.chars();
-            c.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + c.as_str())
+            c.next().map_or_else(String::new, |f| {
+                f.to_uppercase().collect::<String>() + c.as_str()
+            })
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -933,8 +1432,12 @@ fn apt_matrix(ui: &mut egui::Ui, apt: &mut BTreeMap<Apt, u8>) {
     let p = pal(ui);
     let gap = 4.0;
     let cell_w = ((ui.available_width() - 3.0 * gap) / 4.0).floor();
-    for (title, row) in [("Surface", &Apt::ALL[0..2]), ("Distance", &Apt::ALL[2..6]), ("Style", &Apt::ALL[6..10])] {
-        ui.label(RichText::new(title).size(size::XS).color(p.weak));
+    for (title, row) in [
+        ("Surface", &Apt::ALL[0..2]),
+        ("Distance", &Apt::ALL[2..6]),
+        ("Style", &Apt::ALL[6..10]),
+    ] {
+        ui.label(RichText::new(t!(title)).size(size::XS).color(p.weak));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             for &a in row {
@@ -948,11 +1451,11 @@ fn apt_matrix(ui: &mut egui::Ui, apt: &mut BTreeMap<Apt, u8>) {
                 painter.text(pos2(rect.center().x, rect.top() + 12.0), Align2::CENTER_CENTER, a.short(), FontId::proportional(size::SM), ink);
                 painter.text(pos2(rect.center().x, rect.bottom() - 11.0), Align2::CENTER_CENTER, min_label(min), FontId::proportional(size::XS), if on_fill.is_some() { ink } else { p.weak });
                 let now = match min {
-                    Some(8) => "S only",
-                    Some(_) => "A or better",
-                    None => "any grade",
+                    Some(8) => t!("S only"),
+                    Some(_) => t!("A or better"),
+                    None => t!("any grade"),
                 };
-                let resp = resp.on_hover_text(format!("{}: {now}. Click to cycle any → A or better → S only; right-click to clear.", a.label())).on_hover_cursor(egui::CursorIcon::PointingHand);
+                let resp = resp.on_hover_text(tf!("{0}: {1}. Click to cycle any → A or better → S only; right-click to clear.", a.label(), now)).on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     match min {
                         None => {
@@ -989,27 +1492,61 @@ mod tests {
     #[test]
     fn umas_sort_by_any_column() {
         let mut app = App::for_tests();
-        app.umas.sort = TableSort { key: "long", desc: true };
+        app.umas.sort = TableSort {
+            key: "long",
+            desc: true,
+        };
         let list = app.filtered_umas();
         assert_eq!(list.len(), app.roster.umas.len());
-        assert!(list.windows(2).all(|w| long(&app, w[0]) >= long(&app, w[1])));
-        let col = app.uma_cols().into_iter().find(|c| c.key == "long").unwrap();
+        assert!(
+            list.windows(2)
+                .all(|w| long(&app, w[0]) >= long(&app, w[1]))
+        );
+        let col = app
+            .uma_cols()
+            .into_iter()
+            .find(|c| c.key == "long")
+            .unwrap();
         app.umas.sort.click(&col);
         assert!(!app.umas.sort.desc);
         let list = app.filtered_umas();
-        assert!(list.windows(2).all(|w| long(&app, w[0]) <= long(&app, w[1])));
+        assert!(
+            list.windows(2)
+                .all(|w| long(&app, w[0]) <= long(&app, w[1]))
+        );
 
-        app.umas.sort = TableSort { key: "name", desc: false };
-        let names: Vec<String> = app.filtered_umas().iter().map(|&i| app.roster.umas[i].name.to_lowercase()).collect();
+        app.umas.sort = TableSort {
+            key: "name",
+            desc: false,
+        };
+        let names: Vec<String> = app
+            .filtered_umas()
+            .iter()
+            .map(|&i| app.roster.umas[i].name.to_lowercase())
+            .collect();
         assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
 
-        app.umas.sort = TableSort { key: "stars", desc: true };
+        app.umas.sort = TableSort {
+            key: "stars",
+            desc: true,
+        };
         let key = |i: usize| (app.roster.umas[i].stars, app.roster.umas[i].potential);
-        assert!(app.filtered_umas().windows(2).all(|w| key(w[0]) >= key(w[1])));
+        assert!(
+            app.filtered_umas()
+                .windows(2)
+                .all(|w| key(w[0]) >= key(w[1]))
+        );
 
         // Another column clicked starts its own way: names A to Z.
-        let name = app.uma_cols().into_iter().find(|c| c.key == "name").unwrap();
-        let mut sort = TableSort { key: "stars", desc: true };
+        let name = app
+            .uma_cols()
+            .into_iter()
+            .find(|c| c.key == "name")
+            .unwrap();
+        let mut sort = TableSort {
+            key: "stars",
+            desc: true,
+        };
         sort.click(&name);
         assert_eq!((sort.key, sort.desc), ("name", false));
     }
@@ -1025,7 +1562,11 @@ mod tests {
         app.umas.filter.apt.insert(Apt::Long, 8);
         assert!(app.filtered_umas().iter().all(|&i| long(&app, i) >= 8));
         app.umas.filter.potential = [5].into();
-        assert!(app.filtered_umas().iter().all(|&i| app.roster.umas[i].potential == 5));
+        assert!(
+            app.filtered_umas()
+                .iter()
+                .all(|&i| app.roster.umas[i].potential == 5)
+        );
         assert_eq!(app.umas.filter.count(), 2);
 
         let json = serde_json::to_value(&app.umas.filter).unwrap();

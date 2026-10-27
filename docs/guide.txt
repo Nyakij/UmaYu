@@ -1,4 +1,4 @@
-umaLord - Uma Musume: Pretty Derby (Global) account helper
+UmaYu - Uma Musume: Pretty Derby (Global) account helper
 ==========================================================
 
 A Windows app that holds your roster and the full Global game data from uma.guide. It
@@ -8,8 +8,8 @@ where Claude answers questions about your account.
 
 Run it
 ------
-1. Unzip the whole folder anywhere. Keep the other folders next to umalord.exe.
-2. Double-click umalord.exe.
+1. Unzip the whole folder anywhere. Keep the other folders next to umayu.exe.
+2. Double-click umayu.exe.
    The app isn't signed, so Windows may say "Windows protected your PC". Click
    "More info", then "Run anyway".
 
@@ -20,7 +20,7 @@ First run
 ---------
 The app starts empty and opens Setup, which offers two ways in:
 - Load a profile: if someone saved your account for you, you'll have a file ending in
-  .umalord.json. Put it in the profiles folder next to umalord.exe, leave it in Downloads,
+  .umalord.json. Put it in the profiles folder next to umayu.exe, leave it in Downloads,
   or drag it onto the app's window, then click Choose and Load this profile.
 - Set up from scratch: pick a trainer name and how the app looks, then click every uma and
   support card you own (they light up).
@@ -158,13 +158,18 @@ the steps to plan a career, and the game words the app uses.
       the official release, checks it against its published checksum, and installs it in
       tools\opencode.
     - It can read your files but can't edit them or run commands; it works only through
-      umaLord's own tools, and file changes go through the Approve cards.
+      UmaYu's own tools, and file changes go through the Approve cards.
     - Free models are only offered for a limited time and are weaker than Claude. Pick one
       in Settings > AI assistant. The note under the model says whether your questions are
       kept.
   - Claude API gives better answers but needs your own Anthropic API key from
     https://console.anthropic.com, and use is billed to that key. Paste the key into
     Settings > AI assistant, or set the ANTHROPIC_API_KEY environment variable.
+- Music: browse and play audio from your local game installation (enabled in Settings > Game audio).
+  - Files: browse CRIWARE ACB/AWB archives across BGM, Cutin, Jingle, Live, System, and Voice categories with quick search, cue inspection, and WAV export.
+  - Jukebox: listen to in-game jukebox music in Short or Game-size versions with automatic fallback if one is missing.
+  - Live: multi-track live stage player with backing track, audience cheer SFX, synchronized karaoke lyrics, and customizable character vocal lineups with solo, volume, and mode overrides (Auto, Main, Extra, Merge, Mute).
+  - Mini-player: fixed player bar at the bottom of the tab with play/pause, seek, volume, and seamless repeat.
 
 
 Game knowledge: the Help window's word list and Home's "Did you know?" card come from
@@ -174,7 +179,7 @@ Meeting course (corners, slopes, how much Stamina each style needs), and
 knowledge\skills.md gives skill advice, including a community tier list that the Skills page
 and the planner's "Not simulated" list show as "Tier list: CM ... TT ...".
 
-Settings (the cog at the top right, or Ctrl+comma) has five sections. Everything saves as
+Settings (the cog at the top right, or Ctrl+comma) has six sections. Everything saves as
 you change it.
 - Profile: your trainer name, the data folder, and saving, loading or emptying the account.
 - Appearance: the mode (System follows Windows, or always Light or Dark), six colour themes
@@ -184,6 +189,8 @@ you change it.
   the size of everything, and comfortable or compact spacing.
 - Data and updates: how old the game data, the meta sheet and the skill tier list are, and
   how to refresh them.
+- Game audio: enable or disable the local game audio plug-in, auto-detect game installation folders
+  (Global, Steam JP, DMM JP), inspect manifest status, test playback, and export sample WAV files.
 - AI assistant: who answers on the Ask tab, the model, your API key, and what the assistant
   may do without asking.
 - About: the version, credits, license and keyboard shortcuts.
@@ -196,7 +203,7 @@ saved plans become a + button and a folder menu, and the status bar at the botto
 its labels (hover one for the full text).
 
 Keyboard shortcuts (also listed in Help):
-- Ctrl+1 to Ctrl+4: Home, Collection, Career, Ask
+- Ctrl+1 to Ctrl+4: Home, Collection, Career, Ask (Ctrl+5: Music when enabled)
 - Ctrl+F: jump to the page's search box
 - Ctrl+S: save the plan (on Career > Plan)
 - F5: reload your roster, game data and plans
@@ -224,7 +231,7 @@ with.
 
 knowledge\data was built from uma.guide on 2026-10-16, and knowledge\data\sim (the race
 simulator's skills and courses) from umalator.app on 2026-10-17. To refresh them, install
-Python 3, then run this from the umaLord folder:
+Python 3, then run this from the UmaYu folder:
 
     python -I -X utf8 tools\update_knowledge.py
 
@@ -242,6 +249,20 @@ Open this folder in Claude Code. CLAUDE.md tells Claude how to:
 - log results, and keep its opinions in insights.md.
 
 
+Game Audio Plug-in (optional)
+-----------------------------
+UmaYu includes an optional, privacy-respecting audio player and live stage mixer that reads
+assets from your local game installation (Global, Steam JP, or DMM JP):
+- How to enable: Go to Settings (cog icon) > Game audio, turn on "Enable game audio plug-in",
+  and click "Auto-detect" to locate your game's Persistent folder.
+- Offline & local guarantee: All asset reading, decryption, and playback happen strictly on
+  your local machine. No audio files or game data are ever sent over the network.
+- Requires game assets downloaded through the game client. Tracks not yet downloaded are
+  flagged as "Not downloaded in game" with graceful fallback.
+- Exporting: Individual cue waves, full audio archives, jukebox tracks, and complete multi-channel
+  live stage mixes can be exported directly to standard 16-bit PCM RIFF WAV in the exports\audio folder.
+
+
 Rebuilding the app (optional)
 -----------------------------
 The source is in the app folder. You need Rust (rustup) with the
@@ -249,12 +270,15 @@ stable-x86_64-pc-windows-gnu toolchain and its llvm-tools component.
 Run app\setup-toolchain.ps1 once, then run "cargo build --release" in the app folder.
 
 
-License
--------
+License & Credits
+-----------------
 The race simulator is a port of Moomoolator (https://github.com/TheCing/uma-tools, by
 TheCing, building on alpha123's Umalator and kachi-dev's VFalator), which is licensed
 GPL-3.0-or-later. So this app, as shared, is under GPL-3.0-or-later too: see
-LICENSE. The source is in the app folder, and on GitHub: https://github.com/brickc4/umaLord
+LICENSE. The source is in the app folder, and on GitHub: https://github.com/Nyakij/UmaYu
+
+Third-party audio & asset decoding libraries: cridecoder (CRIWARE ACB/AWB/HCA), cpal (audio output),
+rusqlite (SQLite manifest parsing), and lz4_flex (UnityFS LZ4 chunk decompression).
 
 
 Troubleshooting

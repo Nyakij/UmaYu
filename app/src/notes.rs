@@ -45,7 +45,12 @@ pub struct SkillTiers {
 impl SkillTiers {
     pub fn load(path: &std::path::Path) -> Option<SkillTiers> {
         let mut t: SkillTiers = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-        t.by_id = t.skills.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
+        t.by_id = t
+            .skills
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.id, i))
+            .collect();
         Some(t)
     }
 
@@ -59,16 +64,33 @@ impl SkillTiers {
 
     /// A line for hovers and the assistant: both tiers spelled out, the reason, and the source.
     pub fn explain(&self, t: &SkillTier) -> String {
-        let mean = |s: &str| self.scale.get(s).map_or(String::new(), |m| format!(" ({m})"));
-        let target = if t.target.is_empty() { String::new() } else { format!(", filed under {}", t.target) };
-        let score = t.score_per_sp.map(|s| format!(" Team Trials points per SP: {s:.2}.")).unwrap_or_default();
-        format!(
-            "Community tier list{target}: Team Trials {}{}, Champions Meeting {}{}. Why: {}.{score} Source: {}, sheet updated {}. Community opinion.",
+        let mean = |s: &str| {
+            self.scale
+                .get(s)
+                .map_or(String::new(), |m| format!(" ({m})"))
+        };
+        let target = if t.target.is_empty() {
+            String::new()
+        } else {
+            tf!(", filed under {}", t.target)
+        };
+        let score = t
+            .score_per_sp
+            .map(|s| tf!(" Team Trials points per SP: {}.", format!("{s:.2}")))
+            .unwrap_or_default();
+        tf!(
+            "Community tier list{}: Team Trials {}{}, Champions Meeting {}{}. Why: {}.{} Source: {}, sheet updated {}. Community opinion.",
+            target,
             t.tt,
             mean(&t.tt),
             t.cm,
             mean(&t.cm),
-            if t.why.is_empty() { "no reason given" } else { t.why.trim_end_matches('.') },
+            if t.why.is_empty() {
+                t!("no reason given")
+            } else {
+                t.why.trim_end_matches('.')
+            },
+            score,
             self.authors,
             self.sheet_updated
         )
@@ -77,7 +99,10 @@ impl SkillTiers {
 
 /// A tier mark's place on the sheet's scale, best first (unknown marks last).
 pub fn tier_rank(mark: &str) -> u8 {
-    ["⍟", "◎", "◯", "▲", "△", "✕"].iter().position(|m| *m == mark).map_or(8, |i| i as u8)
+    ["⍟", "◎", "◯", "▲", "△", "✕"]
+        .iter()
+        .position(|m| *m == mark)
+        .map_or(8, |i| i as u8)
 }
 
 /// A glossary term from `mechanics.md`.
@@ -106,10 +131,21 @@ fn section<'a>(md: &'a str, heading: &str) -> Option<&'a str> {
 pub fn parse_terms(md: &str) -> Vec<Term> {
     // A Windows checkout (and the release zip built from one) has CRLF line endings.
     let md = md.replace("\r\n", "\n");
-    let Some(text) = section(&md, "Glossary") else { return Vec::new() };
-    let Some(table) = crate::data::tables(text).into_iter().next() else { return Vec::new() };
-    let col = |name: &str| table.headers.iter().position(|h| h.eq_ignore_ascii_case(name));
-    let (Some(t), Some(m)) = (col("Term"), col("Meaning")) else { return Vec::new() };
+    let Some(text) = section(&md, "Glossary") else {
+        return Vec::new();
+    };
+    let Some(table) = crate::data::tables(text).into_iter().next() else {
+        return Vec::new();
+    };
+    let col = |name: &str| {
+        table
+            .headers
+            .iter()
+            .position(|h| h.eq_ignore_ascii_case(name))
+    };
+    let (Some(t), Some(m)) = (col("Term"), col("Meaning")) else {
+        return Vec::new();
+    };
     let s = col("Source");
     table
         .rows
@@ -117,7 +153,14 @@ pub fn parse_terms(md: &str) -> Vec<Term> {
         .filter_map(|r| {
             let term = r.get(t)?.trim().to_string();
             let meaning = r.get(m)?.trim().to_string();
-            (!term.is_empty() && !meaning.is_empty()).then(|| Term { term, meaning, source: s.and_then(|i| r.get(i)).map(|x| x.trim().to_string()).unwrap_or_default() })
+            (!term.is_empty() && !meaning.is_empty()).then(|| Term {
+                term,
+                meaning,
+                source: s
+                    .and_then(|i| r.get(i))
+                    .map(|x| x.trim().to_string())
+                    .unwrap_or_default(),
+            })
         })
         .collect()
 }
@@ -125,7 +168,9 @@ pub fn parse_terms(md: &str) -> Vec<Term> {
 /// The "Did you know?" list: "- tip [source]".
 pub fn parse_tips(md: &str) -> Vec<Tip> {
     let md = md.replace("\r\n", "\n");
-    let Some(text) = section(&md, "Did you know?") else { return Vec::new() };
+    let Some(text) = section(&md, "Did you know?") else {
+        return Vec::new();
+    };
     text.lines()
         .filter_map(|l| l.trim().strip_prefix("- "))
         .filter_map(|l| {
@@ -133,7 +178,10 @@ pub fn parse_tips(md: &str) -> Vec<Tip> {
                 Some(i) if l.ends_with(']') => (&l[..i], &l[i + 2..l.len() - 1]),
                 _ => (l, ""),
             };
-            (!text.trim().is_empty()).then(|| Tip { text: text.trim().to_string(), source: source.trim().to_string() })
+            (!text.trim().is_empty()).then(|| Tip {
+                text: text.trim().to_string(),
+                source: source.trim().to_string(),
+            })
         })
         .collect()
 }
@@ -147,9 +195,28 @@ mod tests {
         let md = "# M\n\n## Glossary\n\nIntro.\n\n| Term | Meaning | Source |\n|---|---|---|\n| Lengths (L) | 2.5 m. | GameTora |\n| Rushed | Burns HP. | GameTora, Race Mechanics |\n\n## Did you know?\n\nIntro.\n\n- Past 1200 a stat counts half. [GameTora, Race Mechanics Handbook]\n- No source here\n\n## Next\n";
         let terms = parse_terms(md);
         assert_eq!(terms.len(), 2);
-        assert_eq!(terms[1], Term { term: "Rushed".into(), meaning: "Burns HP.".into(), source: "GameTora, Race Mechanics".into() });
+        assert_eq!(
+            terms[1],
+            Term {
+                term: "Rushed".into(),
+                meaning: "Burns HP.".into(),
+                source: "GameTora, Race Mechanics".into()
+            }
+        );
         let tips = parse_tips(md);
-        assert_eq!(tips, vec![Tip { text: "Past 1200 a stat counts half.".into(), source: "GameTora, Race Mechanics Handbook".into() }, Tip { text: "No source here".into(), source: String::new() }]);
+        assert_eq!(
+            tips,
+            vec![
+                Tip {
+                    text: "Past 1200 a stat counts half.".into(),
+                    source: "GameTora, Race Mechanics Handbook".into()
+                },
+                Tip {
+                    text: "No source here".into(),
+                    source: String::new()
+                }
+            ]
+        );
         // The same file with Windows line endings, as a CRLF checkout has it.
         let crlf = md.replace('\n', "\r\n");
         assert_eq!(parse_terms(&crlf), terms);
@@ -160,17 +227,30 @@ mod tests {
     /// common skills.
     #[test]
     fn real_notes_are_sourced() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        crate::lang::set(crate::lang::Lang::En);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap();
         let md = std::fs::read_to_string(root.join("knowledge/mechanics.md")).unwrap();
         let terms = parse_terms(&md);
         assert!(terms.len() >= 40, "{} terms", terms.len());
-        assert!(terms.iter().all(|t| !t.source.is_empty()), "a term without a source");
+        assert!(
+            terms.iter().all(|t| !t.source.is_empty()),
+            "a term without a source"
+        );
         let tips = parse_tips(&md);
-        assert!(tips.len() >= 15 && tips.iter().all(|t| !t.source.is_empty()), "every tip needs a source");
-        let tiers = SkillTiers::load(&root.join("knowledge/data/skill_tiers.json")).expect("skill_tiers.json");
+        assert!(
+            tips.len() >= 15 && tips.iter().all(|t| !t.source.is_empty()),
+            "every tip needs a source"
+        );
+        let tiers = SkillTiers::load(&root.join("knowledge/data/skill_tiers.json"))
+            .expect("skill_tiers.json");
         assert!(tiers.len() > 400);
         let corners = tiers.get(201322).expect("Pace Chaser Corners ○");
-        assert_eq!((corners.cm.as_str(), corners.target.as_str()), ("⍟", "Pace Chaser"));
+        assert_eq!(
+            (corners.cm.as_str(), corners.target.as_str()),
+            ("⍟", "Pace Chaser")
+        );
         assert!(tiers.explain(corners).contains("Community opinion"));
     }
 }

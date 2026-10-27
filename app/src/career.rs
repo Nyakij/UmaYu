@@ -113,7 +113,8 @@ pub struct Scenario {
 
 impl Scenario {
     pub fn matches(&self, name: &str) -> bool {
-        self.name.eq_ignore_ascii_case(name) || self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
+        self.name.eq_ignore_ascii_case(name)
+            || self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
     }
 
     pub fn is_linked(&self, uma: &str) -> bool {
@@ -133,7 +134,9 @@ pub const SCENARIOS_FILE: &str = "knowledge/scenarios.json";
 impl Scenarios {
     pub fn load(root: Option<&Path>) -> Option<Scenarios> {
         let text = std::fs::read_to_string(root?.join(SCENARIOS_FILE)).ok()?;
-        serde_json::from_str(&text).map_err(|e| eprintln!("{SCENARIOS_FILE}: {e}")).ok()
+        serde_json::from_str(&text)
+            .map_err(|e| eprintln!("{SCENARIOS_FILE}: {e}"))
+            .ok()
     }
 
     pub fn get(&self, name: &str) -> Option<&Scenario> {
@@ -143,7 +146,9 @@ impl Scenarios {
 
 /// Facility of a card type: Speed 0 … Wit 4; Pal and Group have none.
 pub fn facility_of(kind: &str) -> Option<usize> {
-    ["Speed", "Stamina", "Power", "Guts", "Wit"].iter().position(|k| *k == kind)
+    ["Speed", "Stamina", "Power", "Guts", "Wit"]
+        .iter()
+        .position(|k| *k == kind)
 }
 
 /// One deck card's numbers at the level it's used at.
@@ -200,7 +205,14 @@ fn number_after(line: &str, key: &str) -> Option<f64> {
     let i = l.find(key)?;
     let nums: Vec<f64> = l[i + key.len()..]
         .split('/')
-        .filter_map(|p| p.trim().trim_start_matches('+').split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).next()?.parse().ok())
+        .filter_map(|p| {
+            p.trim()
+                .trim_start_matches('+')
+                .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+                .next()?
+                .parse()
+                .ok()
+        })
         .collect();
     (!nums.is_empty()).then(|| nums.iter().sum::<f64>() / nums.len() as f64)
 }
@@ -221,16 +233,28 @@ pub fn gain_in(line: &str) -> Gain {
             continue;
         }
         if p.starts_with("all stats") || p.starts_with("all status") {
-            if let Some(v) = number_after(&p, "all stats").or_else(|| number_after(&p, "all status")) {
+            if let Some(v) =
+                number_after(&p, "all stats").or_else(|| number_after(&p, "all status"))
+            {
                 for s in &mut g.stats {
                     *s += v;
                 }
             }
             continue;
         }
-        for (i, key) in ["speed", "stamina", "power", "guts", "wit"].iter().enumerate() {
+        for (i, key) in ["speed", "stamina", "power", "guts", "wit"]
+            .iter()
+            .enumerate()
+        {
             if p.starts_with(key) || (i == 4 && p.starts_with("wisdom")) {
-                if let Some(v) = number_after(&p, if i == 4 && p.starts_with("wisdom") { "wisdom" } else { key }) {
+                if let Some(v) = number_after(
+                    &p,
+                    if i == 4 && p.starts_with("wisdom") {
+                        "wisdom"
+                    } else {
+                        key
+                    },
+                ) {
                     g.stats[i] += v;
                 }
             }
@@ -257,7 +281,9 @@ fn event_gain(options: &[Vec<Vec<String>>]) -> Gain {
             }
             sum
         })
-        .fold(Gain::default(), |best, g| if g.total() > best.total() { g } else { best })
+        .fold(Gain::default(), |best, g| {
+            if g.total() > best.total() { g } else { best }
+        })
 }
 
 /// Effect ids by name, for reading unique effects ("Training Effectiveness" → 8).
@@ -271,7 +297,12 @@ pub fn effect_names(kb: &Knowledge) -> HashMap<String, u32> {
     out
 }
 
-pub fn card_stats(info: &CardInfo, level: u32, names: &HashMap<String, u32>, scenario: Option<&Scenario>) -> CardStats {
+pub fn card_stats(
+    info: &CardInfo,
+    level: u32,
+    names: &HashMap<String, u32>,
+    scenario: Option<&Scenario>,
+) -> CardStats {
     let e = |k: u32| f64::from(info.effect(k, level).unwrap_or(0));
     let mut s = CardStats {
         id: info.id,
@@ -296,11 +327,21 @@ pub fn card_stats(info: &CardInfo, level: u32, names: &HashMap<String, u32>, sce
     };
     if let Some(u) = info.unique.as_ref().filter(|u| level >= u.level) {
         // "At Bond 80" uniques apply once the bond is there; plain ones always.
-        s.unique_bond = u.condition.strip_prefix("At Bond ").and_then(|v| v.trim().parse().ok()).unwrap_or(0.0);
+        s.unique_bond = u
+            .condition
+            .strip_prefix("At Bond ")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0.0);
         let plain = u.condition.is_empty() || u.condition.starts_with("At Bond ");
         if plain {
             for ne in &u.effects {
-                let value = ne.value.chars().filter(|c| c.is_ascii_digit() || *c == '.').collect::<String>().parse::<f64>().unwrap_or(0.0);
+                let value = ne
+                    .value
+                    .chars()
+                    .filter(|c| c.is_ascii_digit() || *c == '.')
+                    .collect::<String>()
+                    .parse::<f64>()
+                    .unwrap_or(0.0);
                 if let Some(id) = names.get(&ne.name) {
                     s.unique.push((*id, value));
                 }
@@ -325,7 +366,15 @@ pub fn card_stats(info: &CardInfo, level: u32, names: &HashMap<String, u32>, sce
 impl CardStats {
     /// An effect's value including the unique effect once its bond is reached.
     fn get(&self, id: u32, base: f64, bond: f64) -> f64 {
-        base + if bond >= self.unique_bond { self.unique.iter().filter(|(k, _)| *k == id).map(|(_, v)| v).sum() } else { 0.0 }
+        base + if bond >= self.unique_bond {
+            self.unique
+                .iter()
+                .filter(|(k, _)| *k == id)
+                .map(|(_, v)| v)
+                .sum()
+        } else {
+            0.0
+        }
     }
 }
 
@@ -341,7 +390,20 @@ pub fn turn_of(when: &str) -> Option<usize> {
     } else {
         return None;
     };
-    const MONTHS: [&str; 12] = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+    const MONTHS: [&str; 12] = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ];
     let month = MONTHS.iter().position(|m| w.contains(m))?;
     Some(year * 24 + month * 2 + usize::from(w.contains("late")))
 }
@@ -450,15 +512,27 @@ pub fn simulate(input: &CareerInput) -> CareerResult {
         let (mut rainbows, mut trainings, mut races) = (0.0, 0.0, 0.0);
         // Optional races on random free turns in years 2 and 3, outside summer camp.
         let mut race_turns: Vec<(usize, String)> = input.objectives.clone();
-        let mut free: Vec<usize> = (24..c.turns).filter(|t| !c.summer_camp_turns.contains(t) && !race_turns.iter().any(|(r, _)| r == t)).collect();
+        let mut free: Vec<usize> = (24..c.turns)
+            .filter(|t| !c.summer_camp_turns.contains(t) && !race_turns.iter().any(|(r, _)| r == t))
+            .collect();
         for _ in 0..optional.min(free.len()) {
             let k = (rng.uniform(free.len() as f64) as usize).min(free.len() - 1);
-            let grade = if sc.optional_races.is_some() && rng.random() < 0.5 { "G2" } else { "G1" };
+            let grade = if sc.optional_races.is_some() && rng.random() < 0.5 {
+                "G2"
+            } else {
+                "G1"
+            };
             race_turns.push((free.remove(k), grade.to_string()));
         }
-        let race = |grade: &str, objective: bool, sp: &mut f64, src: &mut [f64; 4], stats: &mut [f64; 5], rng: &mut Rng| {
+        let race = |grade: &str,
+                    objective: bool,
+                    sp: &mut f64,
+                    src: &mut [f64; 4],
+                    stats: &mut [f64; 5],
+                    rng: &mut Rng| {
             let win = !objective || rng.random() < a.objective_win_rate;
-            let factor = if win { 1.0 } else { a.placed_reward_factor } * (1.0 + race_bonus / 100.0);
+            let factor =
+                if win { 1.0 } else { a.placed_reward_factor } * (1.0 + race_bonus / 100.0);
             let gain = race_sp(sc, grade) * factor;
             *sp += gain;
             src[1] += gain;
@@ -495,34 +569,71 @@ pub fn simulate(input: &CareerInput) -> CareerResult {
             }
             let summer = c.summer_camp_turns.contains(&t);
             let gains = |f: usize| -> ([f64; 6], f64, usize) {
-                let level = if summer { a.summer_camp_level } else { (used[f] / c.trainings_per_level) as usize + 1 }.clamp(1, 5);
+                let level = if summer {
+                    a.summer_camp_level
+                } else {
+                    (used[f] / c.trainings_per_level) as usize + 1
+                }
+                .clamp(1, 5);
                 let lm = c.level_multiplier.get(level - 1).copied().unwrap_or(1.0);
                 let base = sc.base_training[f];
                 let cards = &on[f];
                 let n = cards.len() as f64;
-                let mood_effect: f64 = cards.iter().map(|&ci| deck[ci].get(effect::MOOD, deck[ci].mood, bond[ci])).sum();
-                let train: f64 = cards.iter().map(|&ci| deck[ci].get(effect::TRAINING, deck[ci].training, bond[ci])).sum();
+                let mood_effect: f64 = cards
+                    .iter()
+                    .map(|&ci| deck[ci].get(effect::MOOD, deck[ci].mood, bond[ci]))
+                    .sum();
+                let train: f64 = cards
+                    .iter()
+                    .map(|&ci| deck[ci].get(effect::TRAINING, deck[ci].training, bond[ci]))
+                    .sum();
                 let mut friend = 1.0;
                 let mut rb = 0;
                 for &ci in cards {
                     if deck[ci].facility == Some(f) && bond[ci] >= c.rainbow_bond {
-                        friend *= 1.0 + deck[ci].get(effect::FRIENDSHIP, deck[ci].friendship, bond[ci]) / 100.0;
+                        friend *= 1.0
+                            + deck[ci].get(effect::FRIENDSHIP, deck[ci].friendship, bond[ci])
+                                / 100.0;
                         rb += 1;
                     }
                 }
-                let mult = (1.0 + a.mood * c.mood_step * (1.0 + mood_effect / 100.0)) * (1.0 + train / 100.0) * friend * (1.0 + c.support_bonus * n);
+                let mult = (1.0 + a.mood * c.mood_step * (1.0 + mood_effect / 100.0))
+                    * (1.0 + train / 100.0)
+                    * friend
+                    * (1.0 + c.support_bonus * n);
                 let mut out = [0.0; 6];
                 for i in 0..5 {
                     if base[i] > 0.0 {
-                        let bonus: f64 = cards.iter().map(|&ci| deck[ci].get(effect::SPEED + i as u32, deck[ci].stat_bonus[i], bond[ci])).sum();
+                        let bonus: f64 = cards
+                            .iter()
+                            .map(|&ci| {
+                                deck[ci].get(
+                                    effect::SPEED + i as u32,
+                                    deck[ci].stat_bonus[i],
+                                    bond[ci],
+                                )
+                            })
+                            .sum();
                         out[i] = (base[i] * lm + bonus) * mult * (1.0 + input.growth[i] / 100.0);
                     }
                 }
-                let sp_bonus: f64 = cards.iter().map(|&ci| deck[ci].get(effect::SKILL_POINTS, deck[ci].sp_bonus, bond[ci])).sum();
-                let extra: f64 = sc.sp_per_training_from.iter().filter(|(from, _)| t >= *from).map(|(_, v)| v).sum();
+                let sp_bonus: f64 = cards
+                    .iter()
+                    .map(|&ci| deck[ci].get(effect::SKILL_POINTS, deck[ci].sp_bonus, bond[ci]))
+                    .sum();
+                let extra: f64 = sc
+                    .sp_per_training_from
+                    .iter()
+                    .filter(|(from, _)| t >= *from)
+                    .map(|(_, v)| v)
+                    .sum();
                 out[5] = (base[5] * lm + sp_bonus) * mult + extra;
                 let cut: f64 = cards.iter().map(|&ci| deck[ci].energy_cut).sum();
-                let mut energy = if base[6] < 0.0 { base[6] * (1.0 - cut / 100.0) } else { base[6] };
+                let mut energy = if base[6] < 0.0 {
+                    base[6] * (1.0 - cut / 100.0)
+                } else {
+                    base[6]
+                };
                 if f == 4 && rb > 0 {
                     energy += cards.iter().map(|&ci| deck[ci].wit_recovery).sum::<f64>();
                 }
@@ -535,7 +646,12 @@ pub fn simulate(input: &CareerInput) -> CareerResult {
                 (0..5)
                     .map(|i| {
                         let gain = g[i].min((sc.stat_caps[i] - stats[i]).max(0.0));
-                        weights[i] * if input.target[i] > 0.0 { need_value(stats[i], gain, input.target[i] * scale, 0.25) } else { gain }
+                        weights[i]
+                            * if input.target[i] > 0.0 {
+                                need_value(stats[i], gain, input.target[i] * scale, 0.25)
+                            } else {
+                                gain
+                            }
                     })
                     .sum::<f64>()
                     + 0.5 * g[5]
@@ -544,7 +660,15 @@ pub fn simulate(input: &CareerInput) -> CareerResult {
             for f in 0..5 {
                 let (g, _, rb) = gains(f);
                 // Early on, training with cards that still need bond is worth a bit extra.
-                let bonding = if t < 48 { on[f].iter().filter(|&&ci| bond[ci] < c.rainbow_bond).count() as f64 * 3.0 } else { 0.0 };
+                let bonding = if t < 48 {
+                    on[f]
+                        .iter()
+                        .filter(|&&ci| bond[ci] < c.rainbow_bond)
+                        .count() as f64
+                        * 3.0
+                } else {
+                    0.0
+                };
                 let v = value(&g) + bonding + rb as f64 * 5.0;
                 if v > best.1 {
                     best = (f, v);
@@ -576,7 +700,8 @@ pub fn simulate(input: &CareerInput) -> CareerResult {
                 let chance = a.hint_chance * (1.0 + deck[ci].hint_freq / 100.0);
                 if !deck[ci].hints.is_empty() && rng.random() < chance {
                     bond[ci] = (bond[ci] + c.bond_per_hint).min(100.0);
-                    let k = (rng.uniform(deck[ci].hints.len() as f64) as usize).min(deck[ci].hints.len() - 1);
+                    let k = (rng.uniform(deck[ci].hints.len() as f64) as usize)
+                        .min(deck[ci].hints.len() - 1);
                     let lv = hint_lv.entry(deck[ci].hints[k]).or_default();
                     *lv = (*lv + 1.0 + deck[ci].hint_levels).min(5.0);
                 }
@@ -648,7 +773,11 @@ pub fn simulate(input: &CareerInput) -> CareerResult {
         sp_mean: sps.iter().sum::<f64>() / n,
         sp_p10: pct(0.1),
         sp_p90: pct(0.9),
-        sp_sources: ["Training", "Races", "Events", "Scenario"].iter().zip(sources).map(|(k, v)| (k.to_string(), v / n)).collect(),
+        sp_sources: [t!("Training"), t!("Races"), t!("Events"), t!("Scenario")]
+            .into_iter()
+            .zip(sources)
+            .map(|(k, v)| (k.to_string(), v / n))
+            .collect(),
         stats_mean: stats_sum.map(|s| s / n),
         hint_levels: hints.into_iter().map(|(k, v)| (k, v / n)).collect(),
         rainbows_mean: rainbow_sum / n,
@@ -665,7 +794,10 @@ pub fn trainee_inputs(kb: &Knowledge, uma: &UmaInfo) -> (Vec<(usize, String)>, V
         .iter()
         .filter_map(|o| {
             let turn = turn_of(&o.when)?;
-            let grade = o.race_id.and_then(|id| kb.races.iter().find(|r| r.id == id)).map_or("OP".to_string(), |r| r.grade.clone());
+            let grade = o
+                .race_id
+                .and_then(|id| kb.races.iter().find(|r| r.id == id))
+                .map_or("OP".to_string(), |r| r.grade.clone());
             Some((turn, grade))
         })
         .collect();
@@ -677,15 +809,20 @@ pub fn trainee_inputs(kb: &Knowledge, uma: &UmaInfo) -> (Vec<(usize, String)>, V
             e.options
                 .iter()
                 .map(|o| {
-                    o.outcomes.iter().map(|l| gain_in(l)).fold(Gain::default(), |mut a, g| {
-                        a.sp += g.sp;
-                        for i in 0..5 {
-                            a.stats[i] += g.stats[i];
-                        }
-                        a
-                    })
+                    o.outcomes
+                        .iter()
+                        .map(|l| gain_in(l))
+                        .fold(Gain::default(), |mut a, g| {
+                            a.sp += g.sp;
+                            for i in 0..5 {
+                                a.stats[i] += g.stats[i];
+                            }
+                            a
+                        })
                 })
-                .fold(Gain::default(), |best, g| if g.total() > best.total() { g } else { best })
+                .fold(Gain::default(), |best, g| {
+                    if g.total() > best.total() { g } else { best }
+                })
         })
         .filter(|g| g.total() > 0.0)
         .collect();
@@ -695,7 +832,11 @@ pub fn trainee_inputs(kb: &Knowledge, uma: &UmaInfo) -> (Vec<(usize, String)>, V
 /// Skill cost after hints: 10% off per level for three levels, then 5% (uma.guide's skills guide).
 pub fn hint_discount(level: f64) -> f64 {
     let l = level.clamp(0.0, 5.0);
-    if l <= 3.0 { 0.10 * l } else { 0.30 + 0.05 * (l - 3.0) }
+    if l <= 3.0 {
+        0.10 * l
+    } else {
+        0.30 + 0.05 * (l - 3.0)
+    }
 }
 
 #[cfg(test)]
@@ -709,6 +850,8 @@ mod tests {
         assert_eq!(sp_in("Speed +10"), None);
         assert_eq!(turn_of("junior year, late june"), Some(11));
         assert_eq!(turn_of("senior year, early december"), Some(70));
-        assert!((hint_discount(4.0) - 0.35).abs() < 1e-9 && (hint_discount(1.0) - 0.1).abs() < 1e-9);
+        assert!(
+            (hint_discount(4.0) - 0.35).abs() < 1e-9 && (hint_discount(1.0) - 0.1).abs() < 1e-9
+        );
     }
 }

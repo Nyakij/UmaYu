@@ -9,7 +9,9 @@ use crate::App;
 use crate::data::{is_separator, tables};
 use crate::tab_umas::filter_heading;
 use crate::theme::pal;
-use crate::ui_util::{card_titled, empty_state, open_url, page_header, search_combo, local_today, semibold};
+use crate::ui_util::{
+    card_titled, empty_state, local_today, open_url, page_header, search_combo, semibold,
+};
 
 const LOG_ICONS: [&str; 5] = ["🐴", "👥", "🏆", "⭐", "✨"];
 
@@ -41,8 +43,17 @@ pub(crate) struct NotesState {
 /// Insert `row` as the first body row of the first table in `md` (logs are newest first).
 pub fn insert_row(md: &str, row: &[String]) -> Option<String> {
     let lines: Vec<&str> = md.lines().collect();
-    let sep = (1..lines.len()).find(|&i| lines[i - 1].trim_start().starts_with('|') && is_separator(lines[i]))?;
-    let cells: Vec<String> = row.iter().map(|c| c.replace('|', "/").replace(['\n', '\r'], " ").trim().to_string()).collect();
+    let sep = (1..lines.len())
+        .find(|&i| lines[i - 1].trim_start().starts_with('|') && is_separator(lines[i]))?;
+    let cells: Vec<String> = row
+        .iter()
+        .map(|c| {
+            c.replace('|', "/")
+                .replace(['\n', '\r'], " ")
+                .trim()
+                .to_string()
+        })
+        .collect();
     let new_line = format!("| {} |", cells.join(" | "));
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
     out.insert(sep + 1, new_line);
@@ -63,9 +74,23 @@ impl App {
         let text = std::fs::read_to_string(root.join(LOGS[s.log].1)).unwrap_or_default();
         if let Some(t) = tables(&text).into_iter().next() {
             s.headers = t.headers;
-            s.rows = t.rows.into_iter().filter(|r| r.iter().any(|c| !c.is_empty())).collect();
+            s.rows = t
+                .rows
+                .into_iter()
+                .filter(|r| r.iter().any(|c| !c.is_empty()))
+                .collect();
         }
-        s.form = s.headers.iter().map(|h| if h.starts_with("Date") { local_today() } else { String::new() }).collect();
+        s.form = s
+            .headers
+            .iter()
+            .map(|h| {
+                if h.starts_with("Date") {
+                    local_today()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
     }
 
     pub(crate) fn results_tab(&mut self, ui: &mut egui::Ui) {
@@ -74,11 +99,11 @@ impl App {
         }
         egui::Panel::left("results_logs").resizable(false).exact_size(if ui.available_width() < 1100.0 { 200.0 } else { 240.0 }).frame(crate::side_frame()).show(ui, |ui| {
             let weak = pal(ui).weak;
-            ui.label(semibold("Logs", 17.0));
-            ui.label(RichText::new("One log per kind of result. Pick one to add to it or read it.").size(12.5).color(weak));
+            ui.label(semibold(t!("Logs"), 17.0));
+            ui.label(RichText::new(t!("One log per kind of result. Pick one to add to it or read it.")).size(12.5).color(weak));
             ui.add_space(8.0);
             for (i, (label, _)) in LOGS.iter().enumerate() {
-                let b = egui::Button::new(RichText::new(format!("{}  {label}", LOG_ICONS[i])).size(14.0))
+                let b = egui::Button::new(RichText::new(format!("{}  {}", LOG_ICONS[i], t!(label))).size(14.0))
                     .selected(self.results.log == i)
                     .min_size(vec2(ui.available_width(), 30.0));
                 if ui.add(b).clicked() {
@@ -87,17 +112,21 @@ impl App {
             }
             ui.add_space(12.0);
             ui.label(
-                RichText::new("Entries are saved in the results folder, newest first. Claude reads them to check plans against what really happened.")
+                RichText::new(t!("Entries are saved in the results folder, newest first. Claude reads them to check plans against what really happened."))
                     .size(12.0)
                     .color(weak),
             );
         });
-        egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(ui.available_width().min(1000.0));
-                self.results_body(ui);
+        egui::CentralPanel::default()
+            .frame(crate::page_frame())
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_max_width(ui.available_width().min(1000.0));
+                        self.results_body(ui);
+                    });
             });
-        });
     }
 
     fn results_body(&mut self, ui: &mut egui::Ui) {
@@ -105,67 +134,103 @@ impl App {
         let (label, file) = LOGS[self.results.log];
         page_header(
             ui,
-            &format!("{}  {label}", LOG_ICONS[self.results.log]),
-            &format!("Fill in what happened and press ＋ Add entry. The ✨ buttons suggest values from your roster and the open plan. Saved to {file}."),
+            &format!("{}  {}", LOG_ICONS[self.results.log], t!(label)),
+            &tf!(
+                "Fill in what happened and press ＋ Add entry. The ✨ buttons suggest values from your roster and the open plan. Saved to {}.",
+                file
+            ),
             |_| {},
         );
         if self.results.headers.is_empty() {
-            ui.label(RichText::new("No table found in this file.").color(pal(ui).warn));
+            ui.label(RichText::new(t!("No table found in this file.")).color(pal(ui).warn));
             return;
         }
 
-        let suggestions: Vec<(Vec<String>, bool)> = self.results.headers.iter().map(|h| self.field_suggestions(h)).collect();
-        card_titled(ui, "＋ New entry", |ui| {
-            egui::Grid::new("result_form").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                for (i, h) in self.results.headers.iter().enumerate() {
-                    ui.label(RichText::new(h).color(p.weak));
-                    ui.horizontal(|ui| {
-                        let (options, append) = &suggestions[i];
-                        // Leave room for the suggestion button, so a narrow window doesn't cut it off.
-                        let room = ui.available_width() - if options.is_empty() { 0.0 } else { 96.0 };
-                        ui.add(egui::TextEdit::singleline(&mut self.results.form[i]).desired_width(room.clamp(160.0, 560.0)));
-                        if !options.is_empty() {
-                            let label = if *append { "＋ add" } else { "✨ pick" };
-                            let items = || options.iter().map(|o| (Some(o.clone()), o.clone(), String::new())).collect();
-                            if let Some(o) = search_combo(ui, ("suggest", i), label, 84.0, items, None) {
-                                let field = &mut self.results.form[i];
-                                if *append && !field.trim().is_empty() {
-                                    field.push_str(", ");
-                                    field.push_str(&o);
+        let suggestions: Vec<(Vec<String>, bool)> = self
+            .results
+            .headers
+            .iter()
+            .map(|h| self.field_suggestions(h))
+            .collect();
+        card_titled(ui, t!("＋ New entry"), |ui| {
+            egui::Grid::new("result_form")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    for (i, h) in self.results.headers.iter().enumerate() {
+                        ui.label(RichText::new(t!(h)).color(p.weak));
+                        ui.horizontal(|ui| {
+                            let (options, append) = &suggestions[i];
+                            // Leave room for the suggestion button, so a narrow window doesn't cut it off.
+                            let room =
+                                ui.available_width() - if options.is_empty() { 0.0 } else { 96.0 };
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.results.form[i])
+                                    .desired_width(room.clamp(160.0, 560.0)),
+                            );
+                            if !options.is_empty() {
+                                let label = if *append {
+                                    t!("＋ add")
                                 } else {
-                                    *field = o;
+                                    t!("✨ pick")
+                                };
+                                let items = || {
+                                    options
+                                        .iter()
+                                        .map(|o| (Some(o.clone()), o.clone(), String::new()))
+                                        .collect()
+                                };
+                                if let Some(o) =
+                                    search_combo(ui, ("suggest", i), label, 84.0, items, None)
+                                {
+                                    let field = &mut self.results.form[i];
+                                    if *append && !field.trim().is_empty() {
+                                        field.push_str(", ");
+                                        field.push_str(&o);
+                                    } else {
+                                        *field = o;
+                                    }
                                 }
                             }
-                        }
-                    });
-                    ui.end_row();
-                }
-            });
+                        });
+                        ui.end_row();
+                    }
+                });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                let add = crate::ui_util::primary_button(ui, "＋ Add entry", 14.0);
+                let add = crate::ui_util::primary_button(ui, t!("＋ Add entry"), 14.0);
                 if ui.add(add).clicked() {
                     self.add_result();
                 }
-                if self.planner.plan.trainee.is_some() && ui.button("📋 Fill from the open plan").clicked() {
+                if self.planner.plan.trainee.is_some()
+                    && ui.button(t!("📋 Fill from the open plan")).clicked()
+                {
                     self.fill_result_from_plan();
                 }
-                if ui.button("✖ Clear").clicked() {
+                if ui.button(t!("✖ Clear")).clicked() {
                     self.results.loaded = None;
                 }
             });
         });
 
         ui.add_space(4.0);
-        ui.label(semibold(format!("Entries ({})", self.results.rows.len()), 16.0));
+        ui.label(semibold(tf!("Entries ({})", self.results.rows.len()), 16.0));
         if self.results.rows.is_empty() {
-            empty_state(ui, LOG_ICONS[self.results.log], "Nothing logged yet", "Add your first entry above.");
+            empty_state(
+                ui,
+                LOG_ICONS[self.results.log],
+                t!("Nothing logged yet"),
+                t!("Add your first entry above."),
+            );
             return;
         }
         let headers = self.results.headers.clone();
         let rows = &self.results.rows;
         ui.push_id("results_table", |ui| {
-            let mut table = TableBuilder::new(ui).striped(true).sense(Sense::hover()).auto_shrink([false, true]);
+            let mut table = TableBuilder::new(ui)
+                .striped(true)
+                .sense(Sense::hover())
+                .auto_shrink([false, true]);
             for _ in &headers {
                 table = table.column(Column::auto().at_least(60.0).clip(true));
             }
@@ -173,7 +238,7 @@ impl App {
                 .header(22.0, |mut h| {
                     for t in &headers {
                         h.col(|ui| {
-                            ui.strong(t);
+                            ui.strong(t!(t));
                         });
                     }
                 })
@@ -194,27 +259,79 @@ impl App {
     /// Suggested values for a results column, and whether picking one adds to a list.
     fn field_suggestions(&self, header: &str) -> (Vec<String>, bool) {
         let h = header.to_lowercase();
-        let umas = || self.roster.umas.iter().map(|u| format!("{} [{}]", u.name, u.outfit)).collect::<Vec<_>>();
+        let umas = || {
+            self.roster
+                .umas
+                .iter()
+                .map(|u| format!("{} [{}]", u.name, u.outfit))
+                .collect::<Vec<_>>()
+        };
         let plan = &self.planner.plan;
         if h == "uma" {
             (umas(), false)
         } else if h.starts_with("umas") || h == "team" {
             (umas(), true)
         } else if h == "purpose" || h == "built for" {
-            (crate::tab_planner::Purpose::ALL.iter().map(|p| p.label().to_string()).collect(), false)
+            (
+                crate::tab_planner::Purpose::ALL
+                    .iter()
+                    .map(|p| p.label().to_string())
+                    .collect(),
+                false,
+            )
         } else if h == "scenario" {
             // The Global scenarios in knowledge/scenarios.json (uma.guide's support card filter lists the same).
-            let names: Vec<String> = self.kb.scenarios.as_ref().map(|s| s.scenarios.iter().filter(|x| x.global).map(|x| x.name.clone()).collect()).unwrap_or_default();
-            (if names.is_empty() { ["URA Finale", "Unity Cup", "Trackblazer", "Grand Concert"].map(String::from).to_vec() } else { names }, false)
+            let names: Vec<String> = self
+                .kb
+                .scenarios
+                .as_ref()
+                .map(|s| {
+                    s.scenarios
+                        .iter()
+                        .filter(|x| x.global)
+                        .map(|x| x.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (
+                if names.is_empty() {
+                    ["URA Finale", "Unity Cup", "Trackblazer", "Grand Concert"]
+                        .map(String::from)
+                        .to_vec()
+                } else {
+                    names
+                },
+                false,
+            )
         } else if h == "distance" {
-            (["Sprint", "Mile", "Medium", "Long", "Dirt"].map(String::from).to_vec(), false)
+            (
+                ["Sprint", "Mile", "Medium", "Long", "Dirt"]
+                    .map(String::from)
+                    .to_vec(),
+                false,
+            )
         } else if h == "conditions" && !plan.conditions.is_empty() {
             (vec![plan.conditions.clone()], false)
         } else if h == "course" {
-            let course = plan.course.and_then(|c| self.kb.races.iter().find(|r| r.id == c)).map(|r| format!("{} {} {}m ({})", r.track, r.surface, r.distance, r.direction));
+            let course = plan
+                .course
+                .and_then(|c| self.kb.races.iter().find(|r| r.id == c))
+                .map(|r| {
+                    format!(
+                        "{} {} {}m ({})",
+                        r.track, r.surface, r.distance, r.direction
+                    )
+                });
             (course.into_iter().collect(), false)
         } else if h.starts_with("parents") {
-            (plan.parents.iter().filter(|s| !s.is_empty()).cloned().collect(), true)
+            (
+                plan.parents
+                    .iter()
+                    .filter(|s| !s.is_empty())
+                    .cloned()
+                    .collect(),
+                true,
+            )
         } else if h == "plan" && !plan.title.is_empty() {
             (vec![plan.title.clone()], false)
         } else {
@@ -224,15 +341,30 @@ impl App {
 
     fn fill_result_from_plan(&mut self) {
         let p = &self.planner.plan;
-        let uma = p.trainee.and_then(|t| self.owned_uma(t)).map(|u| format!("{} [{}]", u.name, u.outfit));
+        let uma = p
+            .trainee
+            .and_then(|t| self.owned_uma(t))
+            .map(|u| format!("{} [{}]", u.name, u.outfit));
         let deck: Vec<String> = p
             .deck
             .iter()
             .flatten()
-            .filter_map(|id| self.owned_card(*id).map(|c| format!("{} LB{}", c.uma, c.lb)))
-            .chain(p.friend.and_then(|id| self.kb.cards.get(&id)).map(|c| format!("{} LB{} (friend)", c.uma, p.friend_lb)))
+            .filter_map(|id| {
+                self.owned_card(*id)
+                    .map(|c| format!("{} LB{}", c.uma, c.lb))
+            })
+            .chain(
+                p.friend
+                    .and_then(|id| self.kb.cards.get(&id))
+                    .map(|c| format!("{} LB{} (friend)", c.uma, p.friend_lb)),
+            )
             .collect();
-        let parents: Vec<&str> = p.parents.iter().map(String::as_str).filter(|s| !s.is_empty()).collect();
+        let parents: Vec<&str> = p
+            .parents
+            .iter()
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+            .collect();
         let scenario = self.plan_scenario_name();
         for (i, h) in self.results.headers.iter().enumerate() {
             let v = match h.as_str() {
@@ -254,18 +386,26 @@ impl App {
 
     /// The columns of a results log's first table.
     pub(crate) fn result_headers(&self, log: usize) -> Vec<String> {
-        let Some(root) = &self.root else { return Vec::new() };
-        let text = std::fs::read_to_string(root.join(LOGS[log.min(LOGS.len() - 1)].1)).unwrap_or_default();
-        tables(&text).into_iter().next().map(|t| t.headers).unwrap_or_default()
+        let Some(root) = &self.root else {
+            return Vec::new();
+        };
+        let text =
+            std::fs::read_to_string(root.join(LOGS[log.min(LOGS.len() - 1)].1)).unwrap_or_default();
+        tables(&text)
+            .into_iter()
+            .next()
+            .map(|t| t.headers)
+            .unwrap_or_default()
     }
 
     /// Add a row to a results log, newest first (the assistant's `log_result`).
     pub(crate) fn add_result_row(&mut self, log: usize, row: &[String]) -> Result<PathBuf, String> {
-        let root = self.root.clone().ok_or("umaLord folder not found.")?;
+        let root = self.root.clone().ok_or("UmaYu folder not found.")?;
         let path = root.join(LOGS[log.min(LOGS.len() - 1)].1);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let new = insert_row(&text, row).ok_or("No table found in the file.")?;
-        std::fs::write(&path, new).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+        std::fs::write(&path, new)
+            .map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
         self.home_dirty();
         self.results.loaded = None;
         Ok(path)
@@ -278,21 +418,42 @@ impl App {
     }
 
     fn add_result(&mut self) {
-        let Some(root) = self.root.clone() else { return };
-        if self.results.form.iter().filter(|f| !f.trim().is_empty()).count() <= 1 {
-            self.toast("Fill in more than the date.", crate::ui_util::ToastKind::Warn);
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        if self
+            .results
+            .form
+            .iter()
+            .filter(|f| !f.trim().is_empty())
+            .count()
+            <= 1
+        {
+            self.toast(
+                t!("Fill in more than the date."),
+                crate::ui_util::ToastKind::Warn,
+            );
             return;
         }
         let path = root.join(LOGS[self.results.log].1);
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         match insert_row(&text, &self.results.form).map(|t| std::fs::write(&path, t)) {
             Some(Ok(())) => {
-                self.toast("Added. Ask Claude to compare it with the plan and update insights.md.", crate::ui_util::ToastKind::Success);
+                self.toast(
+                    t!("Added. Ask Claude to compare it with the plan and update insights.md."),
+                    crate::ui_util::ToastKind::Success,
+                );
                 self.home_dirty();
                 self.results.loaded = None;
             }
-            Some(Err(e)) => self.toast(format!("Couldn't write: {e}"), crate::ui_util::ToastKind::Error),
-            None => self.toast("No table found in the file.", crate::ui_util::ToastKind::Warn),
+            Some(Err(e)) => self.toast(
+                tf!("Couldn't write: {}", e),
+                crate::ui_util::ToastKind::Error,
+            ),
+            None => self.toast(
+                t!("No table found in the file."),
+                crate::ui_util::ToastKind::Warn,
+            ),
         }
     }
 
@@ -300,20 +461,34 @@ impl App {
     // Notes
 
     fn note_files(&self) -> Vec<(String, Vec<PathBuf>)> {
-        let Some(root) = &self.root else { return Vec::new() };
+        let Some(root) = &self.root else {
+            return Vec::new();
+        };
         let list = |dir: &str| -> Vec<PathBuf> {
             let mut v: Vec<PathBuf> = std::fs::read_dir(root.join(dir))
                 .into_iter()
                 .flatten()
                 .flatten()
                 .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|x| x == "md") && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('_')))
+                .filter(|p| {
+                    p.extension().is_some_and(|x| x == "md")
+                        && !p
+                            .file_name()
+                            .is_some_and(|n| n.to_string_lossy().starts_with('_'))
+                })
                 .collect();
             v.sort();
             v
         };
         vec![
-            ("Claude's notes".into(), vec![root.join("insights.md"), root.join("sources.md"), root.join("CLAUDE.md")]),
+            (
+                "Claude's notes".into(),
+                vec![
+                    root.join("insights.md"),
+                    root.join("sources.md"),
+                    root.join("CLAUDE.md"),
+                ],
+            ),
             ("Plans".into(), list("plans")),
             ("Results".into(), list("results")),
             ("Account".into(), list("account")),
@@ -326,68 +501,115 @@ impl App {
         if self.notes.selected.is_none() {
             self.notes.selected = groups.first().and_then(|g| g.1.first()).cloned();
         }
-        egui::Panel::left("note_files").resizable(false).exact_size(240.0).frame(crate::side_frame()).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.label(semibold("Files", 17.0));
-                ui.label(RichText::new("Markdown notes in this folder. Click one to read it.").size(12.5).color(pal(ui).weak));
-                for (title, files) in &groups {
-                    if files.is_empty() {
-                        continue;
-                    }
-                    filter_heading(ui, title);
-                    for f in files {
-                        let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        let b = egui::Button::new(RichText::new(format!("📄 {name}")).size(13.5))
-                            .truncate()
-                            .selected(self.notes.selected.as_ref() == Some(f))
-                            .min_size(vec2(ui.available_width(), 26.0));
-                        if ui.add(b).on_hover_text(&name).clicked() {
-                            self.notes.selected = Some(f.clone());
+        egui::Panel::left("note_files")
+            .resizable(false)
+            .exact_size(240.0)
+            .frame(crate::side_frame())
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.label(semibold(t!("Files"), 17.0));
+                    ui.label(
+                        RichText::new(t!("Markdown notes in this folder. Click one to read it."))
+                            .size(12.5)
+                            .color(pal(ui).weak),
+                    );
+                    for (title, files) in &groups {
+                        if files.is_empty() {
+                            continue;
                         }
-                    }
-                }
-            });
-        });
-        let Some(path) = self.notes.selected.clone() else { return };
-        if self.notes.loaded.as_ref().is_none_or(|(p, _)| *p != path) {
-            let text = std::fs::read_to_string(&path).unwrap_or_else(|e| format!("Couldn't read {}: {e}", path.display()));
-            // Hide the planner's data block.
-            let text = text.split("<!-- umalord-plan").next().unwrap_or("").to_string();
-            self.notes.loaded = Some((path.clone(), text));
-        }
-        egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let mut reload = false;
-            let shown = display_path(self.root.as_deref(), &path);
-            let where_ = if shown == name { "In the main umaLord folder".to_string() } else { format!("Saved at {shown}") };
-            let mut back = false;
-            page_header(ui, &format!("📝 {name}"), &where_, |ui| {
-                back = ui.add(egui::Button::new("← Back").min_size(vec2(0.0, 30.0))).on_hover_text("Back to the page you were on").clicked();
-                reload = ui.add(egui::Button::new("🔄 Reload").min_size(vec2(0.0, 30.0))).on_hover_text("Read the file again from disk").clicked();
-                if ui.add(egui::Button::new("↗ Open in editor").min_size(vec2(0.0, 30.0))).on_hover_text("Open it in your default program for .md files").clicked() {
-                    open_url(&path.to_string_lossy());
-                }
-            });
-            if reload {
-                self.notes.loaded = None;
-            }
-            if back {
-                self.tab = self.notes_back;
-            }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(ui.available_width().min(1000.0));
-                crate::ui_util::card(ui, |ui| {
-                    if let Some((_, text)) = &self.notes.loaded {
-                        egui_commonmark::CommonMarkViewer::new().show(ui, &mut self.md_cache, text);
+                        filter_heading(ui, t!(title));
+                        for f in files {
+                            let name = f
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            let b =
+                                egui::Button::new(RichText::new(format!("📄 {name}")).size(13.5))
+                                    .truncate()
+                                    .selected(self.notes.selected.as_ref() == Some(f))
+                                    .min_size(vec2(ui.available_width(), 26.0));
+                            if ui.add(b).on_hover_text(&name).clicked() {
+                                self.notes.selected = Some(f.clone());
+                            }
+                        }
                     }
                 });
             });
-        });
+        let Some(path) = self.notes.selected.clone() else {
+            return;
+        };
+        if self.notes.loaded.as_ref().is_none_or(|(p, _)| *p != path) {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| tf!("Couldn't read {}: {}", path.display(), e));
+            // Hide the planner's data block.
+            let text = text
+                .split("<!-- umalord-plan")
+                .next()
+                .unwrap_or("")
+                .to_string();
+            self.notes.loaded = Some((path.clone(), text));
+        }
+        egui::CentralPanel::default()
+            .frame(crate::page_frame())
+            .show(ui, |ui| {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let mut reload = false;
+                let shown = display_path(self.root.as_deref(), &path);
+                let where_ = if shown == name {
+                    t!("In the main UmaYu folder").to_string()
+                } else {
+                    tf!("Saved at {}", shown)
+                };
+                let mut back = false;
+                page_header(ui, &format!("📝 {name}"), &where_, |ui| {
+                    back = ui
+                        .add(egui::Button::new(t!("← Back")).min_size(vec2(0.0, 30.0)))
+                        .on_hover_text(t!("Back to the page you were on"))
+                        .clicked();
+                    reload = ui
+                        .add(egui::Button::new(t!("🔄 Reload")).min_size(vec2(0.0, 30.0)))
+                        .on_hover_text(t!("Read the file again from disk"))
+                        .clicked();
+                    if ui
+                        .add(egui::Button::new(t!("↗ Open in editor")).min_size(vec2(0.0, 30.0)))
+                        .on_hover_text(t!("Open it in your default program for .md files"))
+                        .clicked()
+                    {
+                        open_url(&path.to_string_lossy());
+                    }
+                });
+                if reload {
+                    self.notes.loaded = None;
+                }
+                if back {
+                    self.tab = self.notes_back;
+                }
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_max_width(ui.available_width().min(1000.0));
+                        crate::ui_util::card(ui, |ui| {
+                            if let Some((_, text)) = &self.notes.loaded {
+                                egui_commonmark::CommonMarkViewer::new().show(
+                                    ui,
+                                    &mut self.md_cache,
+                                    text,
+                                );
+                            }
+                        });
+                    });
+            });
     }
 }
 
 fn display_path(root: Option<&Path>, path: &Path) -> String {
-    root.and_then(|r| path.strip_prefix(r).ok()).unwrap_or(path).display().to_string()
+    root.and_then(|r| path.strip_prefix(r).ok())
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 #[cfg(test)]

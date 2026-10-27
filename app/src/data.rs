@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 pub const CARDS_FILE: &str = "account/support_cards.md";
 pub const UMAS_FILE: &str = "account/umas.md";
 
-/// An empty roster, used when the umaLord folder can't be found at runtime. (Not the account
+/// An empty roster, used when the UmaYu folder can't be found at runtime. (Not the account
 /// itself: `account/` is the user's data and stays out of the source.)
 const EMBEDDED_CARDS: &str = include_str!("../templates/account/support_cards.md");
 const EMBEDDED_UMAS: &str = include_str!("../templates/account/umas.md");
@@ -159,13 +159,16 @@ pub enum Source {
 }
 
 impl Roster {
-    /// Load from the umaLord folder when given, else from the build-time snapshot.
+    /// Load from the UmaYu folder when given, else from the build-time snapshot.
     pub fn load(root: Option<&Path>) -> (Roster, Source) {
         if let Some(root) = root {
             let cards = std::fs::read_to_string(root.join(CARDS_FILE));
             let umas = std::fs::read_to_string(root.join(UMAS_FILE));
             if let (Ok(cards), Ok(umas)) = (cards, umas) {
-                return (Self::parse(&cards, &umas), Source::Folder(root.to_path_buf()));
+                return (
+                    Self::parse(&cards, &umas),
+                    Source::Folder(root.to_path_buf()),
+                );
             }
         }
         (Self::parse(EMBEDDED_CARDS, EMBEDDED_UMAS), Source::Embedded)
@@ -200,7 +203,7 @@ pub const SAMPLE_CARDS: &str = include_str!("../tests/fixtures/support_cards.md"
 #[cfg(test)]
 pub const SAMPLE_UMAS: &str = include_str!("../tests/fixtures/umas.md");
 
-/// Finds the umaLord folder: the one containing `account/support_cards.md`, or the game data
+/// Finds the UmaYu folder: the one containing `account/support_cards.md`, or the game data
 /// (`knowledge/data`) on a new install, before the app has written the account files.
 /// Checks an explicit path, `UMALORD_ROOT`, the current dir, the exe's dir and their
 /// ancestors, and finally the folder this crate was built from.
@@ -209,13 +212,24 @@ pub fn find_root(explicit: Option<PathBuf>) -> Option<PathBuf> {
     starts.extend(explicit);
     starts.extend(std::env::var_os("UMALORD_ROOT").map(PathBuf::from));
     starts.extend(std::env::current_dir().ok());
-    starts.extend(std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)));
+    starts.extend(
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(Path::to_path_buf)),
+    );
     starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
 
     starts
         .iter()
         .flat_map(|start| start.ancestors())
-        .find(|dir| dir.join(CARDS_FILE).is_file() || dir.join("knowledge").join("data").join("skills.json").is_file())
+        .find(|dir| {
+            dir.join(CARDS_FILE).is_file()
+                || dir
+                    .join("knowledge")
+                    .join("data")
+                    .join("skills.json")
+                    .is_file()
+        })
         .map(Path::to_path_buf)
 }
 
@@ -229,7 +243,9 @@ pub(crate) struct Table {
 
 impl Table {
     fn col(&self, name: &str) -> Option<usize> {
-        self.headers.iter().position(|h| h.eq_ignore_ascii_case(name))
+        self.headers
+            .iter()
+            .position(|h| h.eq_ignore_ascii_case(name))
     }
 
     fn has_cols(&self, names: &[&str]) -> bool {
@@ -290,7 +306,12 @@ fn meta_value(md: &str, key: &str) -> Option<String> {
     let prefix = format!("- {key}:");
     md.lines().find_map(|line| {
         let value = line.trim().strip_prefix(&prefix)?.trim().replace("**", "");
-        let value = value.split([',', '.']).next().unwrap_or(&value).trim().to_string();
+        let value = value
+            .split([',', '.'])
+            .next()
+            .unwrap_or(&value)
+            .trim()
+            .to_string();
         (!value.is_empty() && value != "—").then_some(value)
     })
 }
@@ -309,11 +330,30 @@ pub fn set_meta(md: &str, key: &str, value: &str) -> String {
     let newline = if md.contains("\r\n") { "\r\n" } else { "\n" };
     let prefix = format!("- {key}:");
     let mut lines: Vec<String> = md.lines().map(String::from).collect();
-    let line = format!("{prefix} {}", if value.trim().is_empty() { "—" } else { value.trim() });
-    match lines.iter().position(|l| l.trim_start().starts_with(&prefix)) {
+    let line = format!(
+        "{prefix} {}",
+        if value.trim().is_empty() {
+            "—"
+        } else {
+            value.trim()
+        }
+    );
+    match lines
+        .iter()
+        .position(|l| l.trim_start().starts_with(&prefix))
+    {
         Some(i) => lines[i] = line,
         None => {
-            let at = lines.iter().position(|l| l.starts_with("- ")).unwrap_or_else(|| lines.iter().position(|l| l.starts_with("# ")).map_or(0, |i| i + 2).min(lines.len()));
+            let at = lines
+                .iter()
+                .position(|l| l.starts_with("- "))
+                .unwrap_or_else(|| {
+                    lines
+                        .iter()
+                        .position(|l| l.starts_with("# "))
+                        .map_or(0, |i| i + 2)
+                        .min(lines.len())
+                });
             lines.insert(at, line);
         }
     }
@@ -325,7 +365,9 @@ pub fn set_meta(md: &str, key: &str, value: &str) -> String {
 }
 
 fn cell<'a>(row: &'a [String], idx: Option<usize>) -> &'a str {
-    idx.and_then(|i| row.get(i)).map(String::as_str).unwrap_or("")
+    idx.and_then(|i| row.get(i))
+        .map(String::as_str)
+        .unwrap_or("")
 }
 
 fn parse_cards(md: &str, roster: &mut Roster) {
@@ -333,33 +375,56 @@ fn parse_cards(md: &str, roster: &mut Roster) {
         if !table.has_cols(&["ID", "Card", "Type", "LB", "Level"]) {
             continue;
         }
-        let (c_id, c_card, c_uma, c_type) = (table.col("ID"), table.col("Card"), table.col("Uma"), table.col("Type"));
+        let (c_id, c_card, c_uma, c_type) = (
+            table.col("ID"),
+            table.col("Card"),
+            table.col("Uma"),
+            table.col("Type"),
+        );
         let (c_lb, c_level, c_notes) = (table.col("LB"), table.col("Level"), table.col("Notes"));
 
         for row in &table.rows {
             let (id_text, url) = parse_link(cell(row, c_id));
             let title = cell(row, c_card).to_string();
             let Ok(id) = id_text.parse::<u32>() else {
-                roster.warnings.push(format!("Card row with unreadable ID: {}", row.join(" | ")));
+                roster
+                    .warnings
+                    .push(tf!("Card row with unreadable ID: {}", row.join(" | ")));
                 continue;
             };
             let Some(rarity) = Rarity::from_id(id) else {
-                roster.warnings.push(format!("{id} {title}: ID doesn't encode a rarity"));
+                roster
+                    .warnings
+                    .push(tf!("{} {}: ID doesn't encode a rarity", id, title));
                 continue;
             };
             let Some(card_type) = CardType::parse(cell(row, c_type)) else {
-                roster.warnings.push(format!("{id} {title}: unknown type '{}'", cell(row, c_type)));
+                roster.warnings.push(tf!(
+                    "{} {}: unknown type '{}'",
+                    id,
+                    title,
+                    cell(row, c_type)
+                ));
                 continue;
             };
-            let (Ok(lb), Ok(level)) = (cell(row, c_lb).parse::<u8>(), cell(row, c_level).parse::<u8>()) else {
-                roster.warnings.push(format!("{id} {title}: unreadable LB or level"));
+            let (Ok(lb), Ok(level)) = (
+                cell(row, c_lb).parse::<u8>(),
+                cell(row, c_level).parse::<u8>(),
+            ) else {
+                roster
+                    .warnings
+                    .push(tf!("{} {}: unreadable LB or level", id, title));
                 continue;
             };
             if lb > 4 || level > rarity.max_level(lb) {
-                roster.warnings.push(format!(
-                    "{id} {title}: Lv{level} is above the {} cap of {} at LB{lb}",
+                roster.warnings.push(tf!(
+                    "{} {}: Lv{} is above the {} cap of {} at LB{}",
+                    id,
+                    title,
+                    level,
                     rarity.label(),
-                    rarity.max_level(lb)
+                    rarity.max_level(lb),
+                    lb
                 ));
             }
             roster.cards.push(SupportCard {
@@ -389,21 +454,33 @@ fn parse_umas(md: &str, roster: &mut Roster) {
             table.col("Potential"),
             table.col("Notes"),
         );
-        let c_outfit = table.headers.iter().position(|h| h.to_ascii_lowercase().starts_with("outfit"));
+        let c_outfit = table
+            .headers
+            .iter()
+            .position(|h| h.to_ascii_lowercase().starts_with("outfit"));
 
         for row in &table.rows {
             let (id_text, url) = parse_link(cell(row, c_id));
             let name = cell(row, c_uma).to_string();
             let Ok(id) = id_text.parse::<u32>() else {
-                roster.warnings.push(format!("Uma row with unreadable ID: {}", row.join(" | ")));
+                roster
+                    .warnings
+                    .push(tf!("Uma row with unreadable ID: {}", row.join(" | ")));
                 continue;
             };
-            let (Ok(stars), Ok(potential)) = (cell(row, c_stars).parse::<u8>(), cell(row, c_pot).parse::<u8>()) else {
-                roster.warnings.push(format!("{id} {name}: unreadable stars or potential"));
+            let (Ok(stars), Ok(potential)) = (
+                cell(row, c_stars).parse::<u8>(),
+                cell(row, c_pot).parse::<u8>(),
+            ) else {
+                roster
+                    .warnings
+                    .push(tf!("{} {}: unreadable stars or potential", id, name));
                 continue;
             };
             if !(1..=5).contains(&stars) || !(1..=5).contains(&potential) {
-                roster.warnings.push(format!("{id} {name}: stars and potential must be 1–5"));
+                roster
+                    .warnings
+                    .push(tf!("{} {}: stars and potential must be 1–5", id, name));
             }
             roster.umas.push(Uma {
                 id,
@@ -439,7 +516,9 @@ pub fn card_url(id: u32) -> String {
 }
 
 fn type_order(t: &str) -> usize {
-    CardType::parse(t).map_or(9, |t| CardType::ALL.iter().position(|x| *x == t).unwrap_or(9))
+    CardType::parse(t).map_or(9, |t| {
+        CardType::ALL.iter().position(|x| *x == t).unwrap_or(9)
+    })
 }
 
 /// Add a card to its rarity's table, in type → LB → level order, or update the LB, level (and
@@ -448,10 +527,16 @@ fn type_order(t: &str) -> usize {
 pub fn upsert_card(md: &str, row: &CardRow, today: &str) -> Result<(String, bool), String> {
     let newline = if md.contains("\r\n") { "\r\n" } else { "\n" };
     let mut lines: Vec<String> = md.lines().map(String::from).collect();
-    let rarity = Rarity::from_id(row.id).ok_or("That ID doesn't encode a rarity.")?;
+    let rarity = Rarity::from_id(row.id)
+        .ok_or_else(|| t!("That ID doesn't encode a rarity.").to_string())?;
     let cap = rarity.max_level(row.lb);
     if row.lb > 4 || row.level == 0 || row.level > cap {
-        return Err(format!("Level must be 1–{cap} for {} at LB{}.", rarity.label(), row.lb));
+        return Err(tf!(
+            "Level must be 1–{} for {} at LB{}.",
+            cap,
+            rarity.label(),
+            row.lb
+        ));
     }
     let marker = format!("[{}](", row.id);
     let cell_for = |headers: &[String], row: &CardRow| -> Vec<String> {
@@ -472,12 +557,23 @@ pub fn upsert_card(md: &str, row: &CardRow, today: &str) -> Result<(String, bool
     let render = |cells: &[String]| format!("| {} |", cells.join(" | ")).replace("|  |", "| |");
     // Header of the table a body line belongs to.
     let header_above = |lines: &[String], i: usize| -> Option<Vec<String>> {
-        (0..i).rev().find(|&k| k + 1 < lines.len() && lines[k].trim_start().starts_with('|') && is_separator(&lines[k + 1])).map(|k| split_row(&lines[k]))
+        (0..i)
+            .rev()
+            .find(|&k| {
+                k + 1 < lines.len()
+                    && lines[k].trim_start().starts_with('|')
+                    && is_separator(&lines[k + 1])
+            })
+            .map(|k| split_row(&lines[k]))
     };
-    let existing = lines.iter().position(|l| l.trim_start().starts_with('|') && split_row(l).first().is_some_and(|c| c.starts_with(&marker)));
+    let existing = lines.iter().position(|l| {
+        l.trim_start().starts_with('|')
+            && split_row(l).first().is_some_and(|c| c.starts_with(&marker))
+    });
     let updated = existing.is_some();
     if let Some(i) = existing {
-        let headers = header_above(&lines, i).ok_or("Couldn't find the card table's header.")?;
+        let headers = header_above(&lines, i)
+            .ok_or_else(|| t!("Couldn't find the card table's header.").to_string())?;
         let mut cells = split_row(&lines[i]);
         cells.resize(headers.len(), String::new());
         for (k, h) in headers.iter().enumerate() {
@@ -505,14 +601,24 @@ pub fn upsert_card(md: &str, row: &CardRow, today: &str) -> Result<(String, bool
             }
         };
         let header_at = (section..lines.len())
-            .find(|&k| k + 1 < lines.len() && lines[k].trim_start().starts_with('|') && is_separator(&lines[k + 1]))
-            .ok_or("Couldn't find the card table under the rarity heading.")?;
+            .find(|&k| {
+                k + 1 < lines.len()
+                    && lines[k].trim_start().starts_with('|')
+                    && is_separator(&lines[k + 1])
+            })
+            .ok_or_else(|| {
+                t!("Couldn't find the card table under the rarity heading.").to_string()
+            })?;
         let headers = split_row(&lines[header_at]);
         let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
         let (c_type, c_lb, c_level) = (col("Type"), col("LB"), col("Level"));
         let key = |cells: &[String]| {
             let get = |c: Option<usize>| c.and_then(|i| cells.get(i)).cloned().unwrap_or_default();
-            (type_order(&get(c_type)), std::cmp::Reverse(get(c_lb).parse::<u8>().unwrap_or(0)), std::cmp::Reverse(get(c_level).parse::<u8>().unwrap_or(0)))
+            (
+                type_order(&get(c_type)),
+                std::cmp::Reverse(get(c_lb).parse::<u8>().unwrap_or(0)),
+                std::cmp::Reverse(get(c_level).parse::<u8>().unwrap_or(0)),
+            )
         };
         let new_cells = cell_for(&headers, row);
         let new_key = key(&new_cells);
@@ -526,8 +632,14 @@ pub fn upsert_card(md: &str, row: &CardRow, today: &str) -> Result<(String, bool
         lines.insert(at, render(&new_cells));
     }
     // "Last updated" gets today's date; the rest of that line stays.
-    if let Some(l) = lines.iter_mut().find(|l| l.trim_start().starts_with("- Last updated:")) {
-        let rest = l.split_once(',').map(|(_, r)| format!(",{r}")).unwrap_or_default();
+    if let Some(l) = lines
+        .iter_mut()
+        .find(|l| l.trim_start().starts_with("- Last updated:"))
+    {
+        let rest = l
+            .split_once(',')
+            .map(|(_, r)| format!(",{r}"))
+            .unwrap_or_default();
         *l = format!("- Last updated: {today}{rest}");
     }
     let mut text = lines.join(newline);
@@ -541,15 +653,28 @@ pub fn upsert_card(md: &str, row: &CardRow, today: &str) -> Result<(String, bool
 pub fn refresh_card_summary(md: &str) -> String {
     let mut roster = Roster::default();
     parse_cards(md, &mut roster);
-    let count = |r: Rarity, f: &dyn Fn(&SupportCard) -> bool| roster.cards.iter().filter(|c| c.rarity == r && f(c)).count();
+    let count = |r: Rarity, f: &dyn Fn(&SupportCard) -> bool| {
+        roster
+            .cards
+            .iter()
+            .filter(|c| c.rarity == r && f(c))
+            .count()
+    };
     let newline = if md.contains("\r\n") { "\r\n" } else { "\n" };
     let mut lines: Vec<String> = md.lines().map(String::from).collect();
-    if let Some(l) = lines.iter_mut().find(|l| l.trim_start().starts_with("- Totals:")) {
+    if let Some(l) = lines
+        .iter_mut()
+        .find(|l| l.trim_start().starts_with("- Totals:"))
+    {
         let mut parts = Vec::new();
         for r in [Rarity::SSR, Rarity::SR, Rarity::R] {
             let n = count(r, &|_| true);
             if n > 0 {
-                parts.push(format!("{n} {} ({} MLB)", r.label(), count(r, &|c| c.is_mlb())));
+                parts.push(format!(
+                    "{n} {} ({} MLB)",
+                    r.label(),
+                    count(r, &|c| c.is_mlb())
+                ));
             }
         }
         let list = match parts.len() {
@@ -559,16 +684,29 @@ pub fn refresh_card_summary(md: &str) -> String {
         };
         *l = format!("- Totals: {} cards. {list}.", roster.cards.len());
     }
-    let summary = tables(md).into_iter().position(|t| t.headers.first().is_some_and(|h| h == "Type") && t.headers.iter().any(|h| h.starts_with("SSR")));
+    let summary = tables(md).into_iter().position(|t| {
+        t.headers.first().is_some_and(|h| h == "Type")
+            && t.headers.iter().any(|h| h.starts_with("SSR"))
+    });
     if summary.is_some() {
         for line in lines.iter_mut() {
             let cells = split_row(line);
-            let Some(t) = cells.first().and_then(|c| CardType::parse(c)) else { continue };
+            let Some(t) = cells.first().and_then(|c| CardType::parse(c)) else {
+                continue;
+            };
             if cells.len() != 6 || !line.trim_start().starts_with('|') {
                 continue;
             }
-            let of = |r: Rarity, f: &dyn Fn(&SupportCard) -> bool| count(r, &|c| c.card_type == t && f(c));
-            let sr_dash = |n: usize| if n == 0 && matches!(t, CardType::Pal | CardType::Group) { "—".to_string() } else { n.to_string() };
+            let of = |r: Rarity, f: &dyn Fn(&SupportCard) -> bool| {
+                count(r, &|c| c.card_type == t && f(c))
+            };
+            let sr_dash = |n: usize| {
+                if n == 0 && matches!(t, CardType::Pal | CardType::Group) {
+                    "—".to_string()
+                } else {
+                    n.to_string()
+                }
+            };
             *line = format!(
                 "| {} | {} | {} | {} | {} | {} |",
                 t.label(),
@@ -607,12 +745,21 @@ pub fn uma_url(id: u32) -> String {
 /// The table line of the row whose ID cell links `id`, if any.
 fn row_index(lines: &[String], id: u32) -> Option<usize> {
     let marker = format!("[{id}](");
-    lines.iter().position(|l| l.trim_start().starts_with('|') && split_row(l).first().is_some_and(|c| c.starts_with(&marker)))
+    lines.iter().position(|l| {
+        l.trim_start().starts_with('|')
+            && split_row(l).first().is_some_and(|c| c.starts_with(&marker))
+    })
 }
 
 fn stamp_updated(lines: &mut [String], today: &str) {
-    if let Some(l) = lines.iter_mut().find(|l| l.trim_start().starts_with("- Last updated:")) {
-        let rest = l.split_once(',').map(|(_, r)| format!(",{r}")).unwrap_or_default();
+    if let Some(l) = lines
+        .iter_mut()
+        .find(|l| l.trim_start().starts_with("- Last updated:"))
+    {
+        let rest = l
+            .split_once(',')
+            .map(|(_, r)| format!(",{r}"))
+            .unwrap_or_default();
         *l = format!("- Last updated: {today}{rest}");
     }
 }
@@ -631,15 +778,22 @@ fn join_like(md: &str, lines: &[String]) -> String {
 /// recounts the totals line. Returns the new text and whether she was already listed.
 pub fn upsert_uma(md: &str, row: &UmaRow, today: &str) -> Result<(String, bool), String> {
     if !(1..=5).contains(&row.stars) || !(1..=5).contains(&row.potential) {
-        return Err("Stars and potential run 1–5.".into());
+        return Err(t!("Stars and potential run 1–5.").into());
     }
     let mut lines: Vec<String> = md.lines().map(String::from).collect();
     let header_at = (0..lines.len())
-        .find(|&k| k + 1 < lines.len() && lines[k].trim_start().starts_with('|') && is_separator(&lines[k + 1]) && {
-            let h = split_row(&lines[k]);
-            ["ID", "Uma", "Stars", "Potential"].iter().all(|n| h.iter().any(|x| x.eq_ignore_ascii_case(n)))
+        .find(|&k| {
+            k + 1 < lines.len()
+                && lines[k].trim_start().starts_with('|')
+                && is_separator(&lines[k + 1])
+                && {
+                    let h = split_row(&lines[k]);
+                    ["ID", "Uma", "Stars", "Potential"]
+                        .iter()
+                        .all(|n| h.iter().any(|x| x.eq_ignore_ascii_case(n)))
+                }
         })
-        .ok_or("Couldn't find the uma table in account/umas.md.")?;
+        .ok_or_else(|| t!("Couldn't find the uma table in account/umas.md.").to_string())?;
     let headers = split_row(&lines[header_at]);
     let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
     let (c_stars, c_id) = (col("Stars"), col("ID"));
@@ -659,7 +813,9 @@ pub fn upsert_uma(md: &str, row: &UmaRow, today: &str) -> Result<(String, bool),
         // Keep whatever else the row says (notes, an edited outfit name).
         let old = split_row(&lines[i]);
         for (k, h) in headers.iter().enumerate() {
-            if !matches!(h.to_ascii_lowercase().as_str(), "stars" | "potential") && let Some(v) = old.get(k).filter(|v| !v.is_empty()) {
+            if !matches!(h.to_ascii_lowercase().as_str(), "stars" | "potential")
+                && let Some(v) = old.get(k).filter(|v| !v.is_empty())
+            {
                 cells[k] = v.clone();
             }
         }
@@ -667,7 +823,10 @@ pub fn upsert_uma(md: &str, row: &UmaRow, today: &str) -> Result<(String, bool),
     }
     let key = |cells: &[String]| {
         let get = |c: Option<usize>| c.and_then(|i| cells.get(i)).cloned().unwrap_or_default();
-        (std::cmp::Reverse(get(c_stars).parse::<u8>().unwrap_or(0)), parse_link(&get(c_id)).0.parse::<u32>().unwrap_or(0))
+        (
+            std::cmp::Reverse(get(c_stars).parse::<u8>().unwrap_or(0)),
+            parse_link(&get(c_id)).0.parse::<u32>().unwrap_or(0),
+        )
     };
     let new_key = key(&cells);
     let mut at = header_at + 2;
@@ -677,9 +836,15 @@ pub fn upsert_uma(md: &str, row: &UmaRow, today: &str) -> Result<(String, bool),
         }
         at += 1;
     }
-    lines.insert(at, format!("| {} |", cells.join(" | ")).replace("|  |", "| |"));
+    lines.insert(
+        at,
+        format!("| {} |", cells.join(" | ")).replace("|  |", "| |"),
+    );
     stamp_updated(&mut lines, today);
-    Ok((refresh_uma_summary(&join_like(md, &lines)), existing.is_some()))
+    Ok((
+        refresh_uma_summary(&join_like(md, &lines)),
+        existing.is_some(),
+    ))
 }
 
 /// Recount the "- Totals:" line of umas.md: "57 trainees. 12 at 5★, 23 at 4★. 42 are at Potential 5."
@@ -687,14 +852,27 @@ pub fn refresh_uma_summary(md: &str) -> String {
     let mut roster = Roster::default();
     parse_umas(md, &mut roster);
     let mut lines: Vec<String> = md.lines().map(String::from).collect();
-    if let Some(l) = lines.iter_mut().find(|l| l.trim_start().starts_with("- Totals:")) {
+    if let Some(l) = lines
+        .iter_mut()
+        .find(|l| l.trim_start().starts_with("- Totals:"))
+    {
         let n = roster.umas.len();
-        let groups: Vec<String> = (1..=5u8).rev().filter_map(|s| {
-            let k = roster.umas.iter().filter(|u| u.stars == s).count();
-            (k > 0).then(|| format!("{k} at {s}★"))
-        }).collect();
+        let groups: Vec<String> = (1..=5u8)
+            .rev()
+            .filter_map(|s| {
+                let k = roster.umas.iter().filter(|u| u.stars == s).count();
+                (k > 0).then(|| format!("{k} at {s}★"))
+            })
+            .collect();
         let p5 = roster.umas.iter().filter(|u| u.potential >= 5).count();
-        *l = if n == 0 { "- Totals: 0 trainees.".to_string() } else { format!("- Totals: {n} trainees. {}. {p5} are at Potential 5.", groups.join(", ")) };
+        *l = if n == 0 {
+            "- Totals: 0 trainees.".to_string()
+        } else {
+            format!(
+                "- Totals: {n} trainees. {}. {p5} are at Potential 5.",
+                groups.join(", ")
+            )
+        };
     }
     join_like(md, &lines)
 }
@@ -707,7 +885,11 @@ pub fn remove_row(md: &str, id: u32, today: &str) -> Option<String> {
     lines.remove(i);
     stamp_updated(&mut lines, today);
     let text = join_like(md, &lines);
-    Some(if text.contains("## Summary by type") { refresh_card_summary(&text) } else { refresh_uma_summary(&text) })
+    Some(if text.contains("## Summary by type") {
+        refresh_card_summary(&text)
+    } else {
+        refresh_uma_summary(&text)
+    })
 }
 
 #[cfg(test)]
@@ -724,14 +906,38 @@ mod tests {
         assert_eq!(refresh_uma_summary(EMBEDDED_UMAS), EMBEDDED_UMAS);
         // Adding a card it already has at the same LB and level leaves the tables as they were.
         let first = Roster::parse(EMBEDDED_CARDS, EMBEDDED_UMAS).cards[0].clone();
-        let row = CardRow { id: first.id, title: first.title, uma: first.uma, card_type: first.card_type, lb: first.lb, level: first.level, notes: String::new() };
+        let row = CardRow {
+            id: first.id,
+            title: first.title,
+            uma: first.uma,
+            card_type: first.card_type,
+            lb: first.lb,
+            level: first.level,
+            notes: String::new(),
+        };
         let (out, updated) = upsert_card(EMBEDDED_CARDS, &row, "2026-10-15").unwrap();
         assert!(updated);
-        let strip = |s: &str| s.lines().filter(|l| !l.starts_with("- Last updated")).collect::<Vec<_>>().join("\n");
+        let strip = |s: &str| {
+            s.lines()
+                .filter(|l| !l.starts_with("- Last updated"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         assert_eq!(strip(&out), strip(EMBEDDED_CARDS));
         // The same for an uma.
         let u = Roster::sample().umas[0].clone();
-        let (out, updated) = upsert_uma(EMBEDDED_UMAS, &UmaRow { id: u.id, name: u.name, outfit: u.outfit, stars: u.stars, potential: u.potential }, "2026-10-15").unwrap();
+        let (out, updated) = upsert_uma(
+            EMBEDDED_UMAS,
+            &UmaRow {
+                id: u.id,
+                name: u.name,
+                outfit: u.outfit,
+                stars: u.stars,
+                potential: u.potential,
+            },
+            "2026-10-15",
+        )
+        .unwrap();
         assert!(updated);
         assert_eq!(strip(&out), strip(EMBEDDED_UMAS));
     }
@@ -742,52 +948,130 @@ mod tests {
         let umas = include_str!("../templates/account/umas.md");
         let cards = include_str!("../templates/account/support_cards.md");
         assert!(Roster::parse(cards, umas).is_empty());
-        let oguri = UmaRow { id: 100601, name: "Oguri Cap".into(), outfit: "Starlight Beat".into(), stars: 3, potential: 1 };
+        let oguri = UmaRow {
+            id: 100601,
+            name: "Oguri Cap".into(),
+            outfit: "Starlight Beat".into(),
+            stars: 3,
+            potential: 1,
+        };
         let (umas, added) = upsert_uma(umas, &oguri, "2026-10-18").unwrap();
         assert!(!added);
-        let (umas, _) = upsert_uma(&umas, &UmaRow { id: 100101, name: "Special Week".into(), outfit: "Special Dreamer".into(), stars: 4, potential: 5 }, "2026-10-18").unwrap();
+        let (umas, _) = upsert_uma(
+            &umas,
+            &UmaRow {
+                id: 100101,
+                name: "Special Week".into(),
+                outfit: "Special Dreamer".into(),
+                stars: 4,
+                potential: 5,
+            },
+            "2026-10-18",
+        )
+        .unwrap();
         // Raising Oguri to 5★ moves her to the top.
-        let (umas, updated) = upsert_uma(&umas, &UmaRow { stars: 5, ..oguri }, "2026-10-18").unwrap();
+        let (umas, updated) =
+            upsert_uma(&umas, &UmaRow { stars: 5, ..oguri }, "2026-10-18").unwrap();
         assert!(updated);
         let r = Roster::parse("", &umas);
-        assert_eq!(r.umas.iter().map(|u| (u.id, u.stars)).collect::<Vec<_>>(), vec![(100601, 5), (100101, 4)]);
-        assert!(umas.contains("- Totals: 2 trainees. 1 at 5★, 1 at 4★. 1 are at Potential 5."), "{umas}");
+        assert_eq!(
+            r.umas.iter().map(|u| (u.id, u.stars)).collect::<Vec<_>>(),
+            vec![(100601, 5), (100101, 4)]
+        );
+        assert!(
+            umas.contains("- Totals: 2 trainees. 1 at 5★, 1 at 4★. 1 are at Potential 5."),
+            "{umas}"
+        );
         assert!(umas.contains("- Last updated: 2026-10-18"));
-        let row = CardRow { id: 30028, title: "Fire at My Heels".into(), uma: "Kitasan Black".into(), card_type: CardType::Speed, lb: 4, level: 50, notes: String::new() };
+        let row = CardRow {
+            id: 30028,
+            title: "Fire at My Heels".into(),
+            uma: "Kitasan Black".into(),
+            card_type: CardType::Speed,
+            lb: 4,
+            level: 50,
+            notes: String::new(),
+        };
         let (cards, _) = upsert_card(cards, &row, "2026-10-18").unwrap();
-        assert!(cards.contains("- Totals: 1 cards. 1 SSR (1 MLB)."), "{cards}");
+        assert!(
+            cards.contains("- Totals: 1 cards. 1 SSR (1 MLB)."),
+            "{cards}"
+        );
         let cards = remove_row(&cards, 30028, "2026-10-18").unwrap();
-        assert!(cards.contains("- Totals: 0 cards.") && Roster::parse(&cards, "").cards.is_empty(), "{cards}");
+        assert!(
+            cards.contains("- Totals: 0 cards.") && Roster::parse(&cards, "").cards.is_empty(),
+            "{cards}"
+        );
         let umas = remove_row(&umas, 100601, "2026-10-18").unwrap();
         assert_eq!(Roster::parse("", &umas).umas.len(), 1);
         assert!(remove_row(&umas, 100601, "x").is_none());
         let named = set_meta(&umas, "Profile", "Sam's account");
-        assert_eq!(Roster::parse("", &named).profile.as_deref(), Some("Sam's account"));
+        assert_eq!(
+            Roster::parse("", &named).profile.as_deref(),
+            Some("Sam's account")
+        );
     }
 
     #[test]
     fn adds_and_updates_cards() {
         let md = "- Last updated: 2026-10-15, from screenshots.\n- Totals: 1 cards. 1 SSR (1 MLB).\n\n## Summary by type\n\n| Type | SSR MLB | SSR LB1–3 | SSR LB0 | SR MLB | SR below MLB |\n|---|---|---|---|---|---|\n| Speed | 1 | 0 | 0 | 0 | 0 |\n| Wit | 0 | 0 | 0 | 0 | 0 |\n\n## SSR\n\n| ID | Card | Uma | Type | LB | Level | Notes |\n|---|---|---|---|---|---|---|\n| [30076](x) | Searching for Unseen Sights | Silence Suzuka | Speed | 4 | 50 | |\n| [30010](x) | Wave of Gratitude | Fine Motion | Wit | 4 | 50 | |\n";
-        let row = CardRow { id: 30028, title: "Fire at My Heels".into(), uma: "Kitasan Black".into(), card_type: CardType::Speed, lb: 2, level: 40, notes: String::new() };
+        let row = CardRow {
+            id: 30028,
+            title: "Fire at My Heels".into(),
+            uma: "Kitasan Black".into(),
+            card_type: CardType::Speed,
+            lb: 2,
+            level: 40,
+            notes: String::new(),
+        };
         let (out, updated) = upsert_card(md, &row, "2026-10-17").unwrap();
         assert!(!updated);
         let r = Roster::parse(&out, "");
         let ids: Vec<u32> = r.cards.iter().map(|c| c.id).collect();
-        assert_eq!(ids, vec![30076, 30028, 30010], "speed cards together, MLB first:\n{out}");
+        assert_eq!(
+            ids,
+            vec![30076, 30028, 30010],
+            "speed cards together, MLB first:\n{out}"
+        );
         assert!(out.contains("- Last updated: 2026-10-17, from screenshots."));
         assert!(out.contains("- Totals: 3 cards. 3 SSR (2 MLB)."), "{out}");
         assert!(out.contains("| Speed | 1 | 1 | 0 | 0 | 0 |"), "{out}");
         // A new copy: same card, higher LB.
-        let row = CardRow { lb: 4, level: 50, ..row };
+        let row = CardRow {
+            lb: 4,
+            level: 50,
+            ..row
+        };
         let (out, updated) = upsert_card(&out, &row, "2026-10-17").unwrap();
         assert!(updated);
-        let kita = Roster::parse(&out, "").cards.into_iter().find(|c| c.id == 30028).unwrap();
+        let kita = Roster::parse(&out, "")
+            .cards
+            .into_iter()
+            .find(|c| c.id == 30028)
+            .unwrap();
         assert_eq!((kita.lb, kita.level), (4, 50));
         // An SR when there's no SR section yet gets one.
-        let sr = CardRow { id: 20039, title: "An Annoying Supervisor".into(), uma: "Vodka".into(), card_type: CardType::Speed, lb: 0, level: 25, notes: "new".into() };
+        let sr = CardRow {
+            id: 20039,
+            title: "An Annoying Supervisor".into(),
+            uma: "Vodka".into(),
+            card_type: CardType::Speed,
+            lb: 0,
+            level: 25,
+            notes: "new".into(),
+        };
         let (out, _) = upsert_card(&out, &sr, "2026-10-17").unwrap();
-        assert!(out.contains("## SR") && Roster::parse(&out, "").cards.iter().any(|c| c.id == 20039 && c.notes == "new"));
-        assert!(upsert_card(&out, &CardRow { level: 51, ..sr }, "x").is_err(), "level above the cap");
+        assert!(
+            out.contains("## SR")
+                && Roster::parse(&out, "")
+                    .cards
+                    .iter()
+                    .any(|c| c.id == 20039 && c.notes == "new")
+        );
+        assert!(
+            upsert_card(&out, &CardRow { level: 51, ..sr }, "x").is_err(),
+            "level above the cap"
+        );
     }
 
     const CARDS: &str = "\
@@ -817,10 +1101,26 @@ mod tests {
     #[test]
     fn parses_cards_by_header() {
         let r = Roster::parse(CARDS, UMAS);
-        assert_eq!(r.cards.len(), 3, "the LB-cap table must not be read as cards");
+        assert_eq!(
+            r.cards.len(),
+            3,
+            "the LB-cap table must not be read as cards"
+        );
         let suzuka = &r.cards[0];
-        assert_eq!((suzuka.id, suzuka.rarity, suzuka.card_type, suzuka.lb, suzuka.level), (30076, Rarity::SSR, CardType::Speed, 4, 50));
-        assert_eq!(suzuka.url, "https://uma.guide/support-cards/detail?id=30076");
+        assert_eq!(
+            (
+                suzuka.id,
+                suzuka.rarity,
+                suzuka.card_type,
+                suzuka.lb,
+                suzuka.level
+            ),
+            (30076, Rarity::SSR, CardType::Speed, 4, 50)
+        );
+        assert_eq!(
+            suzuka.url,
+            "https://uma.guide/support-cards/detail?id=30076"
+        );
         assert_eq!(r.cards[1].rarity, Rarity::SR);
         assert_eq!(r.cards[1].notes, "note");
         assert_eq!(r.cards_updated.as_deref(), Some("2026-10-15"));

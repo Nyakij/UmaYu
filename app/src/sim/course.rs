@@ -95,11 +95,18 @@ impl Course {
     }
 
     pub fn last_straight(&self) -> Region {
-        self.straights.last().map_or(Region::new(self.distance, self.distance), |s| Region::new(s.start, s.end))
+        self.straights
+            .last()
+            .map_or(Region::new(self.distance, self.distance), |s| {
+                Region::new(s.start, s.end)
+            })
     }
 
     pub fn corner_regions(&self) -> Vec<Region> {
-        self.corners.iter().map(|c| Region::new(c.start, c.start + c.length)).collect()
+        self.corners
+            .iter()
+            .map(|c| Region::new(c.start, c.start + c.length))
+            .collect()
     }
 
     /// 1 + the course's stat bonus: +5% per 300 of each listed stat, averaged (capped at 901).
@@ -108,7 +115,11 @@ impl Course {
             1..=5 => stats[(stat - 1) as usize].min(901.0),
             _ => 0.0,
         };
-        let sum: f64 = self.course_set_status.iter().map(|s| (1.0 + (value(*s) / 300.01).floor()) * 0.05).sum();
+        let sum: f64 = self
+            .course_set_status
+            .iter()
+            .map(|s| (1.0 + (value(*s) / 300.01).floor()) * 0.05)
+            .sum();
         1.0 + sum / (self.course_set_status.len().max(1) as f64)
     }
 }

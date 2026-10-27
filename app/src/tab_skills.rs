@@ -8,18 +8,26 @@ use egui_extras::Column;
 use serde::{Deserialize, Serialize};
 
 use crate::collection_kit::{self as kit, SortOption};
-use crate::ui_util::UiExt;
 use crate::knowledge::{Distance, SkillSource, Style, Surface, effects_text};
 use crate::tab_umas::FILTER_W;
 use crate::theme::{pal, size};
+use crate::ui_util::UiExt;
 use crate::ui_util::{
-    DataTable, FilterBarAction, FilterSection, SortKey, TableCol, TableSort, active_filter_bar, badge, card, card_explained, card_titled, empty_state,
-    semibold, sort_rows, tier_color,
+    DataTable, FilterBarAction, FilterSection, SortKey, TableCol, TableSort, active_filter_bar,
+    badge, card, card_explained, card_titled, empty_state, semibold, sort_rows, tier_color,
 };
 use crate::{App, Jump};
 
 pub const TIERS: [&str; 5] = ["White", "Gold", "Unique", "Inherited unique", "Evolved"];
-pub const CATEGORIES: [&str; 7] = ["Speed Boost", "Acceleration", "Recovery", "Passive", "Debuff", "Lane Effect", "Vision"];
+pub const CATEGORIES: [&str; 7] = [
+    "Speed Boost",
+    "Acceleration",
+    "Recovery",
+    "Passive",
+    "Debuff",
+    "Lane Effect",
+    "Vision",
+];
 
 fn category_icon(c: &str) -> &'static str {
     match c {
@@ -47,7 +55,11 @@ pub(crate) struct SkillFilter {
 
 impl SkillFilter {
     pub fn count(&self) -> usize {
-        self.tiers.len() + self.categories.len() + usize::from(self.style.is_some()) + usize::from(self.distance.is_some()) + usize::from(self.surface.is_some())
+        self.tiers.len()
+            + self.categories.len()
+            + usize::from(self.style.is_some())
+            + usize::from(self.distance.is_some())
+            + usize::from(self.surface.is_some())
     }
 }
 
@@ -103,7 +115,10 @@ impl Default for SkillsState {
             filter: SkillFilter::default(),
             available_only: false,
             course: None,
-            sort: TableSort { key: "game", desc: false },
+            sort: TableSort {
+                key: "game",
+                desc: false,
+            },
             selected: None,
             scroll_to: false,
             initialised: false,
@@ -132,9 +147,16 @@ impl App {
             }
         }
         if !self.kb.is_loaded() {
-            egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-                empty_state(ui, "⚡", "No skill data", &self.kb.error.clone().unwrap_or_default());
-            });
+            egui::CentralPanel::default()
+                .frame(crate::page_frame())
+                .show(ui, |ui| {
+                    empty_state(
+                        ui,
+                        "⚡",
+                        "No skill data",
+                        &self.kb.error.clone().unwrap_or_default(),
+                    );
+                });
             return;
         }
         let ctx = ui.ctx().clone();
@@ -147,46 +169,85 @@ impl App {
         // A narrow window with the details open, or with a table: fold the filters so the list
         // keeps its room.
         let table_fold = !kit::opened_by_hand(&ctx, "skills");
-        let auto_fold = !collapsed && ui.available_width() < 1100.0 && !self.focus_search.get() && (self.skills.selected.is_some() || table_fold);
+        let auto_fold = !collapsed
+            && ui.available_width() < 1100.0
+            && !self.focus_search.get()
+            && (self.skills.selected.is_some() || table_fold);
         collapsed |= auto_fold;
-        let active = self.skills.filter.count() + usize::from(!self.skills.search.trim().is_empty()) + usize::from(self.skills.course.is_some());
+        let active = self.skills.filter.count()
+            + usize::from(!self.skills.search.trim().is_empty())
+            + usize::from(self.skills.course.is_some());
         if collapsed {
-            egui::Panel::left("skill_filters_rail").resizable(false).exact_size(kit::RAIL_W).frame(kit::rail_frame()).show(ui, |ui| {
-                if kit::rail(ui, active, &[("🔍", "Search"), ("✨", "Rarity and type"), ("🏇", "Works for"), ("🏁", "Course")]) {
-                    if auto_fold {
-                        self.skills.selected = None;
-                        kit::open_by_hand(&ctx, "skills");
-                    } else {
-                        kit::set_rail(&ctx, "skills", false);
+            egui::Panel::left("skill_filters_rail")
+                .resizable(false)
+                .exact_size(kit::RAIL_W)
+                .frame(kit::rail_frame())
+                .show(ui, |ui| {
+                    if kit::rail(
+                        ui,
+                        active,
+                        &[
+                            ("🔍", "Search"),
+                            ("✨", "Rarity and type"),
+                            ("🏇", "Works for"),
+                            ("🏁", "Course"),
+                        ],
+                    ) {
+                        if auto_fold {
+                            self.skills.selected = None;
+                            kit::open_by_hand(&ctx, "skills");
+                        } else {
+                            kit::set_rail(&ctx, "skills", false);
+                        }
                     }
-                }
-            });
+                });
         } else {
-            egui::Panel::left("skill_filters").resizable(false).exact_size(FILTER_W).frame(crate::side_frame()).show(ui, |ui| {
-                if kit::sidebar_head(ui, active) {
-                    kit::set_rail(&ctx, "skills", true);
-                }
-                egui::ScrollArea::vertical().show(ui, |ui| self.skill_filters(ui));
-            });
+            egui::Panel::left("skill_filters")
+                .resizable(false)
+                .exact_size(FILTER_W)
+                .frame(crate::side_frame())
+                .show(ui, |ui| {
+                    if kit::sidebar_head(ui, active) {
+                        kit::set_rail(&ctx, "skills", true);
+                    }
+                    egui::ScrollArea::vertical().show(ui, |ui| self.skill_filters(ui));
+                });
         }
         if let Some(id) = self.skills.selected {
-            egui::Panel::right("skill_detail").resizable(true).default_size(440.0).min_size(330.0).frame(crate::side_frame()).show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.skill_detail(ui, id));
-            });
+            egui::Panel::right("skill_detail")
+                .resizable(true)
+                .default_size(440.0)
+                .min_size(330.0)
+                .frame(crate::side_frame())
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.skill_detail(ui, id));
+                });
         }
         let list = self.filtered_skills();
-        egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-            self.skill_results_header(ui, &list);
-            if list.is_empty() {
-                empty_state(ui, "🔍", "No skills match", "Loosen the filters, or switch to All skills.");
-            } else {
-                self.skill_table(ui, &list);
-            }
-        });
+        egui::CentralPanel::default()
+            .frame(crate::page_frame())
+            .show(ui, |ui| {
+                self.skill_results_header(ui, &list);
+                if list.is_empty() {
+                    empty_state(
+                        ui,
+                        "🔍",
+                        "No skills match",
+                        "Loosen the filters, or switch to All skills.",
+                    );
+                } else {
+                    self.skill_table(ui, &list);
+                }
+            });
     }
 
     fn skill_results_header(&mut self, ui: &mut egui::Ui, list: &[u32]) {
-        let available = self.kb.skills.keys().filter(|id| self.skill_available(**id)).count();
+        let available = self
+            .kb
+            .skills
+            .keys()
+            .filter(|id| self.skill_available(**id))
+            .count();
         let total = self.kb.skills.len();
         let cols = self.skill_cols();
         // Too narrow for one line: the tools move to a second, and the sort with them when even
@@ -196,12 +257,12 @@ impl App {
         ui.horizontal(|ui| {
             ui.set_min_height(30.0);
             let options = [
-                (true, format!("Ones I can get ({available})"), "From an uma you own (with her potential unlocked far enough), or a hint or event on a card you own"),
-                (false, format!("All skills ({total})"), "Every skill on the Global server"),
+                (true, tf!("Ones I can get ({available})"), "From an uma you own (with her potential unlocked far enough), or a hint or event on a card you own"),
+                (false, tf!("All skills ({total})"), "Every skill on the Global server"),
             ];
             crate::ui_util::segmented(ui, &mut self.skills.available_only, &options);
             ui.add_space(8.0);
-            let shown = if list.len() == if self.skills.available_only { available } else { total } { format!("{} skills", list.len()) } else { format!("Showing {}", list.len()) };
+            let shown = if list.len() == if self.skills.available_only { available } else { total } { tf!("{} skills", list.len()) } else { tf!("Showing {}", list.len()) };
             ui.label(semibold(shown, size::BODY));
             if !very_narrow {
                 ui.add_space(8.0);
@@ -219,7 +280,9 @@ impl App {
                     kit::sort_picker(ui, "skill_sort", &mut self.skills.sort, &SKILL_SORTS);
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.table_tools(ui, "skills", &cols, list.len(), |app, (r, k)| app.skill_text(list[r], k));
+                    self.table_tools(ui, "skills", &cols, list.len(), |app, (r, k)| {
+                        app.skill_text(list[r], k)
+                    });
                 });
             });
         }
@@ -240,10 +303,32 @@ impl App {
             ui.horizontal(|ui| {
                 if checking {
                     ui.spinner();
-                    ui.label(RichText::new(format!("Checking which skills can activate on {}…", c.label)).size(size::SM).color(p.weak));
+                    ui.label(
+                        RichText::new(tf!(
+                            "Checking which skills can activate on {}…",
+                            t!(&c.label)
+                        ))
+                        .size(size::SM)
+                        .color(p.weak),
+                    );
                 } else {
-                    let off = if c.disabled.is_empty() { String::new() } else { format!(" Struck-through skills are turned off in the {}.", c.cm.clone().unwrap_or_default()) };
-                    ui.label(RichText::new(format!("Only skills that can activate on {} (simulator check).{off}", c.label)).size(size::SM).color(p.weak));
+                    let off = if c.disabled.is_empty() {
+                        String::new()
+                    } else {
+                        tf!(
+                            " Struck-through skills are turned off in the {}.",
+                            c.cm.clone().unwrap_or_default()
+                        )
+                    };
+                    ui.label(
+                        RichText::new(tf!(
+                            "Only skills that can activate on {} (simulator check).{}",
+                            t!(&c.label),
+                            off
+                        ))
+                        .size(size::SM)
+                        .color(p.weak),
+                    );
                 }
             });
         }
@@ -254,21 +339,34 @@ impl App {
         let f = &self.skills.filter;
         let mut out = Vec::new();
         if !self.skills.search.trim().is_empty() {
-            out.push((format!("“{}”", self.skills.search.trim()), SkillChip::Search));
+            out.push((
+                format!("“{}”", self.skills.search.trim()),
+                SkillChip::Search,
+            ));
         }
-        out.extend(TIERS.iter().filter(|t| f.tiers.contains(**t)).map(|t| (t.to_string(), SkillChip::Tier(t))));
-        out.extend(CATEGORIES.iter().filter(|c| f.categories.contains(**c)).map(|c| (format!("{} {c}", category_icon(c)), SkillChip::Category(c))));
+        out.extend(
+            TIERS
+                .iter()
+                .filter(|t| f.tiers.contains(**t))
+                .map(|t| (t.to_string(), SkillChip::Tier(t))),
+        );
+        out.extend(
+            CATEGORIES
+                .iter()
+                .filter(|c| f.categories.contains(**c))
+                .map(|c| (format!("{} {c}", category_icon(c)), SkillChip::Category(c))),
+        );
         if let Some(s) = f.style {
-            out.push((format!("For {}", s.label()), SkillChip::Style));
+            out.push((tf!("For {}", s.label()), SkillChip::Style));
         }
         if let Some(d) = f.distance {
-            out.push((format!("For {}", d.label()), SkillChip::Distance));
+            out.push((tf!("For {}", d.label()), SkillChip::Distance));
         }
         if let Some(s) = f.surface {
-            out.push((format!("For {}", s.label()), SkillChip::Surface));
+            out.push((tf!("For {}", s.label()), SkillChip::Surface));
         }
         if let Some(c) = &self.skills.course {
-            out.push((format!("Activates on {}", c.label), SkillChip::Course));
+            out.push((tf!("Activates on {}", t!(&c.label)), SkillChip::Course));
         }
         out
     }
@@ -292,15 +390,52 @@ impl App {
 
     fn skill_filters(&mut self, ui: &mut egui::Ui) {
         let focus = self.focus_search.take();
-        kit::search_box(ui, &mut self.skills.search, "🔍 Search name or effect (Ctrl+F)", focus);
+        kit::search_box(
+            ui,
+            &mut self.skills.search,
+            t!("🔍 Search name or effect (Ctrl+F)"),
+            focus,
+        );
         let builtins = [
-            ("Golds", "Gold skills: stronger, and usually need their white version first", SkillFilter { tiers: ["Gold".to_string()].into(), ..Default::default() }),
-            ("Recovery", "Skills that restore HP", SkillFilter { categories: ["Recovery".to_string()].into(), ..Default::default() }),
-            ("Speed boosts", "Skills that raise speed", SkillFilter { categories: ["Speed Boost".to_string()].into(), ..Default::default() }),
+            (
+                "Golds",
+                "Gold skills: stronger, and usually need their white version first",
+                SkillFilter {
+                    tiers: ["Gold".to_string()].into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Recovery",
+                "Skills that restore HP",
+                SkillFilter {
+                    categories: ["Recovery".to_string()].into(),
+                    ..Default::default()
+                },
+            ),
+            (
+                "Speed boosts",
+                "Skills that raise speed",
+                SkillFilter {
+                    categories: ["Speed Boost".to_string()].into(),
+                    ..Default::default()
+                },
+            ),
         ];
         kit::quick_views(ui, "skills", &mut self.skills.filter, &builtins);
         let f = &mut self.skills.filter;
-        let tiers: Vec<_> = TIERS.iter().map(|t| (*t, t.to_string(), None, Some(tier_color(ui, t)), String::new())).collect();
+        let tiers: Vec<_> = TIERS
+            .iter()
+            .map(|t| {
+                (
+                    *t,
+                    t.to_string(),
+                    None,
+                    Some(tier_color(ui, t)),
+                    String::new(),
+                )
+            })
+            .collect();
         if FilterSection::new("Rarity")
             .help("White skills are the ordinary ones. Gold skills are stronger and usually need their white version first. Unique and evolved skills belong to particular umas.")
             .active(f.tiers.len())
@@ -310,7 +445,18 @@ impl App {
         {
             f.tiers.clear();
         }
-        let cats: Vec<_> = CATEGORIES.iter().map(|c| (*c, format!("{} {c}", category_icon(c)), None, None, String::new())).collect();
+        let cats: Vec<_> = CATEGORIES
+            .iter()
+            .map(|c| {
+                (
+                    *c,
+                    format!("{} {c}", category_icon(c)),
+                    None,
+                    None,
+                    String::new(),
+                )
+            })
+            .collect();
         if FilterSection::new("What it does")
             .help("Speed Boost raises speed; Acceleration helps reach top speed sooner; Recovery restores HP; Passive raises stats; Debuff hinders rivals; Lane Effect and Vision change how she moves through the field.")
             .active(f.categories.len())
@@ -320,19 +466,21 @@ impl App {
         {
             f.categories.clear();
         }
-        let n = usize::from(f.style.is_some()) + usize::from(f.distance.is_some()) + usize::from(f.surface.is_some());
+        let n = usize::from(f.style.is_some())
+            + usize::from(f.distance.is_some())
+            + usize::from(f.surface.is_some());
         if FilterSection::new("Works for")
             .help("Many skills only work for one running style, distance or surface. Pick one to hide skills locked to something else. Click again to clear.")
             .active(n)
             .show(ui, |ui| {
                 let weak = pal(ui).weak;
-                ui.label(RichText::new("Style").size(size::XS).color(weak));
+                ui.label(RichText::new(t!("Style")).size(size::XS).color(weak));
                 let styles: Vec<(Style, &str)> = Style::ALL.iter().map(|s| (*s, s.short())).collect();
                 kit::option_chips(ui, &mut f.style, &styles);
-                ui.label(RichText::new("Distance").size(size::XS).color(weak));
+                ui.label(RichText::new(t!("Distance")).size(size::XS).color(weak));
                 let dists: Vec<(Distance, &str)> = Distance::ALL.iter().map(|d| (*d, d.label())).collect();
                 kit::option_chips(ui, &mut f.distance, &dists);
-                ui.label(RichText::new("Surface").size(size::XS).color(weak));
+                ui.label(RichText::new(t!("Surface")).size(size::XS).color(weak));
                 let surfs: Vec<(Surface, &str)> = Surface::ALL.iter().map(|s| (*s, s.label())).collect();
                 kit::option_chips(ui, &mut f.surface, &surfs);
             })
@@ -355,35 +503,65 @@ impl App {
     /// The Course filter: the next CMs as chips, the plan's course, or any course.
     fn course_filter(&mut self, ui: &mut egui::Ui) {
         let Some(data) = self.sim_data.clone() else {
-            ui.label(RichText::new("The simulator's data isn't loaded.").size(size::SM).color(pal(ui).warn));
+            ui.label(
+                RichText::new(t!("The simulator's data isn't loaded."))
+                    .size(size::SM)
+                    .color(pal(ui).warn),
+            );
             return;
         };
         let today = crate::ui_util::today();
-        let cms: Vec<_> = self.kb.upcoming_cms(&today).into_iter().take(3).cloned().collect();
+        let cms: Vec<_> = self
+            .kb
+            .upcoming_cms(&today)
+            .into_iter()
+            .take(3)
+            .cloned()
+            .collect();
         let mut pick: Option<Option<CourseCheck>> = None;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
             for e in &cms {
-                let on = self.skills.course.as_ref().is_some_and(|c| c.cm.as_deref() == Some(e.name.as_str()) && c.course == e.course);
+                let on = self.skills.course.as_ref().is_some_and(|c| {
+                    c.cm.as_deref() == Some(e.name.as_str()) && c.course == e.course
+                });
                 let mark = if e.announced { "✔" } else { "?" };
-                let hover = format!("{} · {}\n{}", e.course_name, e.conditions, e.status_explained());
-                if crate::ui_util::chip(ui, on, &format!("{mark} {}", e.short_label()), None).on_hover_text(hover).clicked() {
+                let hover = format!(
+                    "{} · {}\n{}",
+                    e.course_name,
+                    e.conditions,
+                    e.status_explained()
+                );
+                if crate::ui_util::chip(ui, on, &format!("{mark} {}", e.short_label()), None)
+                    .on_hover_text(hover)
+                    .clicked()
+                {
                     pick = Some((!on).then(|| CourseCheck {
                         course: e.course,
                         conditions: [e.ground, e.weather, e.season, e.time],
                         cm: Some(e.name.clone()),
                         disabled: e.disabled_skills.clone(),
-                        label: format!("the {}", e.name),
+                        label: tf!("the {}", e.name),
                     }));
                 }
             }
             let setup = self.plan_race_setup();
             if let Some(course) = setup.course {
-                let on = self.skills.course.as_ref().is_some_and(|c| c.cm.is_none() && c.course == course && c.label == "your plan's course");
-                if crate::ui_util::chip(ui, on, "📋 Your plan's course", None).on_hover_text(data.course_name(course)).clicked() {
+                let on = self.skills.course.as_ref().is_some_and(|c| {
+                    c.cm.is_none() && c.course == course && c.label == "your plan's course"
+                });
+                if crate::ui_util::chip(ui, on, t!("📋 Your plan's course"), None)
+                    .on_hover_text(data.course_name(course))
+                    .clicked()
+                {
                     pick = Some((!on).then(|| CourseCheck {
                         course,
-                        conditions: [setup.ground.unwrap_or(1), setup.weather.unwrap_or(1), setup.season.unwrap_or(1), setup.time.unwrap_or(2)],
+                        conditions: [
+                            setup.ground.unwrap_or(1),
+                            setup.weather.unwrap_or(1),
+                            setup.season.unwrap_or(1),
+                            setup.time.unwrap_or(2),
+                        ],
                         cm: None,
                         disabled: Vec::new(),
                         label: "your plan's course".to_string(),
@@ -392,22 +570,49 @@ impl App {
             }
         });
         let items = || {
-            let mut by_track: Vec<(&u32, &crate::sim::course::Course)> = data.courses.iter().collect();
+            let mut by_track: Vec<(&u32, &crate::sim::course::Course)> =
+                data.courses.iter().collect();
             by_track.sort_by_key(|(id, c)| (c.race_track_id, c.surface, c.distance as u32, **id));
             let mut items: Vec<(Option<u32>, String, String)> = Vec::new();
             let mut last = None;
             for (id, c) in by_track {
                 if last != Some(c.race_track_id) {
-                    items.push((None, data.tracks.get(&c.race_track_id).cloned().unwrap_or_default(), String::new()));
+                    items.push((
+                        None,
+                        data.tracks
+                            .get(&c.race_track_id)
+                            .cloned()
+                            .unwrap_or_default(),
+                        String::new(),
+                    ));
                     last = Some(c.race_track_id);
                 }
                 items.push((Some(*id), data.course_name(*id), String::new()));
             }
             items
         };
-        let current = self.skills.course.as_ref().filter(|c| c.cm.is_none() && c.label != "your plan's course").map(|c| data.course_name(c.course)).unwrap_or_else(|| "Any course…".to_string());
-        if let Some(id) = crate::ui_util::search_combo(ui, "skill_course", current, ui.available_width() - 8.0, items, self.skills.course.as_ref().map(|c| &c.course)) {
-            pick = Some(Some(CourseCheck { course: id, conditions: [1, 1, 1, 2], cm: None, disabled: Vec::new(), label: data.course_name(id) }));
+        let current = self
+            .skills
+            .course
+            .as_ref()
+            .filter(|c| c.cm.is_none() && c.label != "your plan's course")
+            .map(|c| data.course_name(c.course))
+            .unwrap_or_else(|| t!("Any course…").to_string());
+        if let Some(id) = crate::ui_util::search_combo(
+            ui,
+            "skill_course",
+            current,
+            ui.available_width() - 8.0,
+            items,
+            self.skills.course.as_ref().map(|c| &c.course),
+        ) {
+            pick = Some(Some(CourseCheck {
+                course: id,
+                conditions: [1, 1, 1, 2],
+                cm: None,
+                disabled: Vec::new(),
+                label: data.course_name(id),
+            }));
         }
         if let Some(p) = pick {
             self.skills.course = p;
@@ -417,8 +622,12 @@ impl App {
             && c.cm.is_none()
         {
             let weak = pal(ui).weak;
-            ui.label(RichText::new("Conditions").size(size::XS).color(weak));
-            for (list, i) in [(&crate::tab_sim::GROUNDS[..], 0), (&crate::tab_sim::WEATHERS[..], 1), (&crate::tab_sim::SEASONS[..], 2)] {
+            ui.label(RichText::new(t!("Conditions")).size(size::XS).color(weak));
+            for (list, i) in [
+                (&crate::tab_sim::GROUNDS[..], 0),
+                (&crate::tab_sim::WEATHERS[..], 1),
+                (&crate::tab_sim::SEASONS[..], 2),
+            ] {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
                     for (n, name) in list.iter().enumerate() {
@@ -444,14 +653,25 @@ impl App {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
-        let Some(check) = self.skills.course.clone() else { return };
-        let want = ActKey { check, style: self.skills.filter.style };
-        let have = self.skills.activation.as_ref().is_some_and(|(k, _)| *k == want);
+        let Some(check) = self.skills.course.clone() else {
+            return;
+        };
+        let want = ActKey {
+            check,
+            style: self.skills.filter.style,
+        };
+        let have = self
+            .skills
+            .activation
+            .as_ref()
+            .is_some_and(|(k, _)| *k == want);
         let running = self.skills.job.as_ref().is_some_and(|(k, _)| *k == want);
         if have || running {
             return;
         }
-        let Some(data) = self.sim_data.clone() else { return };
+        let Some(data) = self.sim_data.clone() else {
+            return;
+        };
         let ids: Vec<u32> = self.kb.skills.keys().copied().collect();
         let (tx, rx) = mpsc::channel();
         let key = want.clone();
@@ -466,23 +686,35 @@ impl App {
 
     /// Whether a skill passes the course filter (while the check runs, everything does).
     fn skill_course_ok(&self, id: u32) -> bool {
-        let Some(c) = &self.skills.course else { return true };
+        let Some(c) = &self.skills.course else {
+            return true;
+        };
         if c.disabled.contains(&id) {
             return true;
         }
         match &self.skills.activation {
-            Some((k, map)) if k.check == *c && k.style == self.skills.filter.style => map.get(&id).copied().flatten().unwrap_or(true),
+            Some((k, map)) if k.check == *c && k.style == self.skills.filter.style => {
+                map.get(&id).copied().flatten().unwrap_or(true)
+            }
             _ => true,
         }
     }
 
     /// Whether the course check couldn't test this skill.
     fn skill_unchecked(&self, id: u32) -> bool {
-        self.skills.course.is_some() && self.skills.activation.as_ref().is_some_and(|(_, m)| matches!(m.get(&id), Some(None)))
+        self.skills.course.is_some()
+            && self
+                .skills
+                .activation
+                .as_ref()
+                .is_some_and(|(_, m)| matches!(m.get(&id), Some(None)))
     }
 
     fn skill_disabled_here(&self, id: u32) -> bool {
-        self.skills.course.as_ref().is_some_and(|c| c.disabled.contains(&id))
+        self.skills
+            .course
+            .as_ref()
+            .is_some_and(|c| c.disabled.contains(&id))
     }
 
     pub(crate) fn filtered_skills(&self) -> Vec<u32> {
@@ -501,12 +733,17 @@ impl App {
                     && k.tags().fits(f.style, f.distance, f.surface)
                     && (!s.available_only || self.skill_available(*id))
                     && self.skill_course_ok(*id)
-                    && (q.is_empty() || k.name.to_lowercase().contains(&q) || k.summary.to_lowercase().contains(&q) || k.desc.to_lowercase().contains(&q))
+                    && (q.is_empty()
+                        || k.name.to_lowercase().contains(&q)
+                        || k.summary.to_lowercase().contains(&q)
+                        || k.desc.to_lowercase().contains(&q))
             })
             .collect();
         if s.sort.key != "game" {
             let gains = self.skill_gains();
-            sort_rows(&mut list, s.sort.desc, |id| self.skill_sort_key(*id, s.sort.key, gains));
+            sort_rows(&mut list, s.sort.desc, |id| {
+                self.skill_sort_key(*id, s.sort.key, gains)
+            });
         } else if s.sort.desc {
             list.reverse();
         }
@@ -516,16 +753,27 @@ impl App {
     /// The planner's simulated gains, when the course filter is on the plan's course.
     fn skill_gains(&self) -> Option<&crate::tab_planner::SkillValues> {
         let c = self.skills.course.as_ref()?;
-        (self.plan_race_setup().course == Some(c.course)).then(|| self.planner.current_skill_values(self.plan_key())).flatten()
+        (self.plan_race_setup().course == Some(c.course))
+            .then(|| self.planner.current_skill_values(self.plan_key()))
+            .flatten()
     }
 
-    fn skill_sort_key(&self, id: u32, key: &str, gains: Option<&crate::tab_planner::SkillValues>) -> SortKey {
+    fn skill_sort_key(
+        &self,
+        id: u32,
+        key: &str,
+        gains: Option<&crate::tab_planner::SkillValues>,
+    ) -> SortKey {
         let k = &self.kb.skills[&id];
         match key {
             "name" => SortKey::Text(k.name.clone()),
             "sp" => SortKey::Num(f64::from(k.sp)),
             "from" => SortKey::Num(self.owned_sources(id).len() as f64),
-            "gain" => SortKey::Num(gains.and_then(|g| g.rows.get(&id)).map_or(f64::NEG_INFINITY, |r| r.mean)),
+            "gain" => SortKey::Num(
+                gains
+                    .and_then(|g| g.rows.get(&id))
+                    .map_or(f64::NEG_INFINITY, |r| r.mean),
+            ),
             "category" => SortKey::Text(k.category.clone()),
             "tier" => SortKey::Num(TIERS.iter().position(|t| *t == k.tier()).unwrap_or(9) as f64),
             "only" => SortKey::Text(self.kb.tag_line(&k.tags())),
@@ -543,7 +791,12 @@ impl App {
             let item = if let Some(u) = src.uma() {
                 self.owned_uma(u).map(|o| (Jump::Uma(u), o.display_name()))
             } else {
-                src.card().and_then(|c| self.owned_card(c)).map(|o| (Jump::Card(o.id), format!("{} {} card [{}]", o.uma, o.card_type.label(), o.title)))
+                src.card().and_then(|c| self.owned_card(c)).map(|o| {
+                    (
+                        Jump::Card(o.id),
+                        format!("{} {} card [{}]", o.uma, o.card_type.label(), o.title),
+                    )
+                })
             };
             if let Some(item) = item
                 && !out.iter().any(|(j, _)| *j == item.0)
@@ -556,18 +809,47 @@ impl App {
 
     fn skill_cols(&self) -> Vec<TableCol> {
         let mut cols = vec![
-            TableCol::new("name", "Skill").width(Column::initial(220.0).at_least(150.0).clip(true)).sort_asc().hover("Its colour shows its rarity: white, gold, or pink for unique and evolved"),
-            TableCol::new("sp", "SP").width(Column::exact(54.0)).right().sort_desc().hover("Skill points it costs before hint discounts"),
-            TableCol::new("effect", "Effect").width(Column::initial(220.0).at_least(140.0).clip(true)).hover("Its effect at base strength"),
-            TableCol::new("trigger", "When").width(Column::initial(250.0).at_least(140.0).clip(true)).hover("When it triggers, from uma.guide's summary. Hover a cell for all of it."),
-            TableCol::new("only", "Only for").width(Column::initial(130.0).at_least(80.0).clip(true)).sort_asc().hover("The running style, distance or surface it's locked to; blank means any"),
-            TableCol::new("from", "From").width(Column::exact(130.0)).sort_desc().hover("Umas and cards you own that can give you this skill. Hover for names."),
+            TableCol::new("name", "Skill")
+                .width(Column::initial(220.0).at_least(150.0).clip(true))
+                .sort_asc()
+                .hover("Its colour shows its rarity: white, gold, or pink for unique and evolved"),
+            TableCol::new("sp", "SP")
+                .width(Column::exact(54.0))
+                .right()
+                .sort_desc()
+                .hover("Skill points it costs before hint discounts"),
+            TableCol::new("effect", "Effect")
+                .width(Column::initial(220.0).at_least(140.0).clip(true))
+                .hover("Its effect at base strength"),
+            TableCol::new("trigger", "When")
+                .width(Column::initial(250.0).at_least(140.0).clip(true))
+                .hover("When it triggers, from uma.guide's summary. Hover a cell for all of it."),
+            TableCol::new("only", "Only for")
+                .width(Column::initial(130.0).at_least(80.0).clip(true))
+                .sort_asc()
+                .hover("The running style, distance or surface it's locked to; blank means any"),
+            TableCol::new("from", "From")
+                .width(Column::exact(130.0))
+                .sort_desc()
+                .hover("Umas and cards you own that can give you this skill. Hover for names."),
         ];
         if self.skill_gains().is_some() {
             cols.push(TableCol::new("gain", "Gain").width(Column::exact(76.0)).right().sort_desc().hover("Lengths it gains on your plan's course, from the planner's skill simulation"));
         }
-        cols.push(TableCol::new("category", "Type").width(Column::exact(130.0)).sort_asc().optional(true).hover("What the skill does"));
-        cols.push(TableCol::new("tier", "Rarity").width(Column::exact(110.0)).sort_asc().optional(true).hover("White, gold, unique, inherited unique (from a parent) or evolved"));
+        cols.push(
+            TableCol::new("category", "Type")
+                .width(Column::exact(130.0))
+                .sort_asc()
+                .optional(true)
+                .hover("What the skill does"),
+        );
+        cols.push(
+            TableCol::new("tier", "Rarity")
+                .width(Column::exact(110.0))
+                .sort_asc()
+                .optional(true)
+                .hover("White, gold, unique, inherited unique (from a parent) or evolved"),
+        );
         cols
     }
 
@@ -580,8 +862,17 @@ impl App {
             "effect" => k.effect_text(),
             "trigger" => k.summary.clone(),
             "only" => self.kb.tag_line(&k.tags()),
-            "from" => self.owned_sources(id).into_iter().map(|(_, n)| n).collect::<Vec<_>>().join("; "),
-            "gain" => self.skill_gains().and_then(|g| g.rows.get(&id)).map(|r| format!("{:.2}", r.mean)).unwrap_or_default(),
+            "from" => self
+                .owned_sources(id)
+                .into_iter()
+                .map(|(_, n)| n)
+                .collect::<Vec<_>>()
+                .join("; "),
+            "gain" => self
+                .skill_gains()
+                .and_then(|g| g.rows.get(&id))
+                .map(|r| format!("{:.2}", r.mean))
+                .unwrap_or_default(),
             "category" => k.category.clone(),
             "tier" => k.tier().to_string(),
             _ => String::new(),
@@ -590,8 +881,15 @@ impl App {
 
     fn skill_table(&mut self, ui: &mut egui::Ui, list: &[u32]) {
         let cols = self.skill_cols();
-        let selected = self.skills.selected.and_then(|id| list.iter().position(|x| *x == id));
-        let scroll_row = if self.skills.scroll_to { selected } else { None };
+        let selected = self
+            .skills
+            .selected
+            .and_then(|id| list.iter().position(|x| *x == id));
+        let scroll_row = if self.skills.scroll_to {
+            selected
+        } else {
+            None
+        };
         self.skills.scroll_to = false;
         let gains = self.skill_gains();
         let mut sort = self.skills.sort;
@@ -612,9 +910,9 @@ impl App {
                             }
                             let r = crate::ui_util::pill(ui, text, c.gamma_multiply(0.10), Stroke::new(1.0, c.gamma_multiply(0.45)));
                             if off {
-                                r.on_hover_text(format!("Turned off in the {}: it won't activate there.", self.skills.course.as_ref().and_then(|c| c.cm.clone()).unwrap_or_default()));
+                                r.on_hover_text(tf!("Turned off in the {}: it won't activate there.", self.skills.course.as_ref().and_then(|c| c.cm.clone()).unwrap_or_default()));
                             } else if self.skill_unchecked(id) {
-                                ui.label(RichText::new("?").color(p.weak)).on_hover_text("The simulator can't check this skill (most are scenario skills), so it stays in the list.");
+                                ui.label(RichText::new("?").color(p.weak)).on_hover_text(t!("The simulator can't check this skill (most are scenario skills), so it stays in the list."));
                             }
                         }
                         "sp" => {
@@ -689,21 +987,34 @@ impl App {
             };
             match self.art_uri(sub, item) {
                 Some(uri) => {
-                    ui.add(egui::Image::new(uri).fit_to_exact_size(size).corner_radius(CornerRadius::same(4))).on_hover_text(name);
+                    ui.add(
+                        egui::Image::new(uri)
+                            .fit_to_exact_size(size)
+                            .corner_radius(CornerRadius::same(4)),
+                    )
+                    .on_hover_text(name);
                 }
                 None => {
-                    ui.label(RichText::new(if sub == "umas" { "🐴" } else { "🃏" }).size(size::SM)).on_hover_text(name);
+                    ui.label(RichText::new(if sub == "umas" { "🐴" } else { "🃏" }).size(size::SM))
+                        .on_hover_text(name);
                 }
             }
         }
         if sources.len() > 4 {
             let rest: Vec<&str> = sources[4..].iter().map(|(_, n)| n.as_str()).collect();
-            ui.label(RichText::new(format!("+{}", sources.len() - 4)).size(size::SM).color(pal(ui).weak)).on_hover_text(rest.join("\n"));
+            ui.label(
+                RichText::new(format!("+{}", sources.len() - 4))
+                    .size(size::SM)
+                    .color(pal(ui).weak),
+            )
+            .on_hover_text(rest.join("\n"));
         }
     }
 
     fn skill_detail(&mut self, ui: &mut egui::Ui, id: u32) {
-        let Some(k) = self.kb.skills.get(&id).cloned() else { return };
+        let Some(k) = self.kb.skills.get(&id).cloned() else {
+            return;
+        };
         let p = pal(ui);
         ui.add_space(10.0);
         let mut test = false;
@@ -711,7 +1022,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label(semibold(&k.name, 21.0).color(tier_color(ui, k.tier())));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                    if ui.small_btn("✖").on_hover_text("Close").clicked() {
+                    if ui.small_btn("✖").on_hover_text(t!("Close")).clicked() {
                         self.skills.selected = None;
                     }
                 });
@@ -724,26 +1035,53 @@ impl App {
                     badge(ui, format!("{} SP", k.sp), p.text);
                 }
                 if k.wit_check {
-                    badge(ui, "Wit check", p.weak).on_hover_text("Whether it triggers depends partly on Wit");
+                    badge(ui, t!("Wit check"), p.weak).on_hover_text(t!("Whether it triggers depends partly on Wit"));
                 }
                 if k.grade != 0 {
-                    badge(ui, format!("{:+} rating", k.grade), p.weak).on_hover_text("Evaluation points: what it adds to an uma's rank when learned (uma.guide's data). The game also scales skills tied to a distance or style by her aptitude.");
+                    badge(ui, tf!("{} rating", format!("{:+}", k.grade)), p.weak).on_hover_text(t!("Evaluation points: what it adds to an uma's rank when learned (uma.guide's data). The game also scales skills tied to a distance or style by her aptitude."));
                 }
                 if let Some((tiers, t)) = self.kb.skill_tiers.as_ref().and_then(|x| Some((x, x.get(id)?))) {
-                    badge(ui, format!("Tier list: CM {} · TT {}", t.cm, t.tt), p.gold).on_hover_text(tiers.explain(t));
+                    badge(ui, tf!("Tier list: CM {} · TT {}", t.cm, t.tt), p.gold).on_hover_text(tiers.explain(t));
                 }
             });
             let tags = self.kb.tag_line(&k.tags());
             if !tags.is_empty() {
                 ui.add_space(4.0);
-                ui.label(RichText::new(format!("Only for: {tags}")).color(p.gold));
+                ui.label(RichText::new(tf!("Only for: {}", tags)).color(p.gold));
             }
             if self.skill_disabled_here(id) {
-                ui.label(RichText::new(format!("⚠ Turned off in the {}.", self.skills.course.as_ref().and_then(|c| c.cm.clone()).unwrap_or_default())).color(p.warn));
+                ui.label(
+                    RichText::new(tf!(
+                        "⚠ Turned off in the {}.",
+                        self.skills
+                            .course
+                            .as_ref()
+                            .and_then(|c| c.cm.clone())
+                            .unwrap_or_default()
+                    ))
+                    .color(p.warn),
+                );
             }
             ui.add_space(6.0);
-            let place = self.skills.course.as_ref().map_or("the Race sim's course".to_string(), |c| c.label.clone());
-            if ui.add(crate::ui_util::primary_button(ui, "🏁 Test on a course", size::BODY)).on_hover_text(format!("Open the Race sim on {place}: Uma 1 without this skill, Uma 2 with it")).clicked() {
+            let place = self
+                .skills
+                .course
+                .as_ref()
+                .map_or(t!("the Race sim's course").to_string(), |c| {
+                    t!(&c.label).to_string()
+                });
+            if ui
+                .add(crate::ui_util::primary_button(
+                    ui,
+                    t!("🏁 Test on a course"),
+                    size::BODY,
+                ))
+                .on_hover_text(tf!(
+                    "Open the Race sim on {}: Uma 1 without this skill, Uma 2 with it",
+                    place
+                ))
+                .clicked()
+            {
                 test = true;
             }
         });
@@ -756,91 +1094,162 @@ impl App {
             ui.label(semibold(k.effect_text(), 15.0));
             if k.duration > 0.0 {
                 ui.add_space(4.0);
-                ui.label(RichText::new(format!("Lasts {} s per 1000 m: a race scales it by its distance ÷ 1000, as the simulator does.", k.duration)).size(size::SM).color(p.weak));
-                let here = self.skills.course.as_ref().and_then(|c| self.sim_data.as_ref()?.courses.get(&c.course).map(|x| (c.label.clone(), x.distance)));
-                egui::Grid::new(("durations", id)).num_columns(2).spacing([14.0, 2.0]).show(ui, |ui| {
-                    for (d, name) in [(1200.0, "Sprint 1200 m"), (1600.0, "Mile 1600 m"), (2000.0, "Medium 2000 m"), (2500.0, "Long 2500 m"), (3200.0, "Long 3200 m")] {
-                        ui.label(RichText::new(name).size(size::SM).color(p.weak));
-                        ui.label(RichText::new(format!("{:.1} s", k.duration * d / 1000.0)).size(size::SM));
-                        ui.end_row();
-                    }
-                    if let Some((label, d)) = here {
-                        ui.label(semibold(format!("On {label} ({d:.0} m)"), size::SM));
-                        ui.label(semibold(format!("{:.1} s", k.duration * d / 1000.0), size::SM));
-                        ui.end_row();
-                    }
+                ui.label(RichText::new(tf!("Lasts {} s per 1000 m: a race scales it by its distance ÷ 1000, as the simulator does.", k.duration)).size(size::SM).color(p.weak));
+                let here = self.skills.course.as_ref().and_then(|c| {
+                    self.sim_data
+                        .as_ref()?
+                        .courses
+                        .get(&c.course)
+                        .map(|x| (c.label.clone(), x.distance))
                 });
+                egui::Grid::new(("durations", id))
+                    .num_columns(2)
+                    .spacing([14.0, 2.0])
+                    .show(ui, |ui| {
+                        for (d, name) in [
+                            (1200.0, "Sprint 1200 m"),
+                            (1600.0, "Mile 1600 m"),
+                            (2000.0, "Medium 2000 m"),
+                            (2500.0, "Long 2500 m"),
+                            (3200.0, "Long 3200 m"),
+                        ] {
+                            ui.label(RichText::new(name).size(size::SM).color(p.weak));
+                            ui.label(
+                                RichText::new(format!("{:.1} s", k.duration * d / 1000.0))
+                                    .size(size::SM),
+                            );
+                            ui.end_row();
+                        }
+                        if let Some((label, d)) = here {
+                            ui.label(semibold(
+                                tf!("On {} ({} m)", label, format!("{d:.0}")),
+                                size::SM,
+                            ));
+                            ui.label(semibold(
+                                format!("{:.1} s", k.duration * d / 1000.0),
+                                size::SM,
+                            ));
+                            ui.end_row();
+                        }
+                    });
             }
             if k.cooldown > 0.0 {
-                let cd = if k.cooldown >= 500.0 { "Once per race".to_string() } else { format!("Cooldown {} s (base, before the distance scaling)", k.cooldown) };
+                let cd = if k.cooldown >= 500.0 {
+                    t!("Once per race").to_string()
+                } else {
+                    tf!(
+                        "Cooldown {} s (base, before the distance scaling)",
+                        k.cooldown
+                    )
+                };
                 ui.label(RichText::new(cd).size(size::SM).color(p.weak));
             }
             if !k.summary.is_empty() {
                 ui.add_space(6.0);
-                ui.label(RichText::new("WHEN IT TRIGGERS (uma.guide)").size(11.0).color(p.weak));
+                ui.label(
+                    RichText::new(t!("WHEN IT TRIGGERS (uma.guide)"))
+                        .size(11.0)
+                        .color(p.weak),
+                );
                 ui.label(&k.summary);
             }
             if !k.desc.is_empty() {
                 ui.add_space(6.0);
-                ui.label(RichText::new("IN-GAME DESCRIPTION").size(11.0).color(p.weak));
+                ui.label(
+                    RichText::new(t!("IN-GAME DESCRIPTION"))
+                        .size(11.0)
+                        .color(p.weak),
+                );
                 ui.label(RichText::new(&k.desc).italics());
             }
             ui.add_space(4.0);
-            egui::CollapsingHeader::new("Raw conditions").id_salt(("raw", id)).show(ui, |ui| {
-                ui.label(RichText::new(format!("conditions: {}", k.conditions)).monospace().small());
-                if !k.pre.is_empty() {
-                    ui.label(RichText::new(format!("precondition: {}", k.pre)).monospace().small());
-                }
-                if let Some(alt) = &k.alt {
-                    ui.label(RichText::new(format!("second activation: {}", alt.conditions)).monospace().small());
-                    ui.label(RichText::new(effects_text(&alt.effects)).small());
-                }
-            });
+            egui::CollapsingHeader::new(t!("Raw conditions"))
+                .id_salt(("raw", id))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(tf!("conditions: {}", k.conditions))
+                            .monospace()
+                            .small(),
+                    );
+                    if !k.pre.is_empty() {
+                        ui.label(
+                            RichText::new(tf!("precondition: {}", k.pre))
+                                .monospace()
+                                .small(),
+                        );
+                    }
+                    if let Some(alt) = &k.alt {
+                        ui.label(
+                            RichText::new(tf!("second activation: {}", alt.conditions))
+                                .monospace()
+                                .small(),
+                        );
+                        ui.label(RichText::new(effects_text(&alt.effects)).small());
+                    }
+                });
         });
 
         // White → gold, ○ → ◎.
         let lower = self.lower_version(id);
-        let upper = id.checked_sub(1).filter(|u| self.lower_version(*u) == Some(id));
+        let upper = id
+            .checked_sub(1)
+            .filter(|u| self.lower_version(*u) == Some(id));
         if lower.is_some() || upper.is_some() {
-            card_explained(ui, "Upgrade path", "A gold (or ◎) skill builds on its white (or ○) version: you buy the lower one first, and its cost counts toward the upgrade.", |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let (a, b) = match (lower, upper) {
-                        (Some(l), _) => (l, id),
-                        (None, Some(u)) => (id, u),
-                        (None, None) => (id, id),
-                    };
-                    self.skill_link(ui, a, false);
-                    ui.label(RichText::new("➜").color(p.weak));
-                    self.skill_link(ui, b, false);
-                });
-            });
+            card_explained(
+                ui,
+                "Upgrade path",
+                "A gold (or ◎) skill builds on its white (or ○) version: you buy the lower one first, and its cost counts toward the upgrade.",
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let (a, b) = match (lower, upper) {
+                            (Some(l), _) => (l, id),
+                            (None, Some(u)) => (id, u),
+                            (None, None) => (id, id),
+                        };
+                        self.skill_link(ui, a, false);
+                        ui.label(RichText::new("➜").color(p.weak));
+                        self.skill_link(ui, b, false);
+                    });
+                },
+            );
         }
 
         let srcs = self.kb.sources.get(&id).cloned().unwrap_or_default();
-        let (mine, others): (Vec<SkillSource>, Vec<SkillSource>) = srcs.into_iter().partition(|s| self.source_available(*s));
-        let locked: Vec<SkillSource> = others.iter().copied().filter(|s| matches!(s, SkillSource::Potential(u, _) if self.owned_uma(*u).is_some())).collect();
+        let (mine, others): (Vec<SkillSource>, Vec<SkillSource>) =
+            srcs.into_iter().partition(|s| self.source_available(*s));
+        let locked: Vec<SkillSource> = others
+            .iter()
+            .copied()
+            .filter(|s| matches!(s, SkillSource::Potential(u, _) if self.owned_uma(*u).is_some()))
+            .collect();
         let rest: Vec<SkillSource> = others.into_iter().filter(|s| !locked.contains(s)).collect();
         card_titled(ui, "Where you can get it", |ui| {
             if mine.is_empty() {
-                ui.label(RichText::new("Nothing you own right now.").color(p.weak));
+                ui.label(RichText::new(t!("Nothing you own right now.")).color(p.weak));
             }
             for s in &mine {
                 self.source_row(ui, *s, true);
             }
             if !locked.is_empty() {
                 ui.add_space(6.0);
-                ui.label(RichText::new("🔒 LOCKED BEHIND POTENTIAL").size(11.0).color(pal(ui).warn));
+                ui.label(
+                    RichText::new(t!("🔒 LOCKED BEHIND POTENTIAL"))
+                        .size(11.0)
+                        .color(pal(ui).warn),
+                );
                 for s in &locked {
                     self.source_row(ui, *s, false);
                 }
             }
             if !rest.is_empty() {
                 ui.add_space(4.0);
-                egui::CollapsingHeader::new(format!("Sources you don't own ({})", rest.len())).id_salt(("rest", id)).show(ui, |ui| {
-                    for s in &rest {
-                        self.source_row(ui, *s, false);
-                    }
-                });
+                egui::CollapsingHeader::new(tf!("Sources you don't own ({})", rest.len()))
+                    .id_salt(("rest", id))
+                    .show(ui, |ui| {
+                        for s in &rest {
+                            self.source_row(ui, *s, false);
+                        }
+                    });
             }
         });
         ui.add_space(10.0);
@@ -866,27 +1275,39 @@ impl App {
         self.sim.umas = [base, with];
         self.sim.from_plan = false;
         self.go_career(crate::CareerTab::Race);
-        self.toast(format!("Race sim: Uma 2 is Uma 1 plus {}. Press ▶ Run to see what it's worth.", self.kb.skill_name(id)), crate::ui_util::ToastKind::Info);
+        self.toast(
+            tf!(
+                "Race sim: Uma 2 is Uma 1 plus {}. Press ▶ Run to see what it's worth.",
+                self.kb.skill_name(id)
+            ),
+            crate::ui_util::ToastKind::Info,
+        );
     }
 
     fn source_row(&self, ui: &mut egui::Ui, src: SkillSource, owned: bool) {
         let (what, target) = match src {
-            SkillSource::Unique(u) => ("Unique of", Jump::Uma(u)),
-            SkillSource::Potential(u, 1) => ("Innate for", Jump::Uma(u)),
-            SkillSource::Potential(u, _) => ("Potential skill of", Jump::Uma(u)),
-            SkillSource::UmaEvent(u) => ("Event of", Jump::Uma(u)),
-            SkillSource::Evolved { uma, .. } => ("Evolution for", Jump::Uma(uma)),
-            SkillSource::Hint(c) => ("Hint from", Jump::Card(c)),
-            SkillSource::CardEvent(c) => ("Event of", Jump::Card(c)),
+            SkillSource::Unique(u) => (t!("Unique of"), Jump::Uma(u)),
+            SkillSource::Potential(u, 1) => (t!("Innate for"), Jump::Uma(u)),
+            SkillSource::Potential(u, _) => (t!("Potential skill of"), Jump::Uma(u)),
+            SkillSource::UmaEvent(u) => (t!("Event of"), Jump::Uma(u)),
+            SkillSource::Evolved { uma, .. } => (t!("Evolution for"), Jump::Uma(uma)),
+            SkillSource::Hint(c) => (t!("Hint from"), Jump::Card(c)),
+            SkillSource::CardEvent(c) => (t!("Event of"), Jump::Card(c)),
         };
         let name = match target {
-            Jump::Uma(u) => self.kb.umas.get(&u).map_or(u.to_string(), |i| format!("{} [{}]", i.name, i.outfit)),
-            Jump::Card(c) => self.kb.cards.get(&c).map_or(c.to_string(), |i| format!("{} {} {} [{}]", i.rarity, i.kind, i.uma, i.title)),
+            Jump::Uma(u) => self
+                .kb
+                .umas
+                .get(&u)
+                .map_or(u.to_string(), |i| format!("{} [{}]", i.name, i.outfit)),
+            Jump::Card(c) => self.kb.cards.get(&c).map_or(c.to_string(), |i| {
+                format!("{} {} {} [{}]", i.rarity, i.kind, i.uma, i.title)
+            }),
             Jump::Skill(_) => String::new(),
         };
         let extra = match src {
-            SkillSource::Potential(_, l) if l > 1 => format!(" (P{l})"),
-            SkillSource::Evolved { base, .. } => format!(" (from {})", self.kb.skill_name(base)),
+            SkillSource::Potential(_, l) if l > 1 => tf!(" (P{})", l),
+            SkillSource::Evolved { base, .. } => tf!(" (from {})", self.kb.skill_name(base)),
             _ => String::new(),
         };
         let weak = pal(ui).weak;
@@ -898,7 +1319,11 @@ impl App {
             };
             match self.art_uri(sub, item) {
                 Some(uri) => {
-                    ui.add(egui::Image::new(uri).fit_to_exact_size(size).corner_radius(CornerRadius::same(4)));
+                    ui.add(
+                        egui::Image::new(uri)
+                            .fit_to_exact_size(size)
+                            .corner_radius(CornerRadius::same(4)),
+                    );
                 }
                 None => {
                     ui.add_space(size.x);
@@ -906,7 +1331,11 @@ impl App {
             }
             ui.label(RichText::new(what).color(weak));
             let text = RichText::new(format!("{name}{extra}"));
-            let text = if owned { text.color(pal(ui).good) } else { text };
+            let text = if owned {
+                text.color(pal(ui).good)
+            } else {
+                text
+            };
             let clickable = match target {
                 Jump::Uma(u) => self.owned_uma(u).is_some(),
                 Jump::Card(c) => self.owned_card(c).is_some(),
@@ -925,8 +1354,14 @@ impl App {
 
 /// For each skill, whether it can activate on the check's course and conditions for any running
 /// style (or the one picked); None when the simulator lacks it.
-fn activation_map(data: &crate::sim::data::SimData, key: &ActKey, ids: &[u32]) -> HashMap<u32, Option<bool>> {
-    let Some(course) = data.courses.get(&key.check.course) else { return HashMap::new() };
+fn activation_map(
+    data: &crate::sim::data::SimData,
+    key: &ActKey,
+    ids: &[u32],
+) -> HashMap<u32, Option<bool>> {
+    let Some(course) = data.courses.get(&key.check.course) else {
+        return HashMap::new();
+    };
     let styles: Vec<Style> = match key.style {
         Some(s) => vec![s],
         None => Style::ALL.to_vec(),
@@ -935,7 +1370,14 @@ fn activation_map(data: &crate::sim::data::SimData, key: &ActKey, ids: &[u32]) -
         .map(|&id| {
             let mut result = None;
             for s in &styles {
-                match crate::recommend::skill_can_activate(data, course, key.check.conditions, [1000.0; 5], crate::tab_sim::strategy_of(*s), id) {
+                match crate::recommend::skill_can_activate(
+                    data,
+                    course,
+                    key.check.conditions,
+                    [1000.0; 5],
+                    crate::tab_sim::strategy_of(*s),
+                    id,
+                ) {
                     Some(true) => {
                         result = Some(true);
                         break;
@@ -959,12 +1401,48 @@ mod tests {
     fn course_check_matches_the_simulator() {
         let app = App::for_tests();
         let data = app.sim_data.clone().expect("sim data");
-        let right = data.courses.iter().find(|(_, c)| c.turn == 1).map(|(id, _)| *id).expect("a right-handed course");
-        let left = data.courses.iter().find(|(_, c)| c.turn == 2).map(|(id, _)| *id).expect("a left-handed course");
-        let lefty = app.kb.skills.values().find(|s| s.name == "Left-Handed ○").map(|s| s.id).expect("Left-Handed ○");
-        let check = |course: u32| CourseCheck { course, conditions: [1, 1, 1, 2], cm: None, disabled: Vec::new(), label: String::new() };
-        let on_right = activation_map(&data, &ActKey { check: check(right), style: None }, &[lefty]);
-        let on_left = activation_map(&data, &ActKey { check: check(left), style: None }, &[lefty]);
+        let right = data
+            .courses
+            .iter()
+            .find(|(_, c)| c.turn == 1)
+            .map(|(id, _)| *id)
+            .expect("a right-handed course");
+        let left = data
+            .courses
+            .iter()
+            .find(|(_, c)| c.turn == 2)
+            .map(|(id, _)| *id)
+            .expect("a left-handed course");
+        let lefty = app
+            .kb
+            .skills
+            .values()
+            .find(|s| s.name == "Left-Handed ○")
+            .map(|s| s.id)
+            .expect("Left-Handed ○");
+        let check = |course: u32| CourseCheck {
+            course,
+            conditions: [1, 1, 1, 2],
+            cm: None,
+            disabled: Vec::new(),
+            label: String::new(),
+        };
+        let on_right = activation_map(
+            &data,
+            &ActKey {
+                check: check(right),
+                style: None,
+            },
+            &[lefty],
+        );
+        let on_left = activation_map(
+            &data,
+            &ActKey {
+                check: check(left),
+                style: None,
+            },
+            &[lefty],
+        );
         assert_eq!(on_right[&lefty], Some(false));
         assert_eq!(on_left[&lefty], Some(true));
     }
@@ -972,7 +1450,11 @@ mod tests {
     /// Filters round-trip through settings.json, so saved views keep working.
     #[test]
     fn filters_round_trip() {
-        let f = SkillFilter { tiers: ["Gold".to_string()].into(), style: Some(Style::Front), ..Default::default() };
+        let f = SkillFilter {
+            tiers: ["Gold".to_string()].into(),
+            style: Some(Style::Front),
+            ..Default::default()
+        };
         let back: SkillFilter = serde_json::from_value(serde_json::to_value(&f).unwrap()).unwrap();
         assert_eq!(f, back);
     }

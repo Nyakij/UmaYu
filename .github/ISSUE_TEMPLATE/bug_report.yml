@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in umaLord doesn't work, looks wrong, or crashes.
+description: Something in UmaYu doesn't work, looks wrong, or crashes.
 labels: [bug]
 body:
   - type: markdown
@@ -10,8 +10,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: Which release you're running (the zip's name, e.g. umaLord-v0.2.0.zip).
-      placeholder: v0.2.0
+      description: Which release you're running (the zip's name, e.g. UmaYu-v0.7.1_beta.zip).
+      placeholder: v0.7.1_beta
     validations:
       required: true
   - type: textarea

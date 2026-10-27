@@ -7,7 +7,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, vec2};
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, FontId, Margin, Pos2, Rect, RichText, Sense, Stroke, vec2,
+};
 
 use crate::App;
 use crate::data::{CardType, Rarity};
@@ -30,9 +32,20 @@ impl Step {
     /// The steps of one path through setup, with their labels.
     pub fn path(via_import: bool) -> Vec<(Step, &'static str)> {
         if via_import {
-            vec![(Step::Welcome, "Welcome"), (Step::Import, "Load a profile"), (Step::You, "Make it yours"), (Step::Done, "All set")]
+            vec![
+                (Step::Welcome, "Welcome"),
+                (Step::Import, "Load a profile"),
+                (Step::You, "Make it yours"),
+                (Step::Done, "All set"),
+            ]
         } else {
-            vec![(Step::Welcome, "Welcome"), (Step::You, "Make it yours"), (Step::Umas, "Your umas"), (Step::Cards, "Your cards"), (Step::Done, "All set")]
+            vec![
+                (Step::Welcome, "Welcome"),
+                (Step::You, "Make it yours"),
+                (Step::Umas, "Your umas"),
+                (Step::Cards, "Your cards"),
+                (Step::Done, "All set"),
+            ]
         }
     }
 
@@ -52,9 +65,17 @@ impl Step {
 /// A change to the roster, as setup makes it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Edit {
-    Uma { id: u32, stars: u8, potential: u8 },
+    Uma {
+        id: u32,
+        stars: u8,
+        potential: u8,
+    },
     /// `level: None` sets the most the LB allows.
-    Card { id: u32, lb: u8, level: Option<u8> },
+    Card {
+        id: u32,
+        lb: u8,
+        level: Option<u8>,
+    },
     RemoveUma(u32),
     RemoveCard(u32),
 }
@@ -217,7 +238,9 @@ impl App {
 
     /// After a run of edits: the digest for the Ask tab, once rather than on every click.
     pub(crate) fn finish_setup_edits(&mut self) {
-        if std::mem::take(&mut self.onboarding.dirty) && std::env::var_os("UMALORD_PROFILE").is_none() {
+        if std::mem::take(&mut self.onboarding.dirty)
+            && std::env::var_os("UMALORD_PROFILE").is_none()
+        {
             self.write_digest();
         }
     }
@@ -240,29 +263,49 @@ impl App {
 
     /// The profile's name: what umas.md says, else "My account".
     pub(crate) fn profile_name(&self) -> String {
-        self.roster.profile.clone().unwrap_or_else(|| "My account".into())
+        self.roster
+            .profile
+            .clone()
+            .unwrap_or_else(|| t!("My account").into())
     }
 
     /// Settings → Profile → Save my data: write the account to profiles/.
     pub(crate) fn export_profile(&self) -> Result<PathBuf, String> {
-        let root = self.root.as_ref().ok_or("umaLord folder not found.")?;
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| t!("UmaYu folder not found.").to_string())?;
         profile::export(root, &self.profile_name(), &crate::ui_util::local_today())
     }
 
     fn import_profile(&mut self, p: &Profile) -> Result<String, String> {
-        let root = self.root.clone().ok_or("umaLord folder not found.")?;
+        let root = self
+            .root
+            .clone()
+            .ok_or_else(|| t!("UmaYu folder not found.").to_string())?;
         let saved = profile::import(&root, p, &stamp())?;
         self.account_changed();
-        let mut msg = format!("Loaded {}: {} umas and {} support cards.", p.name, self.roster.umas.len(), self.roster.cards.len());
+        let mut msg = tf!(
+            "Loaded {}: {} umas and {} support cards.",
+            p.name,
+            self.roster.umas.len(),
+            self.roster.cards.len()
+        );
         if let Some(s) = saved {
-            msg += &format!(" What was here before is saved as profiles/backups/{}.", profile::file_name(&s));
+            msg += &tf!(
+                " What was here before is saved as profiles/backups/{}.",
+                profile::file_name(&s)
+            );
         }
         Ok(msg)
     }
 
     /// Back up and empty the account, named for whoever it's for now.
     pub(crate) fn start_over(&mut self, name: &str) -> Result<Option<PathBuf>, String> {
-        let root = self.root.clone().ok_or("umaLord folder not found.")?;
+        let root = self
+            .root
+            .clone()
+            .ok_or_else(|| t!("UmaYu folder not found.").to_string())?;
         let saved = profile::start_over(&root, name, &stamp())?;
         self.account_changed();
         Ok(saved)
@@ -270,10 +313,14 @@ impl App {
 
     /// Write `- Profile: <name>` in account/umas.md.
     pub(crate) fn set_profile_name(&mut self, name: &str) -> Result<(), String> {
-        let root = self.root.clone().ok_or("umaLord folder not found.")?;
+        let root = self
+            .root
+            .clone()
+            .ok_or_else(|| t!("UmaYu folder not found.").to_string())?;
         let path = root.join(crate::data::UMAS_FILE);
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        std::fs::write(&path, crate::data::set_meta(&text, "Profile", name)).map_err(|e| e.to_string())?;
+        std::fs::write(&path, crate::data::set_meta(&text, "Profile", name))
+            .map_err(|e| e.to_string())?;
         self.reload_roster();
         self.onboarding.dirty = true;
         Ok(())
@@ -282,7 +329,11 @@ impl App {
     /// The name from "Make it yours", or "Trainer" if it was left empty.
     fn save_setup_name(&mut self) {
         let name = self.onboarding.name.trim();
-        let name = if name.is_empty() { "Trainer".to_string() } else { name.to_string() };
+        let name = if name.is_empty() {
+            "Trainer".to_string()
+        } else {
+            name.to_string()
+        };
         if self.roster.profile.as_deref() != Some(name.as_str())
             && let Err(e) = self.set_profile_name(&name)
         {
@@ -293,42 +344,78 @@ impl App {
     /// Apply roster changes: each account file is read and written once. With `record`, the
     /// changes can be undone as one action. Returns how many rows changed.
     pub(crate) fn apply_edits(&mut self, edits: &[Edit], record: bool) -> Result<usize, String> {
-        let root = self.root.clone().ok_or("umaLord folder not found.")?;
+        let root = self
+            .root
+            .clone()
+            .ok_or_else(|| t!("UmaYu folder not found.").to_string())?;
         let today = crate::ui_util::local_today();
-        let (up, cp) = (root.join(crate::data::UMAS_FILE), root.join(crate::data::CARDS_FILE));
+        let (up, cp) = (
+            root.join(crate::data::UMAS_FILE),
+            root.join(crate::data::CARDS_FILE),
+        );
         let mut umas = std::fs::read_to_string(&up).map_err(|e| e.to_string())?;
         let mut cards = std::fs::read_to_string(&cp).map_err(|e| e.to_string())?;
         let (mut umas_changed, mut cards_changed) = (false, false);
         let mut undo = Vec::new();
         for e in edits {
             match *e {
-                Edit::Uma { id, stars, potential } => {
-                    let info = self.kb.umas.get(&id).ok_or("No data for that uma.")?;
+                Edit::Uma {
+                    id,
+                    stars,
+                    potential,
+                } => {
+                    let info = self
+                        .kb
+                        .umas
+                        .get(&id)
+                        .ok_or_else(|| t!("No data for that uma.").to_string())?;
                     let before = self.owned_uma(id).map(|u| (u.stars, u.potential));
                     if before == Some((stars, potential)) {
                         continue;
                     }
-                    let row = crate::data::UmaRow { id, name: info.name.clone(), outfit: info.outfit.clone(), stars, potential };
+                    let row = crate::data::UmaRow {
+                        id,
+                        name: info.name.clone(),
+                        outfit: info.outfit.clone(),
+                        stars,
+                        potential,
+                    };
                     umas = crate::data::upsert_uma(&umas, &row, &today)?.0;
                     umas_changed = true;
                     undo.push(Change::Uma { id, before });
                 }
                 Edit::Card { id, lb, level } => {
-                    let info = self.kb.cards.get(&id).ok_or("No data for that card.")?;
-                    let card_type = CardType::parse(&info.kind).ok_or("Unknown card type.")?;
-                    let level = level.unwrap_or_else(|| Rarity::from_id(id).map_or(1, |r| r.max_level(lb)));
+                    let info = self
+                        .kb
+                        .cards
+                        .get(&id)
+                        .ok_or_else(|| t!("No data for that card.").to_string())?;
+                    let card_type = CardType::parse(&info.kind)
+                        .ok_or_else(|| t!("Unknown card type.").to_string())?;
+                    let level =
+                        level.unwrap_or_else(|| Rarity::from_id(id).map_or(1, |r| r.max_level(lb)));
                     let before = self.owned_card(id).map(|c| (c.lb, c.level));
                     if before == Some((lb, level)) {
                         continue;
                     }
                     // Empty notes keep the row's own.
-                    let row = crate::data::CardRow { id, title: info.title.clone(), uma: info.uma.clone(), card_type, lb, level, notes: String::new() };
+                    let row = crate::data::CardRow {
+                        id,
+                        title: info.title.clone(),
+                        uma: info.uma.clone(),
+                        card_type,
+                        lb,
+                        level,
+                        notes: String::new(),
+                    };
                     cards = crate::data::upsert_card(&cards, &row, &today)?.0;
                     cards_changed = true;
                     undo.push(Change::Card { id, before });
                 }
                 Edit::RemoveUma(id) => {
-                    let Some(u) = self.owned_uma(id) else { continue };
+                    let Some(u) = self.owned_uma(id) else {
+                        continue;
+                    };
                     let before = Some((u.stars, u.potential));
                     if let Some(t) = crate::data::remove_row(&umas, id, &today) {
                         umas = t;
@@ -337,7 +424,9 @@ impl App {
                     }
                 }
                 Edit::RemoveCard(id) => {
-                    let Some(c) = self.owned_card(id) else { continue };
+                    let Some(c) = self.owned_card(id) else {
+                        continue;
+                    };
                     let before = Some((c.lb, c.level));
                     if let Some(t) = crate::data::remove_row(&cards, id, &today) {
                         cards = t;
@@ -369,21 +458,42 @@ impl App {
     /// Ctrl+Z: put back what the last action changed.
     pub(crate) fn undo_setup(&mut self) {
         let Some(group) = self.onboarding.undo.pop() else {
-            self.toast("Nothing to undo.", ToastKind::Info);
+            self.toast(t!("Nothing to undo."), ToastKind::Info);
             return;
         };
         let edits: Vec<Edit> = group
             .iter()
             .rev()
             .map(|c| match *c {
-                Change::Uma { id, before: Some((stars, potential)) } => Edit::Uma { id, stars, potential },
+                Change::Uma {
+                    id,
+                    before: Some((stars, potential)),
+                } => Edit::Uma {
+                    id,
+                    stars,
+                    potential,
+                },
                 Change::Uma { id, before: None } => Edit::RemoveUma(id),
-                Change::Card { id, before: Some((lb, level)) } => Edit::Card { id, lb, level: Some(level) },
+                Change::Card {
+                    id,
+                    before: Some((lb, level)),
+                } => Edit::Card {
+                    id,
+                    lb,
+                    level: Some(level),
+                },
                 Change::Card { id, before: None } => Edit::RemoveCard(id),
             })
             .collect();
         match self.apply_edits(&edits, false) {
-            Ok(n) => self.toast(format!("Undid {n} change{}.", if n == 1 { "" } else { "s" }), ToastKind::Info),
+            Ok(n) => self.toast(
+                if n == 1 {
+                    tf!("Undid {} change.", n)
+                } else {
+                    tf!("Undid {} changes.", n)
+                },
+                ToastKind::Info,
+            ),
             Err(e) => self.toast(e, ToastKind::Error),
         }
     }
@@ -403,8 +513,19 @@ impl App {
 
     /// A `.umalord.json` dropped on the window opens it in setup's Import step.
     pub(crate) fn take_dropped_profile(&mut self, ctx: &egui::Context) {
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
-        let Some(path) = dropped.into_iter().find(|p| p.to_string_lossy().to_lowercase().ends_with(profile::EXT)) else { return };
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
+        let Some(path) = dropped
+            .into_iter()
+            .find(|p| p.to_string_lossy().to_lowercase().ends_with(profile::EXT))
+        else {
+            return;
+        };
         self.open_setup(Step::Import);
         match profile::read(&path) {
             Ok(p) => self.onboarding.pending = Some((path, p)),
@@ -422,34 +543,53 @@ impl App {
             _ => None,
         };
         let ctx = ui.ctx().clone();
-        egui::Panel::top("setup_head").frame(egui::Frame::new().inner_margin(Margin { left: 18, right: 18, top: 10, bottom: 8 })).show(ui, |ui| {
-            centred(ui, |ui| {
-                self.setup_header(ui, step);
-                if let Some(kind) = grid {
-                    self.setup_toolbar(ui, kind);
-                }
+        egui::Panel::top("setup_head")
+            .frame(egui::Frame::new().inner_margin(Margin {
+                left: 18,
+                right: 18,
+                top: 10,
+                bottom: 8,
+            }))
+            .show(ui, |ui| {
+                centred(ui, |ui| {
+                    self.setup_header(ui, step);
+                    if let Some(kind) = grid {
+                        self.setup_toolbar(ui, kind);
+                    }
+                });
             });
-        });
         if step != Step::Welcome && step != Step::Done {
-            egui::Panel::bottom("setup_foot").frame(egui::Frame::new().inner_margin(Margin::symmetric(18, 10))).show(ui, |ui| centred(ui, |ui| self.setup_footer(ui, step)));
+            egui::Panel::bottom("setup_foot")
+                .frame(egui::Frame::new().inner_margin(Margin::symmetric(18, 10)))
+                .show(ui, |ui| centred(ui, |ui| self.setup_footer(ui, step)));
         }
         if let Some(kind) = grid
             && self.setup_selection_owned(kind)
         {
-            egui::Panel::right("setup_edit").resizable(false).exact_size(270.0).frame(crate::side_frame()).show(ui, |ui| self.setup_side_editor(ui, kind));
+            egui::Panel::right("setup_edit")
+                .resizable(false)
+                .exact_size(270.0)
+                .frame(crate::side_frame())
+                .show(ui, |ui| self.setup_side_editor(ui, kind));
         }
-        egui::CentralPanel::default().frame(crate::page_frame()).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                centred(ui, |ui| match step {
-                    Step::Welcome => self.setup_welcome(ui),
-                    Step::Import => self.setup_import(ui),
-                    Step::You => self.setup_you(ui),
-                    Step::Umas | Step::Cards => self.setup_grid(ui, grid.expect("a grid step")),
-                    Step::Done => self.setup_done(ui),
-                });
-                ui.add_space(12.0);
+        egui::CentralPanel::default()
+            .frame(crate::page_frame())
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        centred(ui, |ui| match step {
+                            Step::Welcome => self.setup_welcome(ui),
+                            Step::Import => self.setup_import(ui),
+                            Step::You => self.setup_you(ui),
+                            Step::Umas | Step::Cards => {
+                                self.setup_grid(ui, grid.expect("a grid step"))
+                            }
+                            Step::Done => self.setup_done(ui),
+                        });
+                        ui.add_space(12.0);
+                    });
             });
-        });
         if let Some(kind) = grid {
             self.setup_keys(&ctx, kind);
         }
@@ -460,14 +600,14 @@ impl App {
     fn setup_header(&mut self, ui: &mut egui::Ui, step: Step) {
         let path = Step::path(self.onboarding.via_import);
         let at = path.iter().position(|(s, _)| *s == step).unwrap_or(0);
-        let labels: Vec<&str> = path.iter().map(|(_, l)| *l).collect();
+        let labels: Vec<&str> = path.iter().map(|(_, l)| t!(*l)).collect();
         ui.horizontal(|ui| {
-            ui.label(semibold("✨ Set up", size::XL));
+            ui.label(semibold(t!("✨ Set up"), size::XL));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (label, hover) = if self.roster.is_empty() {
-                    ("Skip for now", "Look around first. ⚙ Settings → Profile → Set up my collection opens this again.")
+                    (t!("Skip for now"), t!("Look around first. ⚙ Settings → Profile → Set up my collection opens this again."))
                 } else {
-                    ("✖ Close", "Back to the app")
+                    (t!("✖ Close"), t!("Back to the app"))
                 };
                 if ui.button(label).on_hover_text(hover).clicked() {
                     self.close_setup();
@@ -493,23 +633,46 @@ impl App {
     fn setup_footer(&mut self, ui: &mut egui::Ui, step: Step) {
         let p = pal(ui);
         ui.horizontal(|ui| {
-            if step.back(self.onboarding.via_import).is_some() && ui.add(egui::Button::new("← Back").min_size(vec2(90.0, 34.0))).clicked() {
+            if step.back(self.onboarding.via_import).is_some()
+                && ui
+                    .add(egui::Button::new(t!("← Back")).min_size(vec2(90.0, 34.0)))
+                    .clicked()
+            {
                 self.setup_back();
             }
             ui.add_space(12.0);
-            ui.label(RichText::new(format!("{} umas · {} support cards added", self.roster.umas.len(), self.roster.cards.len())).color(p.weak));
+            ui.label(
+                RichText::new(tf!(
+                    "{} umas · {} support cards added",
+                    self.roster.umas.len(),
+                    self.roster.cards.len()
+                ))
+                .color(p.weak),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let next = match step {
-                    Step::You if self.onboarding.via_import => "Finish →",
-                    Step::You => "Next: your umas →",
-                    Step::Umas => "Next: your support cards →",
-                    Step::Cards => "Finish →",
+                    Step::You if self.onboarding.via_import => t!("Finish →"),
+                    Step::You => t!("Next: your umas →"),
+                    Step::Umas => t!("Next: your support cards →"),
+                    Step::Cards => t!("Finish →"),
                     _ => "",
                 };
-                if !next.is_empty() && ui.add(crate::ui_util::primary_button(ui, next, size::BODY).min_size(vec2(0.0, 34.0))).clicked() {
+                if !next.is_empty()
+                    && ui
+                        .add(
+                            crate::ui_util::primary_button(ui, next, size::BODY)
+                                .min_size(vec2(0.0, 34.0)),
+                        )
+                        .clicked()
+                {
                     self.setup_next();
                 }
-                if !self.onboarding.undo.is_empty() && ui.button("↶ Undo").on_hover_text("Undo the last change (Ctrl+Z)").clicked() {
+                if !self.onboarding.undo.is_empty()
+                    && ui
+                        .button(t!("↶ Undo"))
+                        .on_hover_text(t!("Undo the last change (Ctrl+Z)"))
+                        .clicked()
+                {
                     self.undo_setup();
                 }
             });
@@ -522,25 +685,34 @@ impl App {
         let w = ui.available_width();
         let (rect, _) = ui.allocate_exact_size(vec2(w, 190.0), Sense::hover());
         crate::ui_util::gradient_rect(ui.painter(), rect, 16.0, p.surface, p.sky);
-        ui.painter().rect_stroke(rect, CornerRadius::same(16), Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(vec2(28.0, 24.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        ui.painter().rect_stroke(
+            rect,
+            CornerRadius::same(16),
+            Stroke::new(1.0, p.border),
+            egui::StrokeKind::Inside,
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(vec2(28.0, 24.0)))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
         child.vertical(|ui| {
             ui.set_max_width(rect.width() - 230.0);
-            ui.label(semibold("Welcome to umaLord", size::XXL + 4.0));
+            ui.label(semibold(t!("Welcome to UmaYu"), size::XXL + 4.0));
             ui.add_space(4.0);
             ui.add(
                 egui::Label::new(
-                    RichText::new(
+                    RichText::new(t!(
                         "Your helper for Uma Musume: Pretty Derby (Global): it knows the umas and support cards you own, plans careers for \
-                         Champions Meetings and more, picks decks and skills, and races builds in a built-in simulator.",
-                    )
+                         Champions Meetings and more, picks decks and skills, and races builds in a built-in simulator."
+                    ))
                     .size(size::MD)
                     .color(p.text),
                 )
                 .wrap(),
             );
             ui.add_space(4.0);
-            ui.label(RichText::new("First, tell it what you own. Everything stays on this computer.").color(p.weak));
+            ui.label(RichText::new(t!("First, tell it what you own. Everything stays on this computer.")).color(p.weak));
         });
         child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if crate::theme::chibi() != crate::theme::Chibi::Off {
@@ -552,10 +724,10 @@ impl App {
         let mut go = None;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 16.0;
-            if self.choice_card(ui, half, Collage::Umas, "📥 Load a profile", "Someone saved your account as a .umalord.json file, or you have a backup. Load it and you're done.").clicked() {
+            if self.choice_card(ui, half, Collage::Umas, t!("📥 Load a profile"), t!("Someone saved your account as a .umalord.json file, or you have a backup. Load it and you're done.")).clicked() {
                 go = Some(Step::Import);
             }
-            if self.choice_card(ui, half, Collage::Cards, "✨ Set up from scratch", "Click the umas and support cards you own: one click each. A few minutes, and you can add more any time.").clicked() {
+            if self.choice_card(ui, half, Collage::Cards, t!("✨ Set up from scratch"), t!("Click the umas and support cards you own: one click each. A few minutes, and you can add more any time.")).clicked() {
                 go = Some(Step::You);
             }
         });
@@ -570,7 +742,7 @@ impl App {
         if !self.roster.is_empty() {
             ui.add_space(10.0);
             ui.label(
-                RichText::new(format!(
+                RichText::new(tf!(
                     "This app already has {} umas and {} cards ({}). Setting up from scratch adds to them; ⚙ Settings → Profile → Start over empties them first.",
                     self.roster.umas.len(),
                     self.roster.cards.len(),
@@ -583,16 +755,43 @@ impl App {
     }
 
     /// A big choice with a little collage of art, a title and a line on it.
-    fn choice_card(&self, ui: &mut egui::Ui, width: f32, collage: Collage, title: &str, body: &str) -> egui::Response {
+    fn choice_card(
+        &self,
+        ui: &mut egui::Ui,
+        width: f32,
+        collage: Collage,
+        title: &str,
+        body: &str,
+    ) -> egui::Response {
         let p = pal(ui);
         let (rect, resp) = ui.allocate_exact_size(vec2(width, 210.0), Sense::click());
         let hovered = resp.hovered();
         let painter = ui.painter();
         if hovered {
-            painter.add(egui::Shadow { offset: [0, 4], blur: 18, spread: 0, color: Color32::from_black_alpha(70) }.as_shape(rect, CornerRadius::same(14)));
+            painter.add(
+                egui::Shadow {
+                    offset: [0, 4],
+                    blur: 18,
+                    spread: 0,
+                    color: Color32::from_black_alpha(70),
+                }
+                .as_shape(rect, CornerRadius::same(14)),
+            );
         }
-        painter.rect_filled(rect, CornerRadius::same(14), if hovered { p.raised } else { p.surface });
-        painter.rect_stroke(rect, CornerRadius::same(14), Stroke::new(if hovered { 1.5 } else { 1.0 }, if hovered { p.accent } else { p.border }), egui::StrokeKind::Inside);
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(14),
+            if hovered { p.raised } else { p.surface },
+        );
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(14),
+            Stroke::new(
+                if hovered { 1.5 } else { 1.0 },
+                if hovered { p.accent } else { p.border },
+            ),
+            egui::StrokeKind::Inside,
+        );
         // The collage: three overlapping pictures.
         let ids = self.collage_ids(collage);
         let (w, h) = match collage {
@@ -600,18 +799,42 @@ impl App {
             Collage::Cards => (60.0, 80.0),
         };
         for (k, id) in ids.iter().enumerate() {
-            let at = rect.left_top() + vec2(22.0 + k as f32 * (w * 0.62), 20.0 + if k == 1 { -6.0 } else { 0.0 });
+            let at = rect.left_top()
+                + vec2(
+                    22.0 + k as f32 * (w * 0.62),
+                    20.0 + if k == 1 { -6.0 } else { 0.0 },
+                );
             let r = Rect::from_min_size(at, vec2(w, h));
             painter.rect_filled(r.expand(2.0), CornerRadius::same(10), p.surface);
-            let sub = if collage == Collage::Umas { "umas" } else { "cards" };
+            let sub = if collage == Collage::Umas {
+                "umas"
+            } else {
+                "cards"
+            };
             if let Some(uri) = self.art_uri(sub, *id) {
-                egui::Image::new(uri).corner_radius(CornerRadius::same(8)).paint_at(ui, r);
+                egui::Image::new(uri)
+                    .corner_radius(CornerRadius::same(8))
+                    .paint_at(ui, r);
             }
         }
         let text_x = rect.left() + 22.0;
         let painter = ui.painter();
-        painter.text(egui::pos2(text_x, rect.top() + 116.0), Align2::LEFT_TOP, title, FontId::new(size::LG + 2.0, egui::FontFamily::Name(crate::theme::SEMIBOLD.into())), p.text);
-        let galley = painter.layout(body.to_string(), FontId::proportional(13.5), p.weak, width - 44.0);
+        painter.text(
+            egui::pos2(text_x, rect.top() + 116.0),
+            Align2::LEFT_TOP,
+            title,
+            FontId::new(
+                size::LG + 2.0,
+                egui::FontFamily::Name(crate::theme::SEMIBOLD.into()),
+            ),
+            p.text,
+        );
+        let galley = painter.layout(
+            body.to_string(),
+            FontId::proportional(13.5),
+            p.weak,
+            width - 44.0,
+        );
         painter.galley(egui::pos2(text_x, rect.top() + 146.0), galley, p.weak);
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
     }
@@ -622,9 +845,23 @@ impl App {
             Collage::Umas => &[100101, 102001, 100601],
             Collage::Cards => &[30028, 30076, 30044],
         };
-        let have = |id: &u32| if collage == Collage::Umas { self.uma_art.contains(id) } else { self.card_art.contains(id) };
+        let have = |id: &u32| {
+            if collage == Collage::Umas {
+                self.uma_art.contains(id)
+            } else {
+                self.card_art.contains(id)
+            }
+        };
         let mut ids: Vec<u32> = wanted.iter().copied().filter(have).collect();
-        let pool: Vec<u32> = if collage == Collage::Umas { self.uma_art.iter().copied().collect() } else { self.card_art.iter().copied().filter(|c| *c >= 30_000).collect() };
+        let pool: Vec<u32> = if collage == Collage::Umas {
+            self.uma_art.iter().copied().collect()
+        } else {
+            self.card_art
+                .iter()
+                .copied()
+                .filter(|c| *c >= 30_000)
+                .collect()
+        };
         let mut pool = pool;
         pool.sort_unstable();
         for id in pool {
@@ -646,13 +883,18 @@ impl App {
             self.onboarding.name_loaded = true;
         }
         card(ui, |ui| {
-            ui.label(semibold("What should we call you?", size::XL));
-            ui.label(RichText::new("Your trainer name: Home greets you by it, and profiles you save carry it.").color(p.weak));
+            ui.label(semibold(t!("What should we call you?"), size::XL));
+            ui.label(
+                RichText::new(t!(
+                    "Your trainer name: Home greets you by it, and profiles you save carry it."
+                ))
+                .color(p.weak),
+            );
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut self.onboarding.name)
-                        .hint_text("Your trainer name")
+                        .hint_text(t!("Your trainer name"))
                         .font(FontId::proportional(20.0))
                         .desired_width(340.0)
                         .margin(Margin::symmetric(10, 6)),
@@ -661,32 +903,75 @@ impl App {
                     self.setup_next();
                 }
                 if self.onboarding.name.trim().is_empty() {
-                    ui.label(RichText::new("Leave it empty to be called Trainer.").size(size::SM).color(p.weak));
+                    ui.label(
+                        RichText::new(t!("Leave it empty to be called Trainer."))
+                            .size(size::SM)
+                            .color(p.weak),
+                    );
                 }
             });
         });
         ui.add_space(10.0);
         card(ui, |ui| {
-            ui.label(semibold("How should it look?", size::LG));
-            ui.label(RichText::new("Try them: the app changes as you click. All of this is in ⚙ Settings later.").color(p.weak));
+            ui.label(semibold(t!("How should it look?"), size::LG));
+            ui.label(
+                RichText::new(t!(
+                    "Try them: the app changes as you click. All of this is in ⚙ Settings later."
+                ))
+                .color(p.weak),
+            );
             ui.add_space(8.0);
-            ui.label(semibold("Mode", size::BODY));
+            ui.label(semibold(t!("Mode"), size::BODY));
             self.mode_picker(ui);
             ui.add_space(10.0);
-            ui.label(semibold("Theme", size::BODY));
+            ui.label(semibold(t!("Theme"), size::BODY));
             self.theme_picker(ui);
             ui.add_space(4.0);
-            ui.label(semibold("Background and Seiun Sky", size::BODY));
+            ui.label(semibold(t!("Background and Seiun Sky"), size::BODY));
             self.background_toggle(ui);
             ui.add_space(4.0);
             self.chibi_picker(ui);
+        });
+        ui.add_space(10.0);
+        card(ui, |ui| {
+            ui.label(semibold(t!("🎵 How about music?"), size::LG));
+            ui.label(
+                RichText::new(t!(
+                    "The optional Game audio plug-in plays music directly from your local game install, 100% offline. It is off by default."
+                ))
+                .color(p.weak),
+            );
+            ui.add_space(8.0);
+
+            let mut enabled = self.gameaudio.enabled;
+            if ui
+                .checkbox(&mut enabled, t!("Enable the Game audio plug-in"))
+                .changed()
+            {
+                self.gameaudio.set_enabled(enabled);
+            }
+
+            if self.gameaudio.enabled {
+                ui.add_space(10.0);
+                self.gameaudio_music_prefs(ui);
+                if self.gameaudio.game_path.is_empty() {
+                    ui.label(
+                        RichText::new(t!(
+                            "💡 You can choose your game folder later in ⚙ Settings → Game audio."
+                        ))
+                        .size(size::SM)
+                        .color(p.weak),
+                    );
+                }
+            }
         });
     }
 
     fn setup_import(&mut self, ui: &mut egui::Ui) {
         let p = pal(ui);
         if self.onboarding.found.is_none() {
-            self.onboarding.found = Some(self.root.as_deref().map(profile::find).unwrap_or_default());
+            self.onboarding.found =
+                Some(self.root.as_deref().map(profile::find).unwrap_or_default());
         }
         // A file picked: confirm before replacing anything.
         if let Some((path, prof)) = self.onboarding.pending.clone() {
@@ -695,11 +980,15 @@ impl App {
             card(ui, |ui| {
                 ui.label(semibold(format!("📄 {}", prof.name), 20.0));
                 ui.label(RichText::new(prof.summary()).color(p.weak));
-                ui.label(RichText::new(path.display().to_string()).size(12.0).color(p.weak));
+                ui.label(
+                    RichText::new(path.display().to_string())
+                        .size(12.0)
+                        .color(p.weak),
+                );
                 ui.add_space(6.0);
                 if !self.roster.is_empty() {
                     ui.label(
-                        RichText::new(format!(
+                        RichText::new(tf!(
                             "This replaces what's in the app now ({}: {} umas, {} cards). That's saved to profiles/backups first, so you can load it back.",
                             self.profile_name(),
                             self.roster.umas.len(),
@@ -709,10 +998,16 @@ impl App {
                     );
                 }
                 ui.horizontal(|ui| {
-                    if ui.add(crate::ui_util::primary_button(ui, "📥 Load this profile", 15.0).min_size(vec2(0.0, 32.0))).clicked() {
+                    if ui
+                        .add(
+                            crate::ui_util::primary_button(ui, t!("📥 Load this profile"), 15.0)
+                                .min_size(vec2(0.0, 32.0)),
+                        )
+                        .clicked()
+                    {
                         go = true;
                     }
-                    if ui.button("Pick another").clicked() {
+                    if ui.button(t!("Pick another")).clicked() {
                         cancel = true;
                     }
                 });
@@ -734,24 +1029,39 @@ impl App {
             return;
         }
         card(ui, |ui| {
-            ui.label(semibold("Load a profile", 20.0));
-            ui.label(RichText::new("A profile is one .umalord.json file with someone's umas, cards, parents, plans and results. Pick one below, drag the file onto this window, or paste where it is.").color(p.weak));
+            ui.label(semibold(t!("Load a profile"), 20.0));
+            ui.label(RichText::new(t!("A profile is one .umalord.json file with someone's umas, cards, parents, plans and results. Pick one below, drag the file onto this window, or paste where it is.")).color(p.weak));
             ui.add_space(8.0);
             let found = self.onboarding.found.clone().unwrap_or_default();
             if found.is_empty() {
-                ui.label(RichText::new("No profiles in the profiles folder or in Downloads yet.").color(p.weak));
+                ui.label(
+                    RichText::new(t!(
+                        "No profiles in the profiles folder or in Downloads yet."
+                    ))
+                    .color(p.weak),
+                );
             }
             for (path, prof) in &found {
                 ui.horizontal(|ui| {
-                    let folder = path.parent().and_then(|d| d.file_name()).map_or(String::new(), |n| n.to_string_lossy().to_string());
+                    let folder = path
+                        .parent()
+                        .and_then(|d| d.file_name())
+                        .map_or(String::new(), |n| n.to_string_lossy().to_string());
                     match prof {
                         Ok(prof) => {
-                            if ui.add(crate::ui_util::primary_button(ui, "Choose", 13.5)).clicked() {
+                            if ui
+                                .add(crate::ui_util::primary_button(ui, t!("Choose"), 13.5))
+                                .clicked()
+                            {
                                 self.onboarding.pending = Some((path.clone(), prof.clone()));
                             }
                             ui.label(semibold(format!("📄 {}", prof.name), 15.0));
                             ui.label(RichText::new(prof.summary()).color(p.weak));
-                            ui.label(RichText::new(format!("{} in {folder}", profile::file_name(path))).size(12.0).color(p.weak));
+                            ui.label(
+                                RichText::new(tf!("{} in {}", profile::file_name(path), folder))
+                                    .size(12.0)
+                                    .color(p.weak),
+                            );
                         }
                         Err(e) => {
                             ui.label(RichText::new(format!("⚠ {e}")).size(12.5).color(p.warn));
@@ -761,22 +1071,29 @@ impl App {
             }
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.onboarding.path).hint_text("…or paste the file's full path").desired_width(420.0));
-                if ui.button("Open").clicked() {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.onboarding.path)
+                        .hint_text(t!("…or paste the file's full path"))
+                        .desired_width(420.0),
+                );
+                if ui.button(t!("Open")).clicked() {
                     let path = PathBuf::from(self.onboarding.path.trim().trim_matches('"'));
                     match profile::read(&path) {
                         Ok(prof) => self.onboarding.pending = Some((path, prof)),
                         Err(e) => self.toast(e, ToastKind::Warn),
                     }
                 }
-                if ui.button("📂 Open the profiles folder").on_hover_text("Put a .umalord.json file here and it shows up above").clicked()
+                if ui
+                    .button(t!("📂 Open the profiles folder"))
+                    .on_hover_text(t!("Put a .umalord.json file here and it shows up above"))
+                    .clicked()
                     && let Some(root) = &self.root
                 {
                     let dir = root.join(profile::DIR);
                     let _ = std::fs::create_dir_all(&dir);
                     let _ = std::process::Command::new("explorer.exe").arg(&dir).spawn();
                 }
-                if ui.button("🔄 Look again").clicked() {
+                if ui.button(t!("🔄 Look again")).clicked() {
                     self.onboarding.found = None;
                 }
             });
@@ -804,34 +1121,78 @@ impl App {
             }
             ui.vertical(|ui| {
                 ui.add_space(18.0);
-                ui.label(semibold(format!("You're all set, {}!", self.profile_name()), size::XXL));
-                ui.label(RichText::new(self.friendly_line()).size(size::MD).color(p.weak));
+                ui.label(semibold(
+                    tf!("You're all set, {}!", self.profile_name()),
+                    size::XXL,
+                ));
+                ui.label(
+                    RichText::new(self.friendly_line())
+                        .size(size::MD)
+                        .color(p.weak),
+                );
             });
         });
         ui.add_space(10.0);
         let stars = |n: u8| umas.iter().filter(|u| u.stars == n).count();
         let ssr = cards.iter().filter(|c| c.rarity == Rarity::SSR).count();
-        let mlb_ssr = cards.iter().filter(|c| c.rarity == Rarity::SSR && c.is_mlb()).count();
+        let mlb_ssr = cards
+            .iter()
+            .filter(|c| c.rarity == Rarity::SSR && c.is_mlb())
+            .count();
         crate::ui_util::stat_row(
             ui,
             &[
-                ("🐴", "Umas", count(umas.len()).to_string(), format!("{} at 5★ · {} at 4★ · {} at 3★", stars(5), stars(4), stars(3)), p.pink),
-                ("🃏", "Support cards", count(cards.len()).to_string(), format!("{ssr} SSR · {} SR", cards.iter().filter(|c| c.rarity == Rarity::SR).count()), p.link),
-                ("💎", "Maxed SSRs", count(mlb_ssr).to_string(), "fully limit broken (MLB)".into(), p.accent),
+                (
+                    "🐴",
+                    t!("Umas"),
+                    count(umas.len()).to_string(),
+                    tf!(
+                        "{} at 5★ · {} at 4★ · {} at 3★",
+                        stars(5),
+                        stars(4),
+                        stars(3)
+                    ),
+                    p.pink,
+                ),
+                (
+                    "🃏",
+                    t!("Support cards"),
+                    count(cards.len()).to_string(),
+                    tf!(
+                        "{} SSR · {} SR",
+                        ssr,
+                        cards.iter().filter(|c| c.rarity == Rarity::SR).count()
+                    ),
+                    p.link,
+                ),
+                (
+                    "💎",
+                    t!("Maxed SSRs"),
+                    count(mlb_ssr).to_string(),
+                    t!("fully limit broken (MLB)").into(),
+                    p.accent,
+                ),
             ],
         );
         ui.add_space(10.0);
         card(ui, |ui| {
-            ui.label(semibold("Maxed SSRs by type", size::MD));
+            ui.label(semibold(t!("Maxed SSRs by type"), size::MD));
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 20.0;
                 for t in CardType::ALL {
-                    let n = cards.iter().filter(|c| c.card_type == t && c.rarity == Rarity::SSR && c.is_mlb()).count();
+                    let n = cards
+                        .iter()
+                        .filter(|c| c.card_type == t && c.rarity == Rarity::SSR && c.is_mlb())
+                        .count();
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 5.0;
                         let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-                        ui.painter().rect_filled(r, CornerRadius::same(3), type_color(t));
-                        ui.label(RichText::new(format!("{} {}", type_icon(t.label()), t.label())).color(crate::ui_util::type_text(ui, t.label())));
+                        ui.painter()
+                            .rect_filled(r, CornerRadius::same(3), type_color(t));
+                        ui.label(
+                            RichText::new(format!("{} {}", type_icon(t.label()), t.label()))
+                                .color(crate::ui_util::type_text(ui, t.label())),
+                        );
                         ui.label(semibold(count(n).to_string(), size::BODY));
                     });
                 }
@@ -842,11 +1203,31 @@ impl App {
             card(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(semibold(format!("🏆 Next Champions Meeting: {}", cm.short_label()), size::MD));
-                        ui.label(RichText::new(format!("{} · {} · {}", cm.course_name, cm.conditions, cm.status())).color(p.weak));
+                        ui.label(semibold(
+                            tf!("🏆 Next Champions Meeting: {}", cm.short_label()),
+                            size::MD,
+                        ));
+                        ui.label(
+                            RichText::new(format!(
+                                "{} · {} · {}",
+                                cm.course_name,
+                                cm.conditions,
+                                cm.status()
+                            ))
+                            .color(p.weak),
+                        );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        plan = ui.add(crate::ui_util::primary_button(ui, "📋 Plan for it", size::BODY).min_size(vec2(0.0, 32.0))).clicked();
+                        plan = ui
+                            .add(
+                                crate::ui_util::primary_button(
+                                    ui,
+                                    t!("📋 Plan for it"),
+                                    size::BODY,
+                                )
+                                .min_size(vec2(0.0, 32.0)),
+                            )
+                            .clicked();
                     });
                 });
             });
@@ -861,9 +1242,21 @@ impl App {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             for (k, (icon, title, body)) in [
-                ("🏇", "Plan a career", "Pick a goal and a trainee; get a deck and skills to buy."),
-                ("📚", "Explore your collection", "Everything you own, with effects at your level."),
-                ("🏠", "Open Home", "Your stable at a glance and what's coming up."),
+                (
+                    "🏇",
+                    t!("Plan a career"),
+                    t!("Pick a goal and a trainee; get a deck and skills to buy."),
+                ),
+                (
+                    "📚",
+                    t!("Explore your collection"),
+                    t!("Everything you own, with effects at your level."),
+                ),
+                (
+                    "🏠",
+                    t!("Open Home"),
+                    t!("Your stable at a glance and what's coming up."),
+                ),
             ]
             .into_iter()
             .enumerate()
@@ -889,7 +1282,7 @@ impl App {
             None => {}
         }
         ui.add_space(8.0);
-        if ui.link("📝 Change what I own").clicked() {
+        if ui.link(t!("📝 Change what I own")).clicked() {
             self.open_setup(Step::Umas);
         }
     }
@@ -897,15 +1290,45 @@ impl App {
     /// One line about the roster, e.g. "Your strongest type is Speed: 9 maxed SSRs."
     pub(crate) fn friendly_line(&self) -> String {
         let cards = &self.roster.cards;
-        let counts: Vec<(CardType, usize)> =
-            CardType::ALL.into_iter().map(|t| (t, cards.iter().filter(|c| c.card_type == t && c.rarity == Rarity::SSR && c.is_mlb()).count())).collect();
+        let counts: Vec<(CardType, usize)> = CardType::ALL
+            .into_iter()
+            .map(|t| {
+                (
+                    t,
+                    cards
+                        .iter()
+                        .filter(|c| c.card_type == t && c.rarity == Rarity::SSR && c.is_mlb())
+                        .count(),
+                )
+            })
+            .collect();
         let most = counts.iter().map(|(_, n)| *n).max().unwrap_or(0);
-        let top: Vec<&str> = counts.iter().filter(|(_, n)| *n == most).map(|(t, _)| t.label()).collect();
+        let top: Vec<&str> = counts
+            .iter()
+            .filter(|(_, n)| *n == most)
+            .map(|(t, _)| t.label())
+            .collect();
         match top.as_slice() {
-            _ if most == 0 && !cards.is_empty() => format!("{} support cards and {} umas are ready to plan with.", cards.len(), self.roster.umas.len()),
-            _ if most == 0 => "Add your support cards any time from Collection → ＋ Add cards.".into(),
-            [one] => format!("Your strongest type is {one}: {most} maxed SSR{}.", if most == 1 { "" } else { "s" }),
-            [first @ .., last] => format!("Your strongest types are {} and {last}: {most} maxed SSRs each.", first.join(", ")),
+            _ if most == 0 && !cards.is_empty() => tf!(
+                "{} support cards and {} umas are ready to plan with.",
+                cards.len(),
+                self.roster.umas.len()
+            ),
+            _ if most == 0 => {
+                t!("Add your support cards any time from Collection → ＋ Add cards.").into()
+            }
+            [one] => tf!(
+                "Your strongest type is {}: {} maxed SSR{}.",
+                one,
+                most,
+                if most == 1 { "" } else { "s" }
+            ),
+            [first @ .., last] => tf!(
+                "Your strongest types are {} and {}: {} maxed SSRs each.",
+                first.join(", "),
+                last,
+                most
+            ),
             [] => String::new(),
         }
     }
@@ -920,20 +1343,20 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("start_over")).show(ctx, |ui| {
             ui.set_width(460.0);
             let p = pal(ui);
-            ui.label(semibold("Start over?", 19.0));
-            ui.label(format!(
+            ui.label(semibold(t!("Start over?"), 19.0));
+            ui.label(tf!(
                 "This empties the app: {}'s {} umas, {} cards, parents, saved plans, results and notes.",
                 self.profile_name(),
                 self.roster.umas.len(),
                 self.roster.cards.len()
             ));
-            ui.label(RichText::new("They're saved to profiles/backups first, so ⚙ Settings → Profile → Load a profile can bring them back.").color(p.weak));
+            ui.label(RichText::new(t!("They're saved to profiles/backups first, so ⚙ Settings → Profile → Load a profile can bring them back.")).color(p.weak));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new(RichText::new("⚠ Back up and start over").color(Color32::WHITE)).fill(p.bad)).clicked() {
+                if ui.add(egui::Button::new(RichText::new(t!("⚠ Back up and start over")).color(Color32::WHITE)).fill(p.bad)).clicked() {
                     go = true;
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(t!("Cancel")).clicked() {
                     cancel = true;
                 }
             });
@@ -944,7 +1367,13 @@ impl App {
                     self.onboarding.name.clear();
                     self.open_setup(Step::Welcome);
                     if let Some(s) = saved {
-                        self.toast(format!("Saved the old account as profiles/backups/{}.", profile::file_name(&s)), ToastKind::Success);
+                        self.toast(
+                            tf!(
+                                "Saved the old account as profiles/backups/{}.",
+                                profile::file_name(&s)
+                            ),
+                            ToastKind::Success,
+                        );
                     }
                 }
                 Err(e) => self.toast(e, ToastKind::Warn),
@@ -969,14 +1398,58 @@ fn big_tile(ui: &mut egui::Ui, width: f32, icon: &str, title: &str, body: &str) 
     let hovered = resp.hovered();
     let painter = ui.painter();
     if hovered {
-        painter.add(egui::Shadow { offset: [0, 3], blur: 14, spread: 0, color: Color32::from_black_alpha(60) }.as_shape(rect, CornerRadius::same(12)));
+        painter.add(
+            egui::Shadow {
+                offset: [0, 3],
+                blur: 14,
+                spread: 0,
+                color: Color32::from_black_alpha(60),
+            }
+            .as_shape(rect, CornerRadius::same(12)),
+        );
     }
-    painter.rect_filled(rect, CornerRadius::same(12), if hovered { p.raised } else { p.surface });
-    painter.rect_stroke(rect, CornerRadius::same(12), Stroke::new(if hovered { 1.5 } else { 1.0 }, if hovered { p.accent } else { p.border }), egui::StrokeKind::Inside);
-    painter.text(rect.left_top() + vec2(16.0, 16.0), Align2::LEFT_TOP, icon, FontId::proportional(24.0), p.accent);
-    painter.text(rect.left_top() + vec2(52.0, 18.0), Align2::LEFT_TOP, title, FontId::new(size::MD + 1.0, egui::FontFamily::Name(crate::theme::SEMIBOLD.into())), p.text);
-    let galley = painter.layout(body.to_string(), FontId::proportional(13.0), p.weak, width - 68.0);
-    painter.galley(Pos2::new(rect.left() + 52.0, rect.top() + 46.0), galley, p.weak);
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(12),
+        if hovered { p.raised } else { p.surface },
+    );
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(12),
+        Stroke::new(
+            if hovered { 1.5 } else { 1.0 },
+            if hovered { p.accent } else { p.border },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        rect.left_top() + vec2(16.0, 16.0),
+        Align2::LEFT_TOP,
+        icon,
+        FontId::proportional(24.0),
+        p.accent,
+    );
+    painter.text(
+        rect.left_top() + vec2(52.0, 18.0),
+        Align2::LEFT_TOP,
+        title,
+        FontId::new(
+            size::MD + 1.0,
+            egui::FontFamily::Name(crate::theme::SEMIBOLD.into()),
+        ),
+        p.text,
+    );
+    let galley = painter.layout(
+        body.to_string(),
+        FontId::proportional(13.0),
+        p.weak,
+        width - 68.0,
+    );
+    painter.galley(
+        Pos2::new(rect.left() + 52.0, rect.top() + 46.0),
+        galley,
+        p.weak,
+    );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1007,8 +1480,20 @@ pub(crate) mod tests {
             }
             seen
         };
-        assert_eq!(walk(false), [Step::Welcome, Step::You, Step::Umas, Step::Cards, Step::Done]);
-        assert_eq!(walk(true), [Step::Welcome, Step::Import, Step::You, Step::Done]);
+        assert_eq!(
+            walk(false),
+            [
+                Step::Welcome,
+                Step::You,
+                Step::Umas,
+                Step::Cards,
+                Step::Done
+            ]
+        );
+        assert_eq!(
+            walk(true),
+            [Step::Welcome, Step::Import, Step::You, Step::Done]
+        );
         assert_eq!(Step::Umas.back(false), Some(Step::You));
         assert_eq!(Step::You.back(true), Some(Step::Import));
         assert_eq!(Step::Welcome.back(false), None);
@@ -1035,15 +1520,52 @@ pub(crate) mod tests {
     #[test]
     fn edits_and_undo() {
         let (mut a, dir) = scratch_app("undo");
-        a.apply_edits(&[Edit::Card { id: 30076, lb: 4, level: None }, Edit::Uma { id: 100601, stars: 5, potential: 5 }], true).unwrap();
-        assert_eq!(a.owned_card(30076).map(|c| (c.lb, c.level)), Some((4, 50)), "the level is the LB's cap");
-        assert_eq!(a.owned_uma(100601).map(|u| (u.stars, u.potential)), Some((5, 5)));
-        a.apply_edits(&[Edit::Card { id: 30076, lb: 2, level: None }], true).unwrap();
+        a.apply_edits(
+            &[
+                Edit::Card {
+                    id: 30076,
+                    lb: 4,
+                    level: None,
+                },
+                Edit::Uma {
+                    id: 100601,
+                    stars: 5,
+                    potential: 5,
+                },
+            ],
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            a.owned_card(30076).map(|c| (c.lb, c.level)),
+            Some((4, 50)),
+            "the level is the LB's cap"
+        );
+        assert_eq!(
+            a.owned_uma(100601).map(|u| (u.stars, u.potential)),
+            Some((5, 5))
+        );
+        a.apply_edits(
+            &[Edit::Card {
+                id: 30076,
+                lb: 2,
+                level: None,
+            }],
+            true,
+        )
+        .unwrap();
         assert_eq!(a.owned_card(30076).map(|c| c.lb), Some(2));
         a.undo_setup();
-        assert_eq!(a.owned_card(30076).map(|c| (c.lb, c.level)), Some((4, 50)), "back to MLB");
+        assert_eq!(
+            a.owned_card(30076).map(|c| (c.lb, c.level)),
+            Some((4, 50)),
+            "back to MLB"
+        );
         a.undo_setup();
-        assert!(a.owned_card(30076).is_none() && a.owned_uma(100601).is_none(), "the first action added both");
+        assert!(
+            a.owned_card(30076).is_none() && a.owned_uma(100601).is_none(),
+            "the first action added both"
+        );
         assert!(a.onboarding.undo.is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }

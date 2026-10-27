@@ -51,7 +51,12 @@ impl Surface {
 }
 
 impl Distance {
-    pub const ALL: [Distance; 4] = [Distance::Sprint, Distance::Mile, Distance::Medium, Distance::Long];
+    pub const ALL: [Distance; 4] = [
+        Distance::Sprint,
+        Distance::Mile,
+        Distance::Medium,
+        Distance::Long,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Sprint => "Sprint",
@@ -123,7 +128,6 @@ pub fn grade_rank(g: &str) -> u8 {
     }
 }
 
-
 #[derive(Deserialize, Clone, Debug, Default)]
 pub struct Aptitude {
     pub turf: String,
@@ -163,7 +167,10 @@ impl Aptitude {
     }
     /// The style with the best grade (first wins ties).
     pub fn best_style(&self) -> Style {
-        Style::ALL.into_iter().max_by_key(|s| (grade_rank(self.style(*s)), 4 - *s as u8)).unwrap_or(Style::Pace)
+        Style::ALL
+            .into_iter()
+            .max_by_key(|s| (grade_rank(self.style(*s)), 4 - *s as u8))
+            .unwrap_or(Style::Pace)
     }
 }
 
@@ -375,7 +382,7 @@ impl EventSource {
         match self {
             EventSource::Official => "umamusume.com",
             EventSource::Umalator => "umalator.app",
-            EventSource::Bundled => "the bundled data",
+            EventSource::Bundled => t!("the bundled data"),
         }
     }
 }
@@ -445,20 +452,27 @@ impl EventPreset {
     /// "Announced on umamusume.com" or "Estimated by umalator.app".
     pub fn status(&self) -> String {
         if self.announced {
-            format!("Announced on {}", self.source.label())
+            tf!("Announced on {}", self.source.label())
         } else {
-            format!("Estimated by {}", self.source.label())
+            tf!("Estimated by {}", self.source.label())
         }
     }
 
     /// A line for hovers: whether the date, course and conditions are final.
     pub fn status_explained(&self) -> String {
         if self.announced {
-            format!("Announced on {}: the dates, course and conditions are official.", self.source.label())
+            tf!(
+                "Announced on {}: the dates, course and conditions are official.",
+                self.source.label()
+            )
         } else {
-            format!(
+            tf!(
                 "Estimated: {} guesses the date, course and conditions until the official announcement, which can change them.",
-                if self.source == EventSource::Bundled { "the bundled Umalator data" } else { "umalator.app" }
+                t!(if self.source == EventSource::Bundled {
+                    "the bundled Umalator data"
+                } else {
+                    "umalator.app"
+                })
             )
         }
     }
@@ -498,7 +512,10 @@ pub fn effect_at(points: &[(u32, i32)], level: u32) -> Option<i32> {
 
 impl CardInfo {
     pub fn effect(&self, kind: u32, level: u32) -> Option<i32> {
-        self.effects.iter().find(|e| e.kind == kind).and_then(|e| effect_at(&e.points, level))
+        self.effects
+            .iter()
+            .find(|e| e.kind == kind)
+            .and_then(|e| effect_at(&e.points, level))
     }
 
     /// Out on Global by `today` (YYYY-MM-DD). uma.guide dates cards it lists ahead of their
@@ -554,20 +571,35 @@ pub struct SkillTags {
 }
 
 impl SkillTags {
-    pub fn fits(&self, style: Option<Style>, distance: Option<Distance>, surface: Option<Surface>) -> bool {
+    pub fn fits(
+        &self,
+        style: Option<Style>,
+        distance: Option<Distance>,
+        surface: Option<Surface>,
+    ) -> bool {
         style.is_none_or(|s| self.styles.is_empty() || self.styles.contains(&s))
             && distance.is_none_or(|d| self.distances.is_empty() || self.distances.contains(&d))
             && surface.is_none_or(|s| self.surfaces.is_empty() || self.surfaces.contains(&s))
     }
 
     pub fn is_general(&self) -> bool {
-        self.styles.is_empty() && self.distances.is_empty() && self.surfaces.is_empty() && self.tracks.is_empty()
+        self.styles.is_empty()
+            && self.distances.is_empty()
+            && self.surfaces.is_empty()
+            && self.tracks.is_empty()
     }
 }
 
 fn condition_values(cond: &str, key: &str) -> Vec<u32> {
     cond.split(['&', '@', '\n'])
-        .filter_map(|c| c.trim().strip_prefix(key)?.strip_prefix("==")?.trim().parse().ok())
+        .filter_map(|c| {
+            c.trim()
+                .strip_prefix(key)?
+                .strip_prefix("==")?
+                .trim()
+                .parse()
+                .ok()
+        })
         .collect()
 }
 
@@ -584,12 +616,18 @@ impl SkillInfo {
     pub fn tags(&self) -> SkillTags {
         let c = self.all_conditions();
         let mut t = SkillTags {
-            styles: Style::ALL.into_iter().filter(|s| condition_values(&c, "running_style").contains(&(s.code() as u32))).collect(),
+            styles: Style::ALL
+                .into_iter()
+                .filter(|s| condition_values(&c, "running_style").contains(&(s.code() as u32)))
+                .collect(),
             distances: Distance::ALL
                 .into_iter()
                 .filter(|d| condition_values(&c, "distance_type").contains(&(d.code() as u32)))
                 .collect(),
-            surfaces: Surface::ALL.into_iter().filter(|s| condition_values(&c, "ground_type").contains(&(s.code() as u32))).collect(),
+            surfaces: Surface::ALL
+                .into_iter()
+                .filter(|s| condition_values(&c, "ground_type").contains(&(s.code() as u32)))
+                .collect(),
             tracks: condition_values(&c, "track_id"),
         };
         t.tracks.sort_unstable();
@@ -633,7 +671,10 @@ pub enum SkillSource {
     /// Innate (potential 1) or unlocked at that potential level.
     Potential(u32, u8),
     UmaEvent(u32),
-    Evolved { uma: u32, base: u32 },
+    Evolved {
+        uma: u32,
+        base: u32,
+    },
     Hint(u32),
     CardEvent(u32),
 }
@@ -641,7 +682,10 @@ pub enum SkillSource {
 impl SkillSource {
     pub fn uma(self) -> Option<u32> {
         match self {
-            Self::Unique(u) | Self::Potential(u, _) | Self::UmaEvent(u) | Self::Evolved { uma: u, .. } => Some(u),
+            Self::Unique(u)
+            | Self::Potential(u, _)
+            | Self::UmaEvent(u)
+            | Self::Evolved { uma: u, .. } => Some(u),
             _ => None,
         }
     }
@@ -698,18 +742,25 @@ pub const GLOBAL_LAUNCH: &str = "2025-06-26";
 impl Knowledge {
     pub fn load(root: Option<&Path>) -> Knowledge {
         let Some(root) = root else {
-            return Knowledge { error: Some("umaLord folder not found".into()), ..Default::default() };
+            return Knowledge {
+                error: Some(t!("UmaYu folder not found").into()),
+                ..Default::default()
+            };
         };
         let dir = root.join(KNOWLEDGE_DIR);
         let mut k = match Self::load_dir(&dir) {
             Ok(k) => k,
             Err(e) => Knowledge {
-                error: Some(format!("{e} (run: python -I -X utf8 tools/update_knowledge.py)")),
+                error: Some(tf!(
+                    "{} (run: python -I -X utf8 tools/update_knowledge.py)",
+                    e
+                )),
                 ..Default::default()
             },
         };
         k.scenarios = crate::career::Scenarios::load(Some(root));
-        let mechanics = std::fs::read_to_string(root.join("knowledge").join("mechanics.md")).unwrap_or_default();
+        let mechanics = std::fs::read_to_string(root.join("knowledge").join("mechanics.md"))
+            .unwrap_or_default();
         k.terms = crate::notes::parse_terms(&mechanics);
         k.tips = crate::notes::parse_tips(&mechanics);
         k
@@ -723,7 +774,14 @@ impl Knowledge {
         let glossary: Vec<GlossaryEntry> = read(dir, "glossary.json").unwrap_or_default();
         let meta: Meta = read(dir, "meta.json").unwrap_or_default();
         let umalator: UmalatorMeta = read(dir, "umalator.json").unwrap_or_default();
-        let mut k = Self::from_parts(umas, cards, skills, races, glossary, Some(meta.built).filter(|b| !b.is_empty()));
+        let mut k = Self::from_parts(
+            umas,
+            cards,
+            skills,
+            races,
+            glossary,
+            Some(meta.built).filter(|b| !b.is_empty()),
+        );
         k.umalator_skills = umalator.skills.into_iter().collect();
         k.umalator_courses = umalator.courses;
         k.umalator_presets = umalator.presets;
@@ -744,7 +802,11 @@ impl Knowledge {
     ) -> Knowledge {
         // uma.guide dates what Global launched with by JP's calendar (2017-01-01 for umas,
         // 2021-02-24 for cards); on Global they all arrived on launch day.
-        for r in umas.iter_mut().map(|u| &mut u.release).chain(cards.iter_mut().map(|c| &mut c.release)) {
+        for r in umas
+            .iter_mut()
+            .map(|u| &mut u.release)
+            .chain(cards.iter_mut().map(|c| &mut c.release))
+        {
             if !r.is_empty() && r.as_str() < GLOBAL_LAUNCH {
                 *r = GLOBAL_LAUNCH.to_string();
             }
@@ -767,7 +829,13 @@ impl Knowledge {
                 add(s, SkillSource::UmaEvent(u.id));
             }
             for e in &u.evolved {
-                add(e.evolved, SkillSource::Evolved { uma: u.id, base: e.base });
+                add(
+                    e.evolved,
+                    SkillSource::Evolved {
+                        uma: u.id,
+                        base: e.base,
+                    },
+                );
             }
         }
         for c in &cards {
@@ -780,8 +848,17 @@ impl Knowledge {
         }
         let mut skill_order: Vec<u32> = skills.iter().map(|s| s.id).collect();
         let skills: HashMap<u32, SkillInfo> = skills.into_iter().map(|s| (s.id, s)).collect();
-        skill_order.sort_by(|a, b| skills[a].name.to_lowercase().cmp(&skills[b].name.to_lowercase()).then(a.cmp(b)));
-        let tracks = races.iter().filter_map(|r| Some((r.track_id?, r.track.clone()))).collect();
+        skill_order.sort_by(|a, b| {
+            skills[a]
+                .name
+                .to_lowercase()
+                .cmp(&skills[b].name.to_lowercase())
+                .then(a.cmp(b))
+        });
+        let tracks = races
+            .iter()
+            .filter_map(|r| Some((r.track_id?, r.track.clone())))
+            .collect();
         Knowledge {
             umas: umas.into_iter().map(|u| (u.id, u)).collect(),
             cards: cards.into_iter().map(|c| (c.id, c)).collect(),
@@ -817,11 +894,16 @@ impl Knowledge {
 
     /// The scenario of the next Champions Meeting from `today`, else the latest one.
     pub fn current_scenario(&self, today: &str) -> Option<String> {
-        let next = self.upcoming_cms(today).into_iter().find_map(|e| self.cm_scenario(e).map(String::from));
+        let next = self
+            .upcoming_cms(today)
+            .into_iter()
+            .find_map(|e| self.cm_scenario(e).map(String::from));
         next.or_else(|| {
-            let mut past: Vec<&EventPreset> = self.umalator_presets.iter().filter(|e| e.is_cm()).collect();
+            let mut past: Vec<&EventPreset> =
+                self.umalator_presets.iter().filter(|e| e.is_cm()).collect();
             past.sort_by(|a, b| b.date.cmp(&a.date));
-            past.into_iter().find_map(|e| self.cm_scenario(e).map(String::from))
+            past.into_iter()
+                .find_map(|e| self.cm_scenario(e).map(String::from))
         })
     }
 
@@ -830,11 +912,16 @@ impl Knowledge {
     }
 
     pub fn skill_name(&self, id: u32) -> String {
-        self.skills.get(&id).map_or_else(|| format!("Skill {id}"), |s| s.name.clone())
+        self.skills
+            .get(&id)
+            .map_or_else(|| format!("Skill {id}"), |s| s.name.clone())
     }
 
     pub fn track_name(&self, id: u32) -> String {
-        self.tracks.get(&id).cloned().unwrap_or_else(|| format!("Track {id}"))
+        self.tracks
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Track {id}"))
     }
 
     /// Champions Meeting events from `today` (YYYY-MM-DD) on, soonest first: those starting
@@ -843,7 +930,12 @@ impl Knowledge {
         let mut out: Vec<_> = self
             .umalator_presets
             .iter()
-            .filter(|e| e.is_cm() && (e.date.as_str() >= today || e.ends.is_some_and(|t| crate::live::utc_date(t).as_str() >= today)))
+            .filter(|e| {
+                e.is_cm()
+                    && (e.date.as_str() >= today
+                        || e.ends
+                            .is_some_and(|t| crate::live::utc_date(t).as_str() >= today))
+            })
             .collect();
         out.sort_by(|a, b| a.date.cmp(&b.date));
         out
@@ -852,10 +944,19 @@ impl Knowledge {
     /// The Champions Meeting a plan was made for. Live data moves estimated dates (and can change
     /// the course), so it matches the cup's name within 21 days of the saved date first, then the
     /// exact date, then the same course within 21 days.
-    pub fn find_cm(&self, date: &str, course: Option<u32>, name: Option<&str>) -> Option<&EventPreset> {
+    pub fn find_cm(
+        &self,
+        date: &str,
+        course: Option<u32>,
+        name: Option<&str>,
+    ) -> Option<&EventPreset> {
         let cms = || self.umalator_presets.iter().filter(|e| e.is_cm());
         let saved = crate::live::date_epoch(date);
-        let near = move |e: &&EventPreset| saved.zip(crate::live::date_epoch(&e.date)).is_some_and(|(a, b)| (a - b).abs() <= 21 * 86_400);
+        let near = move |e: &&EventPreset| {
+            saved
+                .zip(crate::live::date_epoch(&e.date))
+                .is_some_and(|(a, b)| (a - b).abs() <= 21 * 86_400)
+        };
         cms()
             .filter(near)
             .find(|e| name.is_some_and(|n| e.name.eq_ignore_ascii_case(n)))
@@ -885,8 +986,14 @@ mod tests {
         let training = [(1, 1), (30, 10), (50, 15)];
         let init_speed = [(45, 15), (50, 30)];
         let at = |p: &[(u32, i32)]| [30, 35, 40, 45, 50].map(|l| effect_at(p, l));
-        assert_eq!(at(&friendship), [Some(15), Some(16), Some(18), Some(20), Some(20)]);
-        assert_eq!(at(&training), [Some(10), Some(11), Some(12), Some(13), Some(15)]);
+        assert_eq!(
+            at(&friendship),
+            [Some(15), Some(16), Some(18), Some(20), Some(20)]
+        );
+        assert_eq!(
+            at(&training),
+            [Some(10), Some(11), Some(12), Some(13), Some(15)]
+        );
         assert_eq!(at(&init_speed), [None, None, None, Some(15), Some(30)]);
     }
 
@@ -900,7 +1007,8 @@ mod tests {
             rarity: 1,
             sp: 100,
             wit_check: true,
-            conditions: "running_style==2&distance_type==3&phase==1@running_style==3&track_id==10006".into(),
+            conditions:
+                "running_style==2&distance_type==3&phase==1@running_style==3&track_id==10006".into(),
             pre: String::new(),
             effects: vec![],
             duration: 0.0,
@@ -913,14 +1021,24 @@ mod tests {
         assert_eq!(t.styles, vec![Style::Pace, Style::Late]);
         assert_eq!(t.distances, vec![Distance::Medium]);
         assert_eq!(t.tracks, vec![10006]);
-        assert!(t.fits(Some(Style::Pace), Some(Distance::Medium), Some(Surface::Turf)));
+        assert!(t.fits(
+            Some(Style::Pace),
+            Some(Distance::Medium),
+            Some(Surface::Turf)
+        ));
         assert!(!t.fits(Some(Style::Front), None, None));
     }
 
     #[test]
     fn grades_order() {
         assert!(grade_rank("S") > grade_rank("A") && grade_rank("A") > grade_rank("G"));
-        let apt = Aptitude { front: "G".into(), pace: "A".into(), late: "A".into(), end: "C".into(), ..Default::default() };
+        let apt = Aptitude {
+            front: "G".into(),
+            pace: "A".into(),
+            late: "A".into(),
+            end: "C".into(),
+            ..Default::default()
+        };
         assert_eq!(apt.best_style(), Style::Pace);
     }
 

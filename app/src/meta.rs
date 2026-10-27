@@ -181,7 +181,10 @@ pub(crate) struct CardMeta {
 impl CardMeta {
     pub fn of(&self, id: u32, friend: bool, kind: &str) -> (f32, String) {
         let map = if friend { &self.friend } else { &self.owned };
-        map.get(&id).or_else(|| self.any.get(kind)).cloned().unwrap_or_default()
+        map.get(&id)
+            .or_else(|| self.any.get(kind))
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -203,8 +206,12 @@ impl Backing {
         }
     }
     fn why(&self, label: &str) -> String {
-        let notes = if self.notes.is_empty() { String::new() } else { format!(" ({})", self.notes.join("; ")) };
-        format!("meta sheet {label}: {}{notes}", self.tiers.join(", "))
+        let notes = if self.notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", self.notes.join("; "))
+        };
+        tf!("meta sheet {}: {}{}", label, self.tiers.join(", "), notes)
     }
 }
 
@@ -221,7 +228,10 @@ impl App {
         presets
             .iter()
             .filter(|e| e.is_cm() && e.course == course)
-            .min_by_key(|e| (crate::tab_planner::day_number(&e.date) - crate::tab_planner::day_number(&today)).abs())
+            .min_by_key(|e| {
+                (crate::tab_planner::day_number(&e.date) - crate::tab_planner::day_number(&today))
+                    .abs()
+            })
             .map(|e| e.id)
     }
 
@@ -229,58 +239,98 @@ impl App {
     pub(crate) fn plan_meta(&self) -> Option<(&MetaEvent, &MetaStyle)> {
         let meta = self.kb.pvp_meta.as_ref()?;
         let cm = self.plan_cm_number()?;
-        let ev = meta.events.iter().find(|e| e.series == "CM" && e.number == cm)?;
+        let ev = meta
+            .events
+            .iter()
+            .find(|e| e.series == "CM" && e.number == cm)?;
         let st = ev.styles.get(style_key(self.planner.plan.style))?;
         Some((ev, st))
     }
 
     /// The trainees the sheet recommends for the plan's CM and style, in its order.
     pub(crate) fn plan_meta_trainees(&self) -> Vec<u32> {
-        self.plan_meta().map(|(_, st)| st.umas.iter().filter_map(|u| u.id).collect()).unwrap_or_default()
+        self.plan_meta()
+            .map(|(_, st)| st.umas.iter().filter_map(|u| u.id).collect())
+            .unwrap_or_default()
     }
 
     /// "CM 21 Capricorn Cup · Pace" for the plan's meta entry.
     pub(crate) fn plan_meta_label(&self) -> Option<String> {
         let (ev, _) = self.plan_meta()?;
-        Some(format!("CM {} {} · {}", ev.number, ev.name, style_key(self.planner.plan.style)))
+        Some(format!(
+            "CM {} {} · {}",
+            ev.number,
+            ev.name,
+            style_key(self.planner.plan.style)
+        ))
     }
 
     /// How strongly the sheet backs each card for the plan's CM and style. An owned card below
     /// the LB a Beginner deck asks for doesn't count for that deck.
     pub(crate) fn plan_card_meta(&self) -> CardMeta {
-        let Some((_, st)) = self.plan_meta() else { return CardMeta::default() };
+        let Some((_, st)) = self.plan_meta() else {
+            return CardMeta::default();
+        };
         let style = style_key(self.planner.plan.style);
         let mut owned: HashMap<u32, Backing> = HashMap::new();
         let mut friend: HashMap<u32, Backing> = HashMap::new();
         let mut any: HashMap<String, Backing> = HashMap::new();
         for tier in TIERS {
-            let Some(deck) = st.decks.get(tier) else { continue };
+            let Some(deck) = st.decks.get(tier) else {
+                continue;
+            };
             let w = tier_weight(tier);
             for c in &deck.cards {
                 match c.id {
                     Some(id) => {
-                        let lb_ok = c.min_lb.is_none_or(|m| self.owned_card(id).is_none_or(|o| o.lb >= m));
+                        let lb_ok = c
+                            .min_lb
+                            .is_none_or(|m| self.owned_card(id).is_none_or(|o| o.lb >= m));
                         if lb_ok {
-                            owned.entry(id).or_default().add(w, format!("{tier} {style} deck"), &c.note);
+                            owned.entry(id).or_default().add(
+                                w,
+                                tf!("{} {} deck", tier, style),
+                                &c.note,
+                            );
                         }
-                        friend.entry(id).or_default().add(w * 0.5, format!("{tier} {style} deck"), &c.note);
+                        friend.entry(id).or_default().add(
+                            w * 0.5,
+                            tf!("{} {} deck", tier, style),
+                            &c.note,
+                        );
                     }
                     None if !c.any.is_empty() => {
-                        any.entry(c.any.clone()).or_default().add(w * 0.3, format!("{tier} {style} deck asks for any {} card", c.any), "");
+                        any.entry(c.any.clone()).or_default().add(
+                            w * 0.3,
+                            tf!("{} {} deck asks for any {} card", tier, style, c.any),
+                            "",
+                        );
                     }
                     None => {}
                 }
             }
             if let Some(id) = deck.borrow.as_ref().and_then(|b| b.id) {
                 let note = deck.borrow.as_ref().map_or("", |b| b.note.as_str());
-                friend.entry(id).or_default().add(w, format!("{tier} {style} borrow"), note);
-                owned.entry(id).or_default().add(w * 0.5, format!("{tier} {style} borrow"), note);
+                friend
+                    .entry(id)
+                    .or_default()
+                    .add(w, tf!("{} {} borrow", tier, style), note);
+                owned
+                    .entry(id)
+                    .or_default()
+                    .add(w * 0.5, tf!("{} {} borrow", tier, style), note);
             }
         }
         for c in &st.honorable {
             if let Some(id) = c.id {
-                owned.entry(id).or_default().add(0.5, "honorable mention".into(), &c.note);
-                friend.entry(id).or_default().add(0.5, "honorable mention".into(), &c.note);
+                owned
+                    .entry(id)
+                    .or_default()
+                    .add(0.5, t!("honorable mention").into(), &c.note);
+                friend
+                    .entry(id)
+                    .or_default()
+                    .add(0.5, t!("honorable mention").into(), &c.note);
             }
         }
         let label = self.plan_meta_label().unwrap_or_default();
@@ -290,13 +340,27 @@ impl App {
                 let lb = self.owned_card(id).map_or(4, |o| o.lb);
                 let mut why = b.why(&label);
                 if lb < 4 {
-                    why += &format!("; counts {:.0}% at your LB {lb}", lb_factor(lb) * 100.0);
+                    why += &tf!(
+                        "; counts {}% at your LB {}",
+                        format!("{:.0}", lb_factor(lb) * 100.0),
+                        lb
+                    );
                 }
                 (id, (b.weight * lb_factor(lb), why))
             })
             .collect();
-        let friend = friend.into_iter().map(|(id, b)| (id, (b.weight, b.why(&label)))).collect();
-        CardMeta { owned, friend, any: any.into_iter().map(|(k, b)| (k, (b.weight, b.why(&label)))).collect() }
+        let friend = friend
+            .into_iter()
+            .map(|(id, b)| (id, (b.weight, b.why(&label))))
+            .collect();
+        CardMeta {
+            owned,
+            friend,
+            any: any
+                .into_iter()
+                .map(|(k, b)| (k, (b.weight, b.why(&label))))
+                .collect(),
+        }
     }
 
     /// Skills the sheet recommends for the plan's CM and style, as id → (weight, why). The skill
@@ -304,9 +368,15 @@ impl App {
     /// ○/white a quarter of the gold (the fallback when the gold doesn't fit the budget).
     pub(crate) fn plan_meta_skills(&self) -> HashMap<u32, (f32, String)> {
         let mut out: HashMap<u32, (f32, String)> = HashMap::new();
-        let Some((_, st)) = self.plan_meta() else { return out };
+        let Some((_, st)) = self.plan_meta() else {
+            return out;
+        };
         for s in &st.skills {
-            let w = if s.why.starts_with("advice") { 2.0 } else { 1.0 };
+            let w = if s.why.starts_with("advice") {
+                2.0
+            } else {
+                1.0
+            };
             let e = out.entry(s.id).or_insert((0.0, String::new()));
             if w > e.0 {
                 *e = (w, s.why.clone());
@@ -315,7 +385,7 @@ impl App {
                 let gold = self.kb.skill_name(s.id);
                 let e = out.entry(lower).or_insert((0.0, String::new()));
                 if w * 0.25 > e.0 {
-                    *e = (w * 0.25, format!("the ○/white of {gold}"));
+                    *e = (w * 0.25, tf!("the ○/white of {}", gold));
                 }
             }
         }

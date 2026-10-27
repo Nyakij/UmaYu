@@ -24,21 +24,34 @@ fn text<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
 }
 
 fn int(v: &Value, k: &str) -> Option<u64> {
-    v[k].as_u64().or_else(|| v[k].as_f64().filter(|f| *f >= 0.0).map(|f| f as u64))
+    v[k].as_u64()
+        .or_else(|| v[k].as_f64().filter(|f| *f >= 0.0).map(|f| f as u64))
 }
 
 fn texts(v: &Value, k: &str) -> Vec<String> {
-    v[k].as_array().into_iter().flatten().filter_map(Value::as_str).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    v[k].as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn parse_distance(v: &Value) -> Option<Distance> {
-    Distance::ALL.into_iter().find(|d| v.as_str() == Some(d.label()))
+    Distance::ALL
+        .into_iter()
+        .find(|d| v.as_str() == Some(d.label()))
 }
 fn parse_surface(v: &Value) -> Option<Surface> {
-    Surface::ALL.into_iter().find(|d| v.as_str() == Some(d.label()))
+    Surface::ALL
+        .into_iter()
+        .find(|d| v.as_str() == Some(d.label()))
 }
 fn parse_style(v: &Value) -> Option<Style> {
-    Style::ALL.into_iter().find(|d| v.as_str() == Some(d.short()) || v.as_str() == Some(d.label()))
+    Style::ALL
+        .into_iter()
+        .find(|d| v.as_str() == Some(d.short()) || v.as_str() == Some(d.label()))
 }
 
 pub(crate) fn clip(s: String, max: usize) -> String {
@@ -59,10 +72,18 @@ fn plural(n: usize, one: &str) -> String {
 
 /// 1-based condition codes for the names the schemas take.
 fn code(list: &[&str], name: &str) -> Option<i32> {
-    list.iter().position(|x| x.eq_ignore_ascii_case(name)).map(|i| i as i32 + 1)
+    list.iter()
+        .position(|x| x.eq_ignore_ascii_case(name))
+        .map(|i| i as i32 + 1)
 }
 
-const LOG_KEYS: [&str; 5] = ["careers", "team_trials", "champions_meeting", "league_of_heroes", "sparks"];
+const LOG_KEYS: [&str; 5] = [
+    "careers",
+    "team_trials",
+    "champions_meeting",
+    "league_of_heroes",
+    "sparks",
+];
 
 impl App {
     // -----------------------------------------------------------------------
@@ -79,23 +100,51 @@ impl App {
             .kb
             .umas
             .values()
-            .filter(|u| format!("{} [{}]", u.name, u.outfit).to_lowercase().contains(&ql) || u.name.to_lowercase() == ql)
+            .filter(|u| {
+                format!("{} [{}]", u.name, u.outfit)
+                    .to_lowercase()
+                    .contains(&ql)
+                    || u.name.to_lowercase() == ql
+            })
             .map(|u| u.id)
             .collect();
         if hits.is_empty() {
-            hits = self.kb.umas.values().filter(|u| ql.contains(&u.name.to_lowercase())).map(|u| u.id).collect();
+            hits = self
+                .kb
+                .umas
+                .values()
+                .filter(|u| ql.contains(&u.name.to_lowercase()))
+                .map(|u| u.id)
+                .collect();
         }
         hits.sort_by_key(|id| (self.owned_uma(*id).is_none(), *id));
         match hits.as_slice() {
             [] => Err(format!("No uma matches '{q}'.")),
             [one] => Ok(*one),
-            many if self.owned_uma(many[0]).is_some() && many.iter().filter(|i| self.owned_uma(**i).is_some()).count() == 1 => Ok(many[0]),
+            many if self.owned_uma(many[0]).is_some()
+                && many
+                    .iter()
+                    .filter(|i| self.owned_uma(**i).is_some())
+                    .count()
+                    == 1 =>
+            {
+                Ok(many[0])
+            }
             many => Err(format!(
                 "Several match '{q}': {}. Ask again with the outfit.",
                 many.iter()
                     .map(|i| {
                         let u = &self.kb.umas[i];
-                        format!("{} [{}]{}", u.name, u.outfit, if self.owned_uma(*i).is_some() { " (owned)" } else { "" })
+                        format!(
+                            "{} [{}]{}",
+                            u.name,
+                            u.outfit,
+                            if self.owned_uma(*i).is_some() {
+                                " (owned)"
+                            } else {
+                                ""
+                            }
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join("; ")
@@ -114,11 +163,19 @@ impl App {
             .kb
             .cards
             .values()
-            .filter(|c| format!("{} [{}] {} {}", c.uma, c.title, c.rarity, c.kind).to_lowercase().contains(&ql))
+            .filter(|c| {
+                format!("{} [{}] {} {}", c.uma, c.title, c.rarity, c.kind)
+                    .to_lowercase()
+                    .contains(&ql)
+            })
             .map(|c| c.id)
             .collect();
         hits.sort_by_key(|id| (self.owned_card(*id).is_none(), std::cmp::Reverse(*id)));
-        let owned: Vec<u32> = hits.iter().copied().filter(|i| self.owned_card(*i).is_some()).collect();
+        let owned: Vec<u32> = hits
+            .iter()
+            .copied()
+            .filter(|i| self.owned_card(*i).is_some())
+            .collect();
         match (hits.as_slice(), owned.as_slice()) {
             ([], _) => Err(format!("No card matches '{q}'.")),
             ([one], _) | (_, [one]) => Ok(*one),
@@ -128,7 +185,15 @@ impl App {
                     .take(15)
                     .map(|i| {
                         let c = &self.kb.cards[i];
-                        format!("{} {} {} [{}]{}", c.rarity, c.kind, c.uma, c.title, self.owned_card(*i).map_or(String::new(), |o| format!(" (owned LB{})", o.lb)))
+                        format!(
+                            "{} {} {} [{}]{}",
+                            c.rarity,
+                            c.kind,
+                            c.uma,
+                            c.title,
+                            self.owned_card(*i)
+                                .map_or(String::new(), |o| format!(" (owned LB{})", o.lb))
+                        )
                     })
                     .collect::<Vec<_>>()
                     .join("; ")
@@ -143,14 +208,32 @@ impl App {
         {
             return Ok(id);
         }
-        if let Some(id) = self.kb.skill_order.iter().find(|i| self.kb.skills[i].name.to_lowercase() == ql) {
+        if let Some(id) = self
+            .kb
+            .skill_order
+            .iter()
+            .find(|i| self.kb.skills[i].name.to_lowercase() == ql)
+        {
             return Ok(*id);
         }
-        let hits: Vec<u32> = self.kb.skill_order.iter().copied().filter(|i| self.kb.skills[i].name.to_lowercase().contains(&ql)).collect();
+        let hits: Vec<u32> = self
+            .kb
+            .skill_order
+            .iter()
+            .copied()
+            .filter(|i| self.kb.skills[i].name.to_lowercase().contains(&ql))
+            .collect();
         match hits.as_slice() {
             [] => Err(format!("No skill matches '{q}'.")),
             [one] => Ok(*one),
-            many => Err(format!("Several match '{q}': {}.", many.iter().take(20).map(|i| self.kb.skills[i].name.clone()).collect::<Vec<_>>().join("; "))),
+            many => Err(format!(
+                "Several match '{q}': {}.",
+                many.iter()
+                    .take(20)
+                    .map(|i| self.kb.skills[i].name.clone())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )),
         }
     }
 
@@ -163,7 +246,11 @@ impl App {
                 Err(e) => errors.push(e),
             }
         }
-        if errors.is_empty() { Ok(ids) } else { Err(errors.join(" ")) }
+        if errors.is_empty() {
+            Ok(ids)
+        } else {
+            Err(errors.join(" "))
+        }
     }
 
     /// A Champions Meeting by cup name, number ("22", "CM 22") or "next"; the nearest upcoming
@@ -172,7 +259,12 @@ impl App {
         let now = today();
         let ql = q.trim().to_lowercase();
         if ql.is_empty() || ql == "next" {
-            return self.kb.upcoming_cms(&now).first().map(|e| (*e).clone()).ok_or_else(|| "No upcoming Champions Meeting in the schedule.".to_string());
+            return self
+                .kb
+                .upcoming_cms(&now)
+                .first()
+                .map(|e| (*e).clone())
+                .ok_or_else(|| "No upcoming Champions Meeting in the schedule.".to_string());
         }
         let num = ql.trim_start_matches("cm").trim().parse::<u32>().ok();
         let day = |d: &str| crate::tab_planner::day_number(d);
@@ -181,41 +273,75 @@ impl App {
             .umalator_presets
             .iter()
             .filter(|e| e.is_cm())
-            .filter(|e| num.map_or_else(|| e.name.to_lowercase().contains(&ql) || ql.contains(&e.name.to_lowercase()), |n| e.id == n))
+            .filter(|e| {
+                num.map_or_else(
+                    || e.name.to_lowercase().contains(&ql) || ql.contains(&e.name.to_lowercase()),
+                    |n| e.id == n,
+                )
+            })
             .collect();
         hits.sort_by_key(|e| {
             let d = day(&e.date) - day(&now);
             (d < -10, d.abs())
         });
-        hits.first().map(|e| (*e).clone()).ok_or_else(|| format!("No Champions Meeting matches '{q}'. list_upcoming_events shows the schedule."))
+        hits.first().map(|e| (*e).clone()).ok_or_else(|| {
+            format!("No Champions Meeting matches '{q}'. list_upcoming_events shows the schedule.")
+        })
     }
 
     pub(crate) fn skill_line(&self, id: u32) -> String {
-        let Some(s) = self.kb.skills.get(&id) else { return format!("skill {id}") };
+        let Some(s) = self.kb.skills.get(&id) else {
+            return format!("skill {id}");
+        };
         let tags = self.kb.tag_line(&s.tags());
         format!(
             "{} ({}, {} SP{}): {}{}",
             s.name,
             s.tier(),
             s.sp,
-            if tags.is_empty() { String::new() } else { format!(", only {tags}") },
-            if s.summary.is_empty() { s.effect_text() } else { s.summary.clone() },
-            if self.skill_available(id) { " [available to you]" } else { "" }
+            if tags.is_empty() {
+                String::new()
+            } else {
+                format!(", only {tags}")
+            },
+            if s.summary.is_empty() {
+                s.effect_text()
+            } else {
+                s.summary.clone()
+            },
+            if self.skill_available(id) {
+                " [available to you]"
+            } else {
+                ""
+            }
         )
     }
 
     fn uma_label(&self, id: u32) -> String {
-        self.kb.umas.get(&id).map_or(format!("uma {id}"), |u| format!("{} [{}]", u.name, u.outfit))
+        self.kb.umas.get(&id).map_or(format!("uma {id}"), |u| {
+            format!("{} [{}]", u.name, u.outfit)
+        })
     }
 
     fn card_label(&self, id: u32) -> String {
-        let Some(c) = self.kb.cards.get(&id) else { return format!("card {id}") };
-        let owned = self.owned_card(id).map_or(" (not owned)".to_string(), |o| format!(" (owned LB{} Lv{})", o.lb, o.level));
+        let Some(c) = self.kb.cards.get(&id) else {
+            return format!("card {id}");
+        };
+        let owned = self.owned_card(id).map_or(" (not owned)".to_string(), |o| {
+            format!(" (owned LB{} Lv{})", o.lb, o.level)
+        });
         format!("{} [{}] ({} {}){owned}", c.uma, c.title, c.rarity, c.kind)
     }
 
     fn skill_names(&self, ids: &[u32]) -> String {
-        if ids.is_empty() { "none".into() } else { ids.iter().map(|s| self.kb.skill_name(*s)).collect::<Vec<_>>().join(", ") }
+        if ids.is_empty() {
+            "none".into()
+        } else {
+            ids.iter()
+                .map(|s| self.kb.skill_name(*s))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
     }
 
     /// The working plan in a few lines, for the model.
@@ -223,21 +349,82 @@ impl App {
         use std::fmt::Write;
         let p = &self.planner.plan;
         let mut o = String::new();
-        let saved = self.planner.open_file.as_ref().and_then(|f| f.file_name()).map_or("not saved yet".to_string(), |f| format!("saved as plans/{}", f.to_string_lossy()));
-        let _ = writeln!(o, "Working plan: {} ({saved})", if p.title.is_empty() { "untitled" } else { &p.title });
-        let _ = writeln!(o, "Goal: {}; {} {}, {}; scenario {}", p.purpose.label(), p.distance.label(), p.surface.label(), p.style.label(), self.plan_scenario_name());
+        let saved = self
+            .planner
+            .open_file
+            .as_ref()
+            .and_then(|f| f.file_name())
+            .map_or("not saved yet".to_string(), |f| {
+                format!("saved as plans/{}", f.to_string_lossy())
+            });
+        let _ = writeln!(
+            o,
+            "Working plan: {} ({saved})",
+            if p.title.is_empty() {
+                "untitled"
+            } else {
+                &p.title
+            }
+        );
+        let _ = writeln!(
+            o,
+            "Goal: {}; {} {}, {}; scenario {}",
+            p.purpose.label(),
+            p.distance.label(),
+            p.surface.label(),
+            p.style.label(),
+            self.plan_scenario_name()
+        );
         if let Some(e) = self.plan_cm() {
-            let off = if e.disabled_skills.is_empty() { String::new() } else { format!("; turns off: {}", self.skill_names(&e.disabled_skills)) };
-            let _ = writeln!(o, "Champions Meeting: CM {} {} on {} ({}), {}, {}{off}", e.id, e.name, e.date, if e.announced { "announced" } else { "estimated" }, e.course_name, e.conditions);
+            let off = if e.disabled_skills.is_empty() {
+                String::new()
+            } else {
+                format!("; turns off: {}", self.skill_names(&e.disabled_skills))
+            };
+            let _ = writeln!(
+                o,
+                "Champions Meeting: CM {} {} on {} ({}), {}, {}{off}",
+                e.id,
+                e.name,
+                e.date,
+                if e.announced {
+                    "announced"
+                } else {
+                    "estimated"
+                },
+                e.course_name,
+                e.conditions
+            );
         }
-        let race = p.course.and_then(|c| self.kb.races.iter().find(|r| r.id == c)).map_or("not set".to_string(), |r| format!("{} ({} {} {}m {})", r.name, r.track, r.surface, r.distance, r.direction));
+        let race = p
+            .course
+            .and_then(|c| self.kb.races.iter().find(|r| r.id == c))
+            .map_or("not set".to_string(), |r| {
+                format!(
+                    "{} ({} {} {}m {})",
+                    r.name, r.track, r.surface, r.distance, r.direction
+                )
+            });
         let setup = self.plan_race_setup();
-        let sim_course = setup.course.and_then(|c| self.sim_data.as_ref().map(|d| d.course_name(c))).unwrap_or_else(|| "none".into());
-        let _ = writeln!(o, "Race: {race}; simulator course {sim_course}; conditions {}", if p.conditions.is_empty() { "from the CM or nearest event" } else { &p.conditions });
+        let sim_course = setup
+            .course
+            .and_then(|c| self.sim_data.as_ref().map(|d| d.course_name(c)))
+            .unwrap_or_else(|| "none".into());
+        let _ = writeln!(
+            o,
+            "Race: {race}; simulator course {sim_course}; conditions {}",
+            if p.conditions.is_empty() {
+                "from the CM or nearest event"
+            } else {
+                &p.conditions
+            }
+        );
         match p.trainee.and_then(|t| Some((t, self.kb.umas.get(&t)?))) {
             Some((id, info)) => {
                 let a = &info.aptitude;
-                let owned = self.owned_uma(id).map_or("not owned".to_string(), |u| format!("{}★ P{}", u.stars, u.potential));
+                let owned = self.owned_uma(id).map_or("not owned".to_string(), |u| {
+                    format!("{}★ P{}", u.stars, u.potential)
+                });
                 let _ = writeln!(
                     o,
                     "Trainee: {} [{}] {owned}; aptitude {} {}, {} {}, {} {}",
@@ -253,18 +440,68 @@ impl App {
             }
             None => o.push_str("Trainee: not picked\n"),
         }
-        let _ = writeln!(o, "Target stats: {}", if p.target.iter().all(|v| *v == 0) { "not set".to_string() } else { format!("{:?}", p.target) });
-        let deck: Vec<String> = p.deck.iter().enumerate().map(|(i, d)| format!("{}. {}", i + 1, d.map_or("empty".to_string(), |id| self.card_label(id)))).collect();
+        let _ = writeln!(
+            o,
+            "Target stats: {}",
+            if p.target.iter().all(|v| *v == 0) {
+                "not set".to_string()
+            } else {
+                format!("{:?}", p.target)
+            }
+        );
+        let deck: Vec<String> = p
+            .deck
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                format!(
+                    "{}. {}",
+                    i + 1,
+                    d.map_or("empty".to_string(), |id| self.card_label(id))
+                )
+            })
+            .collect();
         let _ = writeln!(o, "Deck: {}", deck.join("; "));
-        let _ = writeln!(o, "Friend card: {}", p.friend.and_then(|f| self.kb.cards.get(&f)).map_or("none".to_string(), |c| format!("{} [{}] ({} {}) LB{}", c.uma, c.title, c.rarity, c.kind, p.friend_lb)));
+        let _ = writeln!(
+            o,
+            "Friend card: {}",
+            p.friend
+                .and_then(|f| self.kb.cards.get(&f))
+                .map_or("none".to_string(), |c| format!(
+                    "{} [{}] ({} {}) LB{}",
+                    c.uma, c.title, c.rarity, c.kind, p.friend_lb
+                ))
+        );
         let career = self.plan_career();
         let cost = self.chosen_cost(&p.skills, career.as_ref());
-        let budget = self.pick_budget().map_or("unknown".to_string(), |b| format!("{b:.0}"));
-        let _ = writeln!(o, "Skills to buy ({}, about {cost:.0} SP of {budget}): {}", p.skills.len(), self.skill_names(&p.skills));
+        let budget = self
+            .pick_budget()
+            .map_or("unknown".to_string(), |b| format!("{b:.0}"));
+        let _ = writeln!(
+            o,
+            "Skills to buy ({}, about {cost:.0} SP of {budget}): {}",
+            p.skills.len(),
+            self.skill_names(&p.skills)
+        );
         if !p.pinned_skills.is_empty() || !p.banned_skills.is_empty() {
-            let _ = writeln!(o, "Pinned: {}; banned: {}", self.skill_names(&p.pinned_skills), self.skill_names(&p.banned_skills));
+            let _ = writeln!(
+                o,
+                "Pinned: {}; banned: {}",
+                self.skill_names(&p.pinned_skills),
+                self.skill_names(&p.banned_skills)
+            );
         }
-        let _ = writeln!(o, "SP budget: {}", p.sp_budget.map_or_else(|| career.map_or("needs a trainee and the scenario data".to_string(), |c| format!("{:.0} (career simulation estimate)", c.sp_mean)), |b| format!("{b} (set by hand)")));
+        let _ = writeln!(
+            o,
+            "SP budget: {}",
+            p.sp_budget.map_or_else(
+                || career.map_or(
+                    "needs a trainee and the scenario data".to_string(),
+                    |c| format!("{:.0} (career simulation estimate)", c.sp_mean)
+                ),
+                |b| format!("{b} (set by hand)")
+            )
+        );
         if let Some(label) = self.plan_meta_label() {
             let _ = writeln!(o, "Meta sheet entry: {label}");
         }
@@ -278,11 +515,15 @@ impl App {
     fn aptitude_note(&self) -> Option<String> {
         let p = &self.planner.plan;
         let a = &self.kb.umas.get(&p.trainee?)?.aptitude;
-        let low: Vec<String> = [(p.distance.label(), a.distance(p.distance)), (p.surface.label(), a.surface(p.surface)), (p.style.label(), a.style(p.style))]
-            .into_iter()
-            .filter(|(_, g)| grade_rank(g) < 7)
-            .map(|(l, g)| format!("{l} {g}"))
-            .collect();
+        let low: Vec<String> = [
+            (p.distance.label(), a.distance(p.distance)),
+            (p.surface.label(), a.surface(p.surface)),
+            (p.style.label(), a.style(p.style)),
+        ]
+        .into_iter()
+        .filter(|(_, g)| grade_rank(g) < 7)
+        .map(|(l, g)| format!("{l} {g}"))
+        .collect();
         (!low.is_empty()).then(|| format!("the trainee's aptitude is below A for {} (slower in the race; pink sparks from parents raise it)", low.join(", ")))
     }
 
@@ -293,17 +534,33 @@ impl App {
         match name {
             "get_account_summary" => Ok(self.account_summary()),
             "find_umas" => {
-                let (d, s, st) = (parse_distance(&input["distance"]), parse_surface(&input["surface"]), parse_style(&input["style"]));
+                let (d, s, st) = (
+                    parse_distance(&input["distance"]),
+                    parse_surface(&input["surface"]),
+                    parse_style(&input["style"]),
+                );
                 let min = input["min_grade"].as_str().map_or(7, grade_rank);
                 let mut rows: Vec<(u32, String)> = Vec::new();
                 for u in &self.roster.umas {
-                    let Some(info) = self.kb.umas.get(&u.id) else { continue };
+                    let Some(info) = self.kb.umas.get(&u.id) else {
+                        continue;
+                    };
                     let a = &info.aptitude;
-                    let grades = [d.map(|x| a.distance(x)), s.map(|x| a.surface(x)), st.map(|x| a.style(x))];
+                    let grades = [
+                        d.map(|x| a.distance(x)),
+                        s.map(|x| a.surface(x)),
+                        st.map(|x| a.style(x)),
+                    ];
                     if grades.iter().flatten().any(|g| grade_rank(g) < min) {
                         continue;
                     }
-                    let score: u32 = grades.iter().flatten().map(|g| u32::from(grade_rank(g))).sum::<u32>() * 10 + u32::from(u.stars);
+                    let score: u32 = grades
+                        .iter()
+                        .flatten()
+                        .map(|g| u32::from(grade_rank(g)))
+                        .sum::<u32>()
+                        * 10
+                        + u32::from(u.stars);
                     rows.push((
                         score,
                         format!(
@@ -313,7 +570,11 @@ impl App {
                     ));
                 }
                 rows.sort_by(|a, b| b.0.cmp(&a.0));
-                Ok(if rows.is_empty() { "No owned uma fits.".into() } else { rows.into_iter().map(|r| r.1).collect::<Vec<_>>().join("\n") })
+                Ok(if rows.is_empty() {
+                    "No owned uma fits.".into()
+                } else {
+                    rows.into_iter().map(|r| r.1).collect::<Vec<_>>().join("\n")
+                })
             }
             "get_uma" => {
                 let id = self.find_uma_id(input["query"].as_str().unwrap_or_default())?;
@@ -325,7 +586,10 @@ impl App {
                     i.name,
                     i.outfit,
                     i.release,
-                    owned.map_or("no".to_string(), |o| format!("yes, {}★, potential {}", o.stars, o.potential)),
+                    owned.map_or("no".to_string(), |o| format!(
+                        "yes, {}★, potential {}",
+                        o.stars, o.potential
+                    )),
                     a.turf,
                     a.dirt,
                     a.sprint,
@@ -346,22 +610,49 @@ impl App {
                     let locked = owned.is_some_and(|o| o.potential < s.potential);
                     out += &format!(
                         "{}{}: {}\n",
-                        if s.potential <= 1 { "Innate".to_string() } else { format!("Potential {}", s.potential) },
-                        if locked { " (LOCKED for this account)" } else { "" },
+                        if s.potential <= 1 {
+                            "Innate".to_string()
+                        } else {
+                            format!("Potential {}", s.potential)
+                        },
+                        if locked {
+                            " (LOCKED for this account)"
+                        } else {
+                            ""
+                        },
                         self.skill_line(s.id)
                     );
                 }
                 for e in &i.evolved {
-                    out += &format!("Evolves {} -> {} when: {}\n", self.kb.skill_name(e.base), self.skill_line(e.evolved), e.conditions.iter().map(|c| c.join(" + ")).collect::<Vec<_>>().join(" OR "));
+                    out += &format!(
+                        "Evolves {} -> {} when: {}\n",
+                        self.kb.skill_name(e.base),
+                        self.skill_line(e.evolved),
+                        e.conditions
+                            .iter()
+                            .map(|c| c.join(" + "))
+                            .collect::<Vec<_>>()
+                            .join(" OR ")
+                    );
                 }
                 if !i.event_skills.is_empty() {
-                    out += &format!("Event skills: {}\n", i.event_skills.iter().map(|s| self.kb.skill_name(*s)).collect::<Vec<_>>().join(", "));
+                    out += &format!(
+                        "Event skills: {}\n",
+                        i.event_skills
+                            .iter()
+                            .map(|s| self.kb.skill_name(*s))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                 }
                 out += "Career objectives:\n";
                 for o in &i.objectives {
                     out += &format!("- {}: {} ({})\n", o.when, o.race, o.goal);
                 }
-                out += &format!("{} career events (event outcomes are in the Umas tab).\n", i.events.len());
+                out += &format!(
+                    "{} career events (event outcomes are in the Umas tab).\n",
+                    i.events.len()
+                );
                 Ok(out)
             }
             "get_card" => {
@@ -381,22 +672,38 @@ impl App {
                     c.uma,
                     c.title,
                     c.release,
-                    owned.map_or("no".to_string(), |o| format!("yes, LB{} Lv{}", o.lb, o.level))
+                    owned.map_or("no".to_string(), |o| format!(
+                        "yes, LB{} Lv{}",
+                        o.lb, o.level
+                    ))
                 );
                 for e in &c.effects {
                     let now = crate::knowledge::effect_at(&e.points, level);
                     let top = crate::knowledge::effect_at(&e.points, max);
                     if now.unwrap_or(0) != 0 || top.unwrap_or(0) != 0 {
-                        out += &format!("- {}: {} / {}\n", e.name, now.unwrap_or(0), top.unwrap_or(0));
+                        out += &format!(
+                            "- {}: {} / {}\n",
+                            e.name,
+                            now.unwrap_or(0),
+                            top.unwrap_or(0)
+                        );
                     }
                 }
                 if let Some(u) = &c.unique {
                     out += &format!(
                         "Unique effect (from Lv{}{}): {} {}\n",
                         u.level,
-                        if level >= u.level { ", active" } else { ", NOT active at owned level" },
+                        if level >= u.level {
+                            ", active"
+                        } else {
+                            ", NOT active at owned level"
+                        },
                         u.condition,
-                        u.effects.iter().map(|e| format!("{} {}", e.name, e.value)).collect::<Vec<_>>().join(", ")
+                        u.effects
+                            .iter()
+                            .map(|e| format!("{} {}", e.name, e.value))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     );
                 }
                 out += "Skill hints:\n";
@@ -404,11 +711,28 @@ impl App {
                     out += &format!("- {}\n", self.skill_line(*s));
                 }
                 if !c.event_skills.is_empty() {
-                    out += &format!("Skills from events: {}\n", c.event_skills.iter().map(|s| self.kb.skill_name(*s)).collect::<Vec<_>>().join(", "));
+                    out += &format!(
+                        "Skills from events: {}\n",
+                        c.event_skills
+                            .iter()
+                            .map(|s| self.kb.skill_name(*s))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                 }
-                out += "Events (options; '|' separates random alternative outcomes, odds unknown):\n";
+                out +=
+                    "Events (options; '|' separates random alternative outcomes, odds unknown):\n";
                 for e in &c.events {
-                    let opts: Vec<String> = e.options.iter().map(|alts| alts.iter().map(|l| l.join(", ")).collect::<Vec<_>>().join(" | ")).collect();
+                    let opts: Vec<String> = e
+                        .options
+                        .iter()
+                        .map(|alts| {
+                            alts.iter()
+                                .map(|l| l.join(", "))
+                                .collect::<Vec<_>>()
+                                .join(" | ")
+                        })
+                        .collect();
                     out += &format!("- {} ({}): {}\n", e.title, e.kind, opts.join(" // "));
                 }
                 Ok(clip(out, 12_000))
@@ -417,14 +741,20 @@ impl App {
                 let q = input["query"].as_str().unwrap_or_default().to_lowercase();
                 let owned_only = input["owned_only"].as_bool().unwrap_or(true);
                 let cat = input["category"].as_str();
-                let (d, s, st) = (parse_distance(&input["distance"]), parse_surface(&input["surface"]), parse_style(&input["style"]));
+                let (d, s, st) = (
+                    parse_distance(&input["distance"]),
+                    parse_surface(&input["surface"]),
+                    parse_style(&input["style"]),
+                );
                 let hits: Vec<String> = self
                     .kb
                     .skill_order
                     .iter()
                     .filter(|id| {
                         let k = &self.kb.skills[id];
-                        (q.is_empty() || k.name.to_lowercase().contains(&q) || k.summary.to_lowercase().contains(&q))
+                        (q.is_empty()
+                            || k.name.to_lowercase().contains(&q)
+                            || k.summary.to_lowercase().contains(&q))
                             && cat.is_none_or(|c| k.category == c || k.tier() == c)
                             && k.tags().fits(st, d, s)
                             && (!owned_only || self.skill_available(**id))
@@ -432,7 +762,11 @@ impl App {
                     .take(40)
                     .map(|id| self.skill_line(*id))
                     .collect();
-                Ok(if hits.is_empty() { "No skills match.".into() } else { hits.join("\n") })
+                Ok(if hits.is_empty() {
+                    "No skills match.".into()
+                } else {
+                    hits.join("\n")
+                })
             }
             "get_skill" => {
                 let id = self.find_skill_id(input["query"].as_str().unwrap_or_default())?;
@@ -453,18 +787,46 @@ impl App {
                     k.cooldown
                 );
                 if k.grade != 0 {
-                    out = out.replacen("\nEffect:", &format!(", {} evaluation points\nEffect:", k.grade), 1);
+                    out = out.replacen(
+                        "\nEffect:",
+                        &format!(", {} evaluation points\nEffect:", k.grade),
+                        1,
+                    );
                 }
-                if let Some((tiers, t)) = self.kb.skill_tiers.as_ref().and_then(|x| Some((x, x.get(id)?))) {
+                if let Some((tiers, t)) = self
+                    .kb
+                    .skill_tiers
+                    .as_ref()
+                    .and_then(|x| Some((x, x.get(id)?)))
+                {
                     out += &format!("{}\n", tiers.explain(t));
                 }
                 for src in self.kb.sources.get(&id).into_iter().flatten() {
-                    let who = src
-                        .uma()
-                        .and_then(|u| self.kb.umas.get(&u).map(|i| format!("uma {} [{}]", i.name, i.outfit)))
-                        .or_else(|| src.card().and_then(|c| self.kb.cards.get(&c).map(|i| format!("card {} {} [{}]", i.rarity, i.uma, i.title))))
-                        .unwrap_or_default();
-                    out += &format!("- {:?} {who}{}\n", src, if self.source_available(*src) { " (available to you)" } else { "" });
+                    let who =
+                        src.uma()
+                            .and_then(|u| {
+                                self.kb
+                                    .umas
+                                    .get(&u)
+                                    .map(|i| format!("uma {} [{}]", i.name, i.outfit))
+                            })
+                            .or_else(|| {
+                                src.card().and_then(|c| {
+                                    self.kb.cards.get(&c).map(|i| {
+                                        format!("card {} {} [{}]", i.rarity, i.uma, i.title)
+                                    })
+                                })
+                            })
+                            .unwrap_or_default();
+                    out += &format!(
+                        "- {:?} {who}{}\n",
+                        src,
+                        if self.source_available(*src) {
+                            " (available to you)"
+                        } else {
+                            ""
+                        }
+                    );
                 }
                 Ok(out)
             }
@@ -475,27 +837,71 @@ impl App {
                     .kb
                     .races
                     .iter()
-                    .filter(|r| r.name.to_lowercase().contains(&q) || r.track.to_lowercase().contains(&q))
+                    .filter(|r| {
+                        r.name.to_lowercase().contains(&q) || r.track.to_lowercase().contains(&q)
+                    })
                     .filter(|r| seen.insert((r.name.clone(), r.distance)))
                     .take(25)
-                    .map(|r| format!("{} ({}): {} {} {}m {} [{}] (race id {})", r.name, r.grade, r.track, r.surface, r.distance, r.direction, r.category, r.id))
+                    .map(|r| {
+                        format!(
+                            "{} ({}): {} {} {}m {} [{}] (race id {})",
+                            r.name,
+                            r.grade,
+                            r.track,
+                            r.surface,
+                            r.distance,
+                            r.direction,
+                            r.category,
+                            r.id
+                        )
+                    })
                     .collect();
-                Ok(if hits.is_empty() { "No race matches.".into() } else { hits.join("\n") })
+                Ok(if hits.is_empty() {
+                    "No race matches.".into()
+                } else {
+                    hits.join("\n")
+                })
             }
-            "list_upcoming_events" => Ok(self.upcoming_text(int(input, "count").unwrap_or(4) as usize)),
+            "list_upcoming_events" => {
+                Ok(self.upcoming_text(int(input, "count").unwrap_or(4) as usize))
+            }
             "get_cm_meta" => self.cm_meta_text(text(input, "cm"), input["style"].as_str()),
             "list_plans" => {
                 let files = self.plan_files();
-                Ok(if files.is_empty() { "No saved plans yet.".into() } else { files.iter().map(|(p, t)| format!("plans/{} — {t}", p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())).collect::<Vec<_>>().join("\n") })
+                Ok(if files.is_empty() {
+                    "No saved plans yet.".into()
+                } else {
+                    files
+                        .iter()
+                        .map(|(p, t)| {
+                            format!(
+                                "plans/{} — {t}",
+                                p.file_name()
+                                    .map(|f| f.to_string_lossy().to_string())
+                                    .unwrap_or_default()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
             }
-            "get_plan" => match text(input, "name").filter(|n| !n.eq_ignore_ascii_case("current")) {
-                None => Ok(self.plan_brief()),
-                Some(name) => {
-                    let path = self.find_plan_file(name)?;
-                    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                    Ok(clip(text.split(crate::tab_planner::PLAN_MARKER).next().unwrap_or("").to_string(), 16_000))
+            "get_plan" => {
+                match text(input, "name").filter(|n| !n.eq_ignore_ascii_case("current")) {
+                    None => Ok(self.plan_brief()),
+                    Some(name) => {
+                        let path = self.find_plan_file(name)?;
+                        let text = std::fs::read_to_string(&path)
+                            .map_err(|e| format!("{}: {e}", path.display()))?;
+                        Ok(clip(
+                            text.split(crate::tab_planner::PLAN_MARKER)
+                                .next()
+                                .unwrap_or("")
+                                .to_string(),
+                            16_000,
+                        ))
+                    }
                 }
-            },
+            }
             "get_slot_ranking" => {
                 let slot = (int(input, "slot").unwrap_or(1).clamp(1, 6) - 1) as usize;
                 let top = int(input, "top_n").unwrap_or(5).clamp(1, 15) as usize;
@@ -503,11 +909,28 @@ impl App {
                 if picks.is_empty() {
                     return Ok("No candidates for that slot.".into());
                 }
-                let label = if slot == 5 { "the friend slot".to_string() } else { format!("slot {}", slot + 1) };
-                let mut out = format!("Cards for {label} of the working plan, best first (model output: suggestions; scores are stat-point equivalents):\n");
+                let label = if slot == 5 {
+                    "the friend slot".to_string()
+                } else {
+                    format!("slot {}", slot + 1)
+                };
+                let mut out = format!(
+                    "Cards for {label} of the working plan, best first (model output: suggestions; scores are stat-point equivalents):\n"
+                );
                 for (i, c) in picks.iter().take(top).enumerate() {
                     let stars = crate::meta::stars(c.meta);
-                    out += &format!("{}. {}{} — score {:.0}: {}\n", i + 1, if stars.is_empty() { String::new() } else { format!("{stars} ") }, self.card_label(c.id), c.score, c.reason);
+                    out += &format!(
+                        "{}. {}{} — score {:.0}: {}\n",
+                        i + 1,
+                        if stars.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{stars} ")
+                        },
+                        self.card_label(c.id),
+                        c.score,
+                        c.reason
+                    );
                 }
                 Ok(out)
             }
@@ -526,15 +949,27 @@ impl App {
                     .filter_map(|id| {
                         let (u, info) = (self.owned_uma(id)?, self.kb.umas.get(&id)?);
                         let a = &info.aptitude;
-                        let low: Vec<&str> = [(p.distance.label(), a.distance(p.distance)), (p.surface.label(), a.surface(p.surface)), (p.style.label(), a.style(p.style))]
-                            .into_iter()
-                            .filter(|(_, g)| grade_rank(g) < 7)
-                            .map(|(l, _)| l)
-                            .collect();
-                        let warn = if low.is_empty() { String::new() } else { format!(" ⚠ below A for {} (slower there)", low.join(", ")) };
+                        let low: Vec<&str> = [
+                            (p.distance.label(), a.distance(p.distance)),
+                            (p.surface.label(), a.surface(p.surface)),
+                            (p.style.label(), a.style(p.style)),
+                        ]
+                        .into_iter()
+                        .filter(|(_, g)| grade_rank(g) < 7)
+                        .map(|(l, _)| l)
+                        .collect();
+                        let warn = if low.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ⚠ below A for {} (slower there)", low.join(", "))
+                        };
                         Some(format!(
                             "{}{} [{}] {}★ P{} — {} {}, {} {}, {} {}{warn}",
-                            if meta.contains(&id) { "★ meta sheet pick: " } else { "" },
+                            if meta.contains(&id) {
+                                "★ meta sheet pick: "
+                            } else {
+                                ""
+                            },
                             u.name,
                             u.outfit,
                             u.stars,
@@ -548,14 +983,33 @@ impl App {
                         ))
                     })
                     .collect();
-                let goal = format!("for {} {}, {}", p.distance.label(), p.surface.label(), p.style.label());
-                Ok(if rows.is_empty() { "The roster has no umas.".into() } else { format!("Best owned trainees {goal}:\n{}", rows.join("\n")) })
+                let goal = format!(
+                    "for {} {}, {}",
+                    p.distance.label(),
+                    p.surface.label(),
+                    p.style.label()
+                );
+                Ok(if rows.is_empty() {
+                    "The roster has no umas.".into()
+                } else {
+                    format!("Best owned trainees {goal}:\n{}", rows.join("\n"))
+                })
             }
             "list_notes" => {
-                let root = self.root.as_ref().ok_or("umaLord folder not found")?;
-                let mut files = vec!["insights.md".to_string(), "sources.md".to_string(), "knowledge/mechanics.md".to_string(), "knowledge/racecourses.md".to_string(), "knowledge/skills.md".to_string()];
+                let root = self.root.as_ref().ok_or("UmaYu folder not found")?;
+                let mut files = vec![
+                    "insights.md".to_string(),
+                    "sources.md".to_string(),
+                    "knowledge/mechanics.md".to_string(),
+                    "knowledge/racecourses.md".to_string(),
+                    "knowledge/skills.md".to_string(),
+                ];
                 for dir in ["plans", "results", "account"] {
-                    for e in std::fs::read_dir(root.join(dir)).into_iter().flatten().flatten() {
+                    for e in std::fs::read_dir(root.join(dir))
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                    {
                         let n = e.file_name().to_string_lossy().to_string();
                         if n.ends_with(".md") && !n.starts_with('_') {
                             files.push(format!("{dir}/{n}"));
@@ -565,16 +1019,29 @@ impl App {
                 Ok(files.join("\n"))
             }
             "read_note" => {
-                let root = self.root.as_ref().ok_or("umaLord folder not found")?;
-                let rel = input["path"].as_str().unwrap_or_default().replace('\\', "/");
+                let root = self.root.as_ref().ok_or("UmaYu folder not found")?;
+                let rel = input["path"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .replace('\\', "/");
                 let allowed = rel.ends_with(".md")
                     && !rel.contains("..")
-                    && (["insights.md", "sources.md", "CLAUDE.md"].contains(&rel.as_str()) || ["plans/", "results/", "account/", "knowledge/"].iter().any(|d| rel.starts_with(d)));
+                    && (["insights.md", "sources.md", "CLAUDE.md"].contains(&rel.as_str())
+                        || ["plans/", "results/", "account/", "knowledge/"]
+                            .iter()
+                            .any(|d| rel.starts_with(d)));
                 if !allowed {
                     return Err(format!("Not a readable note: {rel}"));
                 }
-                let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-                Ok(clip(text.split("<!-- umalord-plan").next().unwrap_or("").to_string(), 20_000))
+                let text =
+                    std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
+                Ok(clip(
+                    text.split("<!-- umalord-plan")
+                        .next()
+                        .unwrap_or("")
+                        .to_string(),
+                    20_000,
+                ))
             }
             "glossary" => {
                 let q = input["term"].as_str().unwrap_or_default().to_lowercase();
@@ -582,11 +1049,18 @@ impl App {
                     .kb
                     .glossary
                     .iter()
-                    .filter(|g| g.term.to_lowercase().contains(&q) || g.aliases.iter().any(|a| a.to_lowercase().contains(&q)))
+                    .filter(|g| {
+                        g.term.to_lowercase().contains(&q)
+                            || g.aliases.iter().any(|a| a.to_lowercase().contains(&q))
+                    })
                     .take(8)
                     .map(|g| format!("{}: {}", g.term, g.description))
                     .collect();
-                Ok(if hits.is_empty() { "Not in the glossary.".into() } else { hits.join("\n") })
+                Ok(if hits.is_empty() {
+                    "Not in the glossary.".into()
+                } else {
+                    hits.join("\n")
+                })
             }
             other => Err(format!("Unknown tool {other}")),
         }
@@ -596,34 +1070,84 @@ impl App {
         use std::fmt::Write;
         let r = &self.roster;
         let mut o = String::new();
-        let _ = writeln!(o, "Profile: {}; server: {}", r.profile.as_deref().unwrap_or("(no name)"), r.server.as_deref().unwrap_or("Global"));
+        let _ = writeln!(
+            o,
+            "Profile: {}; server: {}",
+            r.profile.as_deref().unwrap_or("(no name)"),
+            r.server.as_deref().unwrap_or("Global")
+        );
         if r.umas.is_empty() && r.cards.is_empty() {
             o.push_str("The roster is empty: point the user to ⚙ Settings → Profile → Set up my collection, or Load a profile.\n");
             return o;
         }
-        let _ = writeln!(o, "{} and {}", plural(r.umas.len(), "uma"), plural(r.cards.len(), "support card"));
-        let stars: Vec<String> = (1..=5u8).rev().map(|s| (s, r.umas.iter().filter(|u| u.stars == s).count())).filter(|(_, n)| *n > 0).map(|(s, n)| format!("{s}★ {n}")).collect();
+        let _ = writeln!(
+            o,
+            "{} and {}",
+            plural(r.umas.len(), "uma"),
+            plural(r.cards.len(), "support card")
+        );
+        let stars: Vec<String> = (1..=5u8)
+            .rev()
+            .map(|s| (s, r.umas.iter().filter(|u| u.stars == s).count()))
+            .filter(|(_, n)| *n > 0)
+            .map(|(s, n)| format!("{s}★ {n}"))
+            .collect();
         let p5 = r.umas.iter().filter(|u| u.potential >= 5).count();
-        let _ = writeln!(o, "Umas by stars: {}; at potential 5: {p5}", stars.join(", "));
+        let _ = writeln!(
+            o,
+            "Umas by stars: {}; at potential 5: {p5}",
+            stars.join(", ")
+        );
         let mut kinds: Vec<&str> = r.cards.iter().map(|c| c.card_type.label()).collect();
         kinds.sort_unstable();
         kinds.dedup();
         for k in kinds {
-            let of: Vec<&crate::data::SupportCard> = r.cards.iter().filter(|c| c.card_type.label() == k).collect();
-            let mlb_ssr: Vec<String> = of.iter().filter(|c| c.rarity == crate::data::Rarity::SSR && c.is_mlb()).map(|c| c.uma.clone()).collect();
+            let of: Vec<&crate::data::SupportCard> = r
+                .cards
+                .iter()
+                .filter(|c| c.card_type.label() == k)
+                .collect();
+            let mlb_ssr: Vec<String> = of
+                .iter()
+                .filter(|c| c.rarity == crate::data::Rarity::SSR && c.is_mlb())
+                .map(|c| c.uma.clone())
+                .collect();
             let _ = writeln!(
                 o,
                 "{k}: {} cards, {} SSR, {} maxed (MLB){}",
                 of.len(),
-                of.iter().filter(|c| c.rarity == crate::data::Rarity::SSR).count(),
+                of.iter()
+                    .filter(|c| c.rarity == crate::data::Rarity::SSR)
+                    .count(),
                 of.iter().filter(|c| c.is_mlb()).count(),
-                if mlb_ssr.is_empty() { String::new() } else { format!("; MLB SSRs: {}", mlb_ssr.join(", ")) }
+                if mlb_ssr.is_empty() {
+                    String::new()
+                } else {
+                    format!("; MLB SSRs: {}", mlb_ssr.join(", "))
+                }
             );
         }
-        let _ = writeln!(o, "Saved parents: {}; saved plans: {}", self.saved_parents().len(), self.plan_files().len());
+        let _ = writeln!(
+            o,
+            "Saved parents: {}; saved plans: {}",
+            self.saved_parents().len(),
+            self.plan_files().len()
+        );
         let p = &self.planner.plan;
-        let trainee = p.trainee.map_or("no trainee".to_string(), |t| self.uma_label(t));
-        let _ = writeln!(o, "Working plan in the Planner: {} — {}, {}", if p.title.is_empty() { "untitled" } else { &p.title }, p.purpose.label(), trainee);
+        let trainee = p
+            .trainee
+            .map_or("no trainee".to_string(), |t| self.uma_label(t));
+        let _ = writeln!(
+            o,
+            "Working plan in the Planner: {} — {}, {}",
+            if p.title.is_empty() {
+                "untitled"
+            } else {
+                &p.title
+            },
+            p.purpose.label(),
+            trainee
+        );
         o
     }
 
@@ -633,21 +1157,36 @@ impl App {
         if cms.is_empty() {
             return "No upcoming Champions Meeting in the schedule.".into();
         }
-        let mut out = String::from("Upcoming Champions Meetings (the app's live schedule: announced = official and final, estimated = Umalator's guess, may change):\n");
+        let mut out = String::from(
+            "Upcoming Champions Meetings (the app's live schedule: announced = official and final, estimated = Umalator's guess, may change):\n",
+        );
         for e in cms.into_iter().take(n.max(1)) {
-            let meta = self.kb.pvp_meta.as_ref().and_then(|m| m.events.iter().find(|x| x.series == "CM" && x.number == e.id));
+            let meta = self.kb.pvp_meta.as_ref().and_then(|m| {
+                m.events
+                    .iter()
+                    .find(|x| x.series == "CM" && x.number == e.id)
+            });
             let styles = meta.map_or("not on the meta sheet yet".to_string(), |m| {
                 let mut s: Vec<&String> = m.styles.keys().collect();
                 s.sort();
-                format!("meta sheet covers {}", s.iter().map(|x| x.as_str()).collect::<Vec<_>>().join(", "))
+                format!(
+                    "meta sheet covers {}",
+                    s.iter().map(|x| x.as_str()).collect::<Vec<_>>().join(", ")
+                )
             });
-            let round1 = e.round1.map_or(String::new(), |t| format!("; Round 1 {}", crate::live::fmt_local(t)));
+            let round1 = e.round1.map_or(String::new(), |t| {
+                format!("; Round 1 {}", crate::live::fmt_local(t))
+            });
             out += &format!(
                 "- CM {} {}: {} ({}{round1}) · {} · {} · scenario {} · turns off: {} · {styles}\n",
                 e.id,
                 e.name,
                 e.date,
-                if e.announced { "announced" } else { "estimated" },
+                if e.announced {
+                    "announced"
+                } else {
+                    "estimated"
+                },
                 e.course_name,
                 e.conditions,
                 self.kb.cm_scenario(e).unwrap_or("unknown"),
@@ -658,12 +1197,23 @@ impl App {
     }
 
     fn cm_meta_text(&self, cm: Option<&str>, style: Option<&str>) -> Result<String, String> {
-        let meta = self.kb.pvp_meta.as_ref().ok_or("No meta sheet data: run tools/update_knowledge.py --only meta.")?;
+        let meta = self
+            .kb
+            .pvp_meta
+            .as_ref()
+            .ok_or("No meta sheet data: run tools/update_knowledge.py --only meta.")?;
         let number = match cm {
             Some(q) => self.find_event(q)?.id,
-            None => self.plan_cm_number().or_else(|| self.kb.upcoming_cms(&today()).first().map(|e| e.id)).ok_or("No CM given and none upcoming.")?,
+            None => self
+                .plan_cm_number()
+                .or_else(|| self.kb.upcoming_cms(&today()).first().map(|e| e.id))
+                .ok_or("No CM given and none upcoming.")?,
         };
-        let ev = meta.events.iter().find(|e| e.series == "CM" && e.number == number).ok_or_else(|| format!("The meta sheet has nothing for CM {number} yet."))?;
+        let ev = meta
+            .events
+            .iter()
+            .find(|e| e.series == "CM" && e.number == number)
+            .ok_or_else(|| format!("The meta sheet has nothing for CM {number} yet."))?;
         let mut out = format!(
             "Community meta sheet ({}), fetched {}: CM {} {}. Community opinion, not game data. {}\nStyle ranking: {}\nRecommended stats (Speed/Stamina/Power/Guts/Wit): {}\n",
             meta.authors,
@@ -679,7 +1229,13 @@ impl App {
         }
         let mut styles: Vec<&String> = ev.styles.keys().collect();
         styles.sort_by_key(|s| ev.style_ranking.find(s.as_str()).unwrap_or(99));
-        let want = style.map(|s| s.trim_end_matches(" Runner").trim_end_matches(" Chaser").trim_end_matches(" Surger").trim_end_matches(" Closer").to_string());
+        let want = style.map(|s| {
+            s.trim_end_matches(" Runner")
+                .trim_end_matches(" Chaser")
+                .trim_end_matches(" Surger")
+                .trim_end_matches(" Closer")
+                .to_string()
+        });
         for name in styles {
             if want.as_ref().is_some_and(|w| !w.eq_ignore_ascii_case(name)) {
                 continue;
@@ -690,15 +1246,40 @@ impl App {
                 .umas
                 .iter()
                 .map(|u| {
-                    let owned = u.id.and_then(|id| self.owned_uma(id)).map_or(String::new(), |o| format!(" (owned {}★ P{})", o.stars, o.potential));
-                    format!("{}{}{owned}", u.name, if u.rating.is_empty() { String::new() } else { format!(" {}", u.rating) })
+                    let owned =
+                        u.id.and_then(|id| self.owned_uma(id))
+                            .map_or(String::new(), |o| {
+                                format!(" (owned {}★ P{})", o.stars, o.potential)
+                            });
+                    format!(
+                        "{}{}{owned}",
+                        u.name,
+                        if u.rating.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", u.rating)
+                        }
+                    )
                 })
                 .collect();
             out += &format!("Trainees: {}\n", umas.join("; "));
             let card = |c: &crate::meta::MetaCard| match c.id {
                 Some(id) => {
-                    let lb = c.min_lb.map_or(String::new(), |m| format!(", needs LB{m}+{}", if c.alt.is_empty() { String::new() } else { format!(" ({})", c.alt) }));
-                    let note = if c.note.is_empty() { String::new() } else { format!(" — {}", c.note) };
+                    let lb = c.min_lb.map_or(String::new(), |m| {
+                        format!(
+                            ", needs LB{m}+{}",
+                            if c.alt.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" ({})", c.alt)
+                            }
+                        )
+                    });
+                    let note = if c.note.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", c.note)
+                    };
                     format!("{}{lb}{note}", self.card_label(id))
                 }
                 None if !c.any.is_empty() => format!("any {} card", c.any),
@@ -707,24 +1288,51 @@ impl App {
             for tier in crate::meta::TIERS {
                 if let Some(d) = st.decks.get(tier) {
                     let cards: Vec<String> = d.cards.iter().map(card).collect();
-                    let borrow = d.borrow.as_ref().map_or(String::new(), |b| format!(" | borrow: {}", card(b)));
+                    let borrow = d
+                        .borrow
+                        .as_ref()
+                        .map_or(String::new(), |b| format!(" | borrow: {}", card(b)));
                     out += &format!("{tier} deck: {}{borrow}\n", cards.join(" · "));
                 }
             }
             if !st.honorable.is_empty() {
-                out += &format!("Honorable mentions: {}\n", st.honorable.iter().map(card).collect::<Vec<_>>().join(" · "));
+                out += &format!(
+                    "Honorable mentions: {}\n",
+                    st.honorable
+                        .iter()
+                        .map(card)
+                        .collect::<Vec<_>>()
+                        .join(" · ")
+                );
             }
             if !st.skills.is_empty() {
-                out += &format!("Skills it recommends: {}\n", st.skills.iter().map(|s| self.kb.skill_name(s.id)).collect::<Vec<_>>().join(", "));
+                out += &format!(
+                    "Skills it recommends: {}\n",
+                    st.skills
+                        .iter()
+                        .map(|s| self.kb.skill_name(s.id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
             }
             if !st.accel.is_empty() {
                 out += &format!("Acceleration advice: {}\n", st.accel);
             }
             if !st.advice.is_empty() {
-                out += &format!("Skill advice as written: {}\n", clip(st.advice.clone(), 600));
+                out += &format!(
+                    "Skill advice as written: {}\n",
+                    clip(st.advice.clone(), 600)
+                );
             }
             if !st.parents.is_empty() {
-                out += &format!("Parents to look for: {}\n", st.parents.iter().map(|p| format!("{} ({})", p.uma, self.kb.skill_name(p.skill))).collect::<Vec<_>>().join("; "));
+                out += &format!(
+                    "Parents to look for: {}\n",
+                    st.parents
+                        .iter()
+                        .map(|p| format!("{} ({})", p.uma, self.kb.skill_name(p.skill)))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                );
             }
         }
         Ok(clip(out, 10_000))
@@ -734,14 +1342,26 @@ impl App {
     pub(crate) fn plan_files(&self) -> Vec<(PathBuf, String)> {
         let mut files = Vec::new();
         let Some(root) = &self.root else { return files };
-        for entry in std::fs::read_dir(root.join("plans")).into_iter().flatten().flatten() {
+        for entry in std::fs::read_dir(root.join("plans"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let path = entry.path();
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
             if !name.ends_with(".md") || name.starts_with('_') {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap_or_default();
-            let title = text.lines().find_map(|l| l.strip_prefix("# ")).unwrap_or(&name).to_string();
+            let title = text
+                .lines()
+                .find_map(|l| l.strip_prefix("# "))
+                .unwrap_or(&name)
+                .to_string();
             files.push((path, title));
         }
         files.sort_by(|a, b| b.0.cmp(&a.0));
@@ -753,7 +1373,11 @@ impl App {
         let files = self.plan_files();
         files
             .iter()
-            .find(|(p, t)| p.file_name().is_some_and(|f| f.to_string_lossy().to_lowercase().contains(&ql)) || t.to_lowercase().contains(&ql))
+            .find(|(p, t)| {
+                p.file_name()
+                    .is_some_and(|f| f.to_string_lossy().to_lowercase().contains(&ql))
+                    || t.to_lowercase().contains(&ql)
+            })
             .map(|(p, _)| p.clone())
             .ok_or_else(|| format!("No saved plan matches '{q}'. list_plans lists them."))
     }
@@ -761,7 +1385,9 @@ impl App {
     /// The ranking for one slot (0..=4 own, 5 friend), worked out now (about 40 ms).
     fn rank_now(&self, slot: usize) -> Vec<crate::recommend::CardPick> {
         let p = &self.planner.plan;
-        let deck = [p.deck[0], p.deck[1], p.deck[2], p.deck[3], p.deck[4], p.friend];
+        let deck = [
+            p.deck[0], p.deck[1], p.deck[2], p.deck[3], p.deck[4], p.friend,
+        ];
         crate::recommend::rank_slot(&self.rank_context(), &deck, slot)
     }
 
@@ -778,22 +1404,54 @@ impl App {
             5
         };
         let picks = self.rank_now(slot);
-        let where_ = if slot == 5 { "the friend slot".to_string() } else { format!("slot {}", slot + 1) };
-        let mut out = format!("{} for {where_} of the working plan (model output: a suggestion):\n", self.card_label(id));
+        let where_ = if slot == 5 {
+            "the friend slot".to_string()
+        } else {
+            format!("slot {}", slot + 1)
+        };
+        let mut out = format!(
+            "{} for {where_} of the working plan (model output: a suggestion):\n",
+            self.card_label(id)
+        );
         match picks.iter().position(|c| c.id == id) {
             Some(rank) => {
                 let c = &picks[rank];
-                out += &format!("Rank {} of {}, score {:.0} stat points{}.\nWhy: {}\n", rank + 1, picks.len(), c.score, if c.meta > 0.0 { format!(", meta sheet {}", crate::meta::stars(c.meta)) } else { String::new() }, c.reason);
+                out += &format!(
+                    "Rank {} of {}, score {:.0} stat points{}.\nWhy: {}\n",
+                    rank + 1,
+                    picks.len(),
+                    c.score,
+                    if c.meta > 0.0 {
+                        format!(", meta sheet {}", crate::meta::stars(c.meta))
+                    } else {
+                        String::new()
+                    },
+                    c.reason
+                );
                 if rank > 0 {
-                    out += &format!("Best for this slot: {} (score {:.0}): {}\n", self.card_label(picks[0].id), picks[0].score, picks[0].reason);
+                    out += &format!(
+                        "Best for this slot: {} (score {:.0}): {}\n",
+                        self.card_label(picks[0].id),
+                        picks[0].score,
+                        picks[0].reason
+                    );
                 }
             }
-            None => out += "Not a candidate for this slot: it's the trainee's own character, another card of the same character is in the deck, or it isn't owned (own slots take owned cards only).\n",
+            None => {
+                out += "Not a candidate for this slot: it's the trainee's own character, another card of the same character is in the deck, or it isn't owned (own slots take owned cards only).\n"
+            }
         }
-        let kind = self.kb.cards.get(&id).map_or(String::new(), |c| c.kind.clone());
+        let kind = self
+            .kb
+            .cards
+            .get(&id)
+            .map_or(String::new(), |c| c.kind.clone());
         let (w, why) = self.plan_card_meta().of(id, slot == 5, &kind);
         if w > 0.0 {
-            out += &format!("Meta sheet: {} ({why}). Community opinion.\n", crate::meta::stars(w));
+            out += &format!(
+                "Meta sheet: {} ({why}). Community opinion.\n",
+                crate::meta::stars(w)
+            );
         } else if self.plan_meta_label().is_some() {
             out += "The meta sheet doesn't list it for this CM and style.\n";
         }
@@ -805,12 +1463,23 @@ impl App {
 
     /// Validate and run one tool call.
     pub(crate) fn agent_call(&mut self, ctx: &egui::Context, name: &str, input: &Value) -> Exec {
-        let Some(spec) = super::find(name) else { return Exec::Done(ToolOut::err(format!("Unknown tool {name}"))) };
-        let input = if input.is_null() { json!({}) } else { input.clone() };
+        let Some(spec) = super::find(name) else {
+            return Exec::Done(ToolOut::err(format!("Unknown tool {name}")));
+        };
+        let input = if input.is_null() {
+            json!({})
+        } else {
+            input.clone()
+        };
         if let Err(e) = super::validate(&spec.schema, &input, "") {
             return Exec::Done(ToolOut::err(format!("Invalid input: {e}")));
         }
-        let first = |t: &str| t.lines().find(|l| !l.trim().is_empty()).map(|l| crate::ui_util::truncate(l, 110)).unwrap_or_default();
+        let first = |t: &str| {
+            t.lines()
+                .find(|l| !l.trim().is_empty())
+                .map(|l| crate::ui_util::truncate(l, 110))
+                .unwrap_or_default()
+        };
         match spec.kind {
             Kind::Read => Exec::Done(match self.run_tool(spec.name, &input) {
                 Ok(t) => {
@@ -849,12 +1518,20 @@ impl App {
                     j.cancel();
                 }
             }
-            Wait::Compare { .. } | Wait::Chart { .. } | Wait::Stamina { .. } | Wait::Extra(_) => self.cancel_sim_jobs(),
+            Wait::Compare { .. } | Wait::Chart { .. } | Wait::Stamina { .. } | Wait::Extra(_) => {
+                self.cancel_sim_jobs()
+            }
         }
     }
 
     /// Run a Long tool to the end, polling: the MCP server and tests use this.
-    pub(crate) fn agent_call_blocking(&mut self, ctx: &egui::Context, name: &str, input: &Value, limit: std::time::Duration) -> Exec {
+    pub(crate) fn agent_call_blocking(
+        &mut self,
+        ctx: &egui::Context,
+        name: &str,
+        input: &Value,
+        limit: std::time::Duration,
+    ) -> Exec {
         match self.agent_call(ctx, name, input) {
             Exec::Wait(w) => {
                 let start = std::time::Instant::now();
@@ -865,7 +1542,9 @@ impl App {
                     }
                     if start.elapsed() > limit {
                         self.agent_cancel(w);
-                        return Exec::Done(ToolOut::err("The simulation took too long and was stopped. Try fewer runs."));
+                        return Exec::Done(ToolOut::err(
+                            "The simulation took too long and was stopped. Try fewer runs.",
+                        ));
                     }
                     std::thread::sleep(std::time::Duration::from_millis(15));
                 }
@@ -879,12 +1558,22 @@ impl App {
 
     fn sim_setup(&self) -> SimSetup {
         let s = &self.sim;
-        SimSetup { course: s.course, ground: s.ground, weather: s.weather, season: s.season, time: s.time, umas: s.umas.clone(), opts: s.opts.clone(), from_plan: s.from_plan }
+        SimSetup {
+            course: s.course,
+            ground: s.ground,
+            weather: s.weather,
+            season: s.season,
+            time: s.time,
+            umas: s.umas.clone(),
+            opts: s.opts.clone(),
+            from_plan: s.from_plan,
+        }
     }
 
     pub(crate) fn restore_sim(&mut self, s: SimSetup) {
         let sim = &mut self.sim;
-        (sim.course, sim.ground, sim.weather, sim.season, sim.time) = (s.course, s.ground, s.weather, s.season, s.time);
+        (sim.course, sim.ground, sim.weather, sim.season, sim.time) =
+            (s.course, s.ground, s.weather, s.season, s.time);
         sim.umas = s.umas;
         sim.opts = s.opts;
         sim.from_plan = s.from_plan;
@@ -892,25 +1581,47 @@ impl App {
 
     /// Remember the working plan and the sim setup before a change; returns the snapshot's index.
     pub(crate) fn agent_snapshot(&mut self, label: impl Into<String>) -> usize {
-        let snap = Snapshot { label: label.into(), plan: self.planner.plan.clone(), open_file: self.planner.open_file.clone(), sim: self.sim_setup() };
+        let snap = Snapshot {
+            label: label.into(),
+            plan: self.planner.plan.clone(),
+            open_file: self.planner.open_file.clone(),
+            sim: self.sim_setup(),
+        };
         self.agent.undo.push(snap);
         self.agent.undo.len() - 1
     }
 
     /// Put back what the chat changed from snapshot `idx` on (that change and every later one).
     pub(crate) fn agent_undo(&mut self, idx: usize) -> Result<String, String> {
-        let snap = self.agent.undo.get(idx).cloned().ok_or("That change was already undone.")?;
+        let snap = self
+            .agent
+            .undo
+            .get(idx)
+            .cloned()
+            .ok_or("That change was already undone.")?;
         let later = self.agent.undo.len() - idx - 1;
         self.agent.undo.truncate(idx);
         self.planner.plan = snap.plan;
         self.planner.open_file = snap.open_file;
         self.planner.skill_status = None;
         self.restore_sim(snap.sim);
-        Ok(if later == 0 { format!("Undid: {}.", snap.label) } else { format!("Undid: {} and {} after it.", snap.label, plural(later, "change")) })
+        Ok(if later == 0 {
+            format!("Undid: {}.", snap.label)
+        } else {
+            format!(
+                "Undid: {} and {} after it.",
+                snap.label,
+                plural(later, "change")
+            )
+        })
     }
 
     /// Run `f` as one undoable change: a snapshot first, put back if `f` fails.
-    fn drafted(&mut self, label: &str, f: impl FnOnce(&mut App) -> Result<ToolOut, String>) -> ToolOut {
+    fn drafted(
+        &mut self,
+        label: &str,
+        f: impl FnOnce(&mut App) -> Result<ToolOut, String>,
+    ) -> ToolOut {
         let idx = self.agent_snapshot(label);
         match f(self) {
             Ok(out) => {
@@ -946,11 +1657,24 @@ impl App {
                     let mut text = format!("{msg}\n");
                     for c in &picks {
                         let stars = crate::meta::stars(c.meta);
-                        text += &format!("- {}{} — score {:.0}: {}\n", if stars.is_empty() { String::new() } else { format!("{stars} ") }, a.card_label(c.id), c.score, c.reason);
+                        text += &format!(
+                            "- {}{} — score {:.0}: {}\n",
+                            if stars.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{stars} ")
+                            },
+                            a.card_label(c.id),
+                            c.score,
+                            c.reason
+                        );
                     }
                     text += &format!("\n{}", a.plan_brief());
                     let p = &a.planner.plan;
-                    let deck = Visual::Deck { cards: p.deck.iter().flatten().copied().collect(), friend: p.friend };
+                    let deck = Visual::Deck {
+                        cards: p.deck.iter().flatten().copied().collect(),
+                        friend: p.friend,
+                    };
                     Ok(ToolOut::ok(text, msg).visual(deck).open(OpenAt::Plan))
                 })
             }
@@ -969,14 +1693,20 @@ impl App {
     fn owned_trainee(&self, q: &str) -> Result<u32, String> {
         let id = self.find_uma_id(q)?;
         if self.owned_uma(id).is_none() {
-            return Err(format!("{} isn't in the account's roster; the Planner trains owned umas only.", self.uma_label(id)));
+            return Err(format!(
+                "{} isn't in the account's roster; the Planner trains owned umas only.",
+                self.uma_label(id)
+            ));
         }
         Ok(id)
     }
 
     fn tool_new_plan(&mut self, input: &Value) -> ToolOut {
         let purpose = match input["goal"].as_str() {
-            Some(g) => Purpose::ALL.into_iter().find(|p| p.label() == g).unwrap_or_default(),
+            Some(g) => Purpose::ALL
+                .into_iter()
+                .find(|p| p.label() == g)
+                .unwrap_or_default(),
             None => Purpose::ChampionsMeeting,
         };
         let cm = if purpose == Purpose::ChampionsMeeting {
@@ -998,7 +1728,10 @@ impl App {
             return ToolOut::err(e);
         }
         self.drafted("new plan", |a| {
-            let mut plan = Plan { purpose, ..Plan::default() };
+            let mut plan = Plan {
+                purpose,
+                ..Plan::default()
+            };
             let mut notes = Vec::new();
             if let Some(e) = &cm
                 && let Some(n) = plan.apply_cm(&a.kb, e)
@@ -1020,7 +1753,9 @@ impl App {
             a.planner.plan = plan;
             a.planner.open_file = None;
             a.planner.skill_status = None;
-            let what = cm.as_ref().map_or(purpose.label().to_string(), |e| format!("{} · {}", e.name, crate::live::short_day(&e.date)));
+            let what = cm.as_ref().map_or(purpose.label().to_string(), |e| {
+                format!("{} · {}", e.name, crate::live::short_day(&e.date))
+            });
             let summary = format!("New plan: {what} · {}", a.planner.plan.style.label());
             let mut text = a.plan_brief();
             if !notes.is_empty() {
@@ -1031,8 +1766,26 @@ impl App {
     }
 
     fn check_scenario(&self, s: &str) -> Result<(), String> {
-        let names: Vec<String> = self.kb.scenarios.as_ref().map(|x| x.scenarios.iter().filter(|x| x.global).map(|x| x.name.clone()).collect()).unwrap_or_default();
-        if names.is_empty() || names.iter().any(|n| n == s) { Ok(()) } else { Err(format!("Unknown scenario '{s}'. Global scenarios: {}.", names.join(", "))) }
+        let names: Vec<String> = self
+            .kb
+            .scenarios
+            .as_ref()
+            .map(|x| {
+                x.scenarios
+                    .iter()
+                    .filter(|x| x.global)
+                    .map(|x| x.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if names.is_empty() || names.iter().any(|n| n == s) {
+            Ok(())
+        } else {
+            Err(format!(
+                "Unknown scenario '{s}'. Global scenarios: {}.",
+                names.join(", ")
+            ))
+        }
     }
 
     fn tool_set_plan(&mut self, input: &Value) -> ToolOut {
@@ -1071,12 +1824,21 @@ impl App {
                     .ok()
                     .and_then(|id| self.kb.races.iter().find(|r| r.id == id))
                     .or_else(|| self.kb.races.iter().find(|r| r.name.to_lowercase() == ql))
-                    .or_else(|| self.kb.races.iter().find(|r| r.name.to_lowercase().contains(&ql)));
+                    .or_else(|| {
+                        self.kb
+                            .races
+                            .iter()
+                            .find(|r| r.name.to_lowercase().contains(&ql))
+                    });
                 match race {
                     Some(r) => {
                         p.course = Some(r.id);
                         p.distance = crate::tab_planner::race_distance(&r.category, r.distance);
-                        p.surface = if r.surface == "Dirt" { Surface::Dirt } else { Surface::Turf };
+                        p.surface = if r.surface == "Dirt" {
+                            Surface::Dirt
+                        } else {
+                            Surface::Turf
+                        };
                     }
                     None => errors.push(format!("No race matches '{q}'; find_races lists them.")),
                 }
@@ -1100,7 +1862,11 @@ impl App {
             }
             changed.push("Champions Meeting");
         }
-        for (key, group) in [("ground", &crate::tab_planner::GROUNDS), ("weather", &crate::tab_planner::WEATHERS), ("season", &crate::tab_planner::SEASONS)] {
+        for (key, group) in [
+            ("ground", &crate::tab_planner::GROUNDS),
+            ("weather", &crate::tab_planner::WEATHERS),
+            ("season", &crate::tab_planner::SEASONS),
+        ] {
             if let Some(v) = text(input, key) {
                 if !crate::tab_planner::has_condition(&p.conditions, v) {
                     p.conditions = crate::tab_planner::set_condition(&p.conditions, group, v);
@@ -1116,7 +1882,10 @@ impl App {
         }
         if input["parents"].is_array() {
             let names = texts(input, "parents");
-            p.parents = [names.first().cloned().unwrap_or_default(), names.get(1).cloned().unwrap_or_default()];
+            p.parents = [
+                names.first().cloned().unwrap_or_default(),
+                names.get(1).cloned().unwrap_or_default(),
+            ];
             changed.push("parents");
         }
         if let Some(n) = input["notes"].as_str() {
@@ -1147,7 +1916,10 @@ impl App {
             };
             changed.push("meta influence");
         }
-        for (key, label) in [("pin_skills", "pinned skills"), ("ban_skills", "banned skills")] {
+        for (key, label) in [
+            ("pin_skills", "pinned skills"),
+            ("ban_skills", "banned skills"),
+        ] {
             if input[key].is_array() {
                 match self.find_skills(&texts(input, key)) {
                     Ok(ids) => {
@@ -1198,7 +1970,10 @@ impl App {
         let mut ids = Vec::new();
         for q in texts(input, "cards") {
             match self.find_card_id(&q) {
-                Ok(id) if self.owned_card(id).is_none() => errors.push(format!("{} isn't owned; only the friend slot takes a borrowed card.", self.card_label(id))),
+                Ok(id) if self.owned_card(id).is_none() => errors.push(format!(
+                    "{} isn't owned; only the friend slot takes a borrowed card.",
+                    self.card_label(id)
+                )),
                 Ok(id) => ids.push(id),
                 Err(e) => errors.push(e),
             }
@@ -1214,15 +1989,28 @@ impl App {
             },
             None => None,
         };
-        let trainee = self.planner.plan.trainee.and_then(|t| self.kb.umas.get(&t)).map(|u| u.name.clone());
+        let trainee = self
+            .planner
+            .plan
+            .trainee
+            .and_then(|t| self.kb.umas.get(&t))
+            .map(|u| u.name.clone());
         let mut seen: Vec<String> = Vec::new();
         for id in ids.iter().chain(friend.flatten().iter()) {
-            let Some(c) = self.kb.cards.get(id) else { continue };
+            let Some(c) = self.kb.cards.get(id) else {
+                continue;
+            };
             if trainee.as_deref() == Some(c.uma.as_str()) {
-                errors.push(format!("{} is the trainee's own character, which can't be in her deck.", self.card_label(*id)));
+                errors.push(format!(
+                    "{} is the trainee's own character, which can't be in her deck.",
+                    self.card_label(*id)
+                ));
             }
             if seen.contains(&c.uma) {
-                errors.push(format!("Two cards of {}: a deck holds one card per character.", c.uma));
+                errors.push(format!(
+                    "Two cards of {}: a deck holds one card per character.",
+                    c.uma
+                ));
             }
             seen.push(c.uma.clone());
         }
@@ -1242,8 +2030,24 @@ impl App {
             if let Some(lb) = friend_lb {
                 p.friend_lb = lb.min(4) as u8;
             }
-            let deck = Visual::Deck { cards: p.deck.iter().flatten().copied().collect(), friend: p.friend };
-            Ok(ToolOut::ok(a.plan_brief(), format!("Deck set: {}{}", plural(ids.len(), "card"), if a.planner.plan.friend.is_some() { " + friend" } else { "" })).visual(deck).open(OpenAt::Plan))
+            let deck = Visual::Deck {
+                cards: p.deck.iter().flatten().copied().collect(),
+                friend: p.friend,
+            };
+            Ok(ToolOut::ok(
+                a.plan_brief(),
+                format!(
+                    "Deck set: {}{}",
+                    plural(ids.len(), "card"),
+                    if a.planner.plan.friend.is_some() {
+                        " + friend"
+                    } else {
+                        ""
+                    }
+                ),
+            )
+            .visual(deck)
+            .open(OpenAt::Plan))
         })
     }
 
@@ -1269,12 +2073,26 @@ impl App {
             let chosen = a.planner.plan.skills.clone();
             let mut notes = Vec::new();
             let offered = a.pick_rows();
-            let off: Vec<String> = chosen.iter().filter(|s| !offered.contains_key(s)).map(|s| a.kb.skill_name(*s)).collect();
+            let off: Vec<String> = chosen
+                .iter()
+                .filter(|s| !offered.contains_key(s))
+                .map(|s| a.kb.skill_name(*s))
+                .collect();
             if !off.is_empty() {
-                notes.push(format!("not offered by the trainee, deck or parents: {}", off.join(", ")));
+                notes.push(format!(
+                    "not offered by the trainee, deck or parents: {}",
+                    off.join(", ")
+                ));
             }
-            let disabled = a.plan_cm().map(|e| e.disabled_skills.clone()).unwrap_or_default();
-            let dead: Vec<String> = chosen.iter().filter(|s| disabled.contains(s)).map(|s| a.kb.skill_name(*s)).collect();
+            let disabled = a
+                .plan_cm()
+                .map(|e| e.disabled_skills.clone())
+                .unwrap_or_default();
+            let dead: Vec<String> = chosen
+                .iter()
+                .filter(|s| disabled.contains(s))
+                .map(|s| a.kb.skill_name(*s))
+                .collect();
             if !dead.is_empty() {
                 notes.push(format!("turned off in this CM: {}", dead.join(", ")));
             }
@@ -1283,13 +2101,26 @@ impl App {
             if let Some(b) = a.pick_budget()
                 && cost > b + 1.0
             {
-                notes.push(format!("they cost about {cost:.0} SP, over the {b:.0} SP budget"));
+                notes.push(format!(
+                    "they cost about {cost:.0} SP, over the {b:.0} SP budget"
+                ));
             }
-            let mut text = format!("Skills to buy: {} (about {cost:.0} SP).\n", a.skill_names(&chosen));
+            let mut text = format!(
+                "Skills to buy: {} (about {cost:.0} SP).\n",
+                a.skill_names(&chosen)
+            );
             if !notes.is_empty() {
                 text += &format!("Warnings: {}.\n", notes.join("; "));
             }
-            Ok(ToolOut::ok(text, format!("{} to buy, about {cost:.0} SP", plural(chosen.len(), "skill"))).visual(Visual::Skills(chosen)).open(OpenAt::Plan))
+            Ok(ToolOut::ok(
+                text,
+                format!(
+                    "{} to buy, about {cost:.0} SP",
+                    plural(chosen.len(), "skill")
+                ),
+            )
+            .visual(Visual::Skills(chosen))
+            .open(OpenAt::Plan))
         })
     }
 
@@ -1297,15 +2128,22 @@ impl App {
         let data = self.sim_data.as_ref();
         let mut out = format!(
             "Race sim: {}, {}\n",
-            data.map_or(format!("course {}", self.sim.course), |d| d.course_name(self.sim.course)),
-            crate::tab_sim::conditions_text(self.sim.ground, self.sim.weather, self.sim.season, self.sim.time)
+            data.map_or(format!("course {}", self.sim.course), |d| d
+                .course_name(self.sim.course)),
+            crate::tab_sim::conditions_text(
+                self.sim.ground,
+                self.sim.weather,
+                self.sim.season,
+                self.sim.time
+            )
         );
         for (k, u) in self.sim.umas.iter().enumerate() {
             let apt = |i: usize| crate::sim::params::APTITUDES[i.min(7)];
             out += &format!(
                 "Uma {}: {}, {}/{}/{}/{}/{} {}, aptitudes {}/{}/{}, skills: {}\n",
                 k + 1,
-                u.outfit.map_or("no outfit".to_string(), |o| self.uma_label(o)),
+                u.outfit
+                    .map_or("no outfit".to_string(), |o| self.uma_label(o)),
                 u.desc.speed,
                 u.desc.stamina,
                 u.desc.power,
@@ -1330,13 +2168,20 @@ impl App {
         };
         let mut lists = Vec::new();
         for key in ["skills", "add_skills", "remove_skills"] {
-            match input[key].is_array().then(|| self.find_skills(&texts(input, key))) {
+            match input[key]
+                .is_array()
+                .then(|| self.find_skills(&texts(input, key)))
+            {
                 Some(Err(e)) => return ToolOut::err(format!("Nothing changed: {e}")),
                 Some(Ok(ids)) => lists.push(Some(ids)),
                 None => lists.push(None),
             }
         }
-        let Some(data) = self.sim_data.clone() else { return ToolOut::err("No simulator data; run tools/update_knowledge.py --only umalator.") };
+        let Some(data) = self.sim_data.clone() else {
+            return ToolOut::err(
+                "No simulator data; run tools/update_knowledge.py --only umalator.",
+            );
+        };
         self.drafted("Race sim build change", |a| {
             if let Some(which) = input["from_plan"].as_str() {
                 a.sim.umas[i] = a.plan_sim_build(which == "with_skills")?;
@@ -1354,12 +2199,16 @@ impl App {
                 a.fill_aptitudes(i);
             }
             if let Some(m) = input["mood"].as_str() {
-                a.sim.umas[i].desc.mood = code(&["Awful", "Bad", "Normal", "Good", "Great"], m).unwrap_or(3) - 3;
+                a.sim.umas[i].desc.mood =
+                    code(&["Awful", "Bad", "Normal", "Good", "Great"], m).unwrap_or(3) - 3;
             }
             let u = &mut a.sim.umas[i];
             let unique = u.outfit.and_then(|o| data.unique_skill(o, u.stars));
             if let Some(ids) = &lists[0] {
-                u.skills = unique.into_iter().chain(ids.iter().copied().filter(|s| Some(*s) != unique)).collect();
+                u.skills = unique
+                    .into_iter()
+                    .chain(ids.iter().copied().filter(|s| Some(*s) != unique))
+                    .collect();
             }
             if let Some(ids) = &lists[1] {
                 for s in ids {
@@ -1371,13 +2220,21 @@ impl App {
             if let Some(ids) = &lists[2] {
                 u.skills.retain(|s| !ids.contains(s));
             }
-            let unknown: Vec<String> = u.skills.iter().filter(|s| !data.skills.contains_key(s)).map(|s| a.kb.skill_name(*s)).collect();
+            let unknown: Vec<String> = u
+                .skills
+                .iter()
+                .filter(|s| !data.skills.contains_key(s))
+                .map(|s| a.kb.skill_name(*s))
+                .collect();
             u.skills.retain(|s| data.skills.contains_key(s));
             u.normalise(&data);
             a.sim.from_plan = false;
             let mut text = a.sim_builds_text();
             if !unknown.is_empty() {
-                text += &format!("Left out (the simulator doesn't have them, mostly scenario skills): {}\n", unknown.join(", "));
+                text += &format!(
+                    "Left out (the simulator doesn't have them, mostly scenario skills): {}\n",
+                    unknown.join(", ")
+                );
             }
             Ok(ToolOut::ok(text, format!("Uma {} changed", i + 1)).open(OpenAt::Race))
         })
@@ -1392,20 +2249,48 @@ impl App {
         if let Some(q) = text(race, "cm") {
             let e = self.find_event(q)?;
             let s = &mut self.sim;
-            (s.course, s.ground, s.weather, s.season, s.time) = (e.course, i32::from(e.ground), i32::from(e.weather), i32::from(e.season), i32::from(e.time));
+            (s.course, s.ground, s.weather, s.season, s.time) = (
+                e.course,
+                i32::from(e.ground),
+                i32::from(e.weather),
+                i32::from(e.season),
+                i32::from(e.time),
+            );
             let n = self.drop_disabled_skills(&e.disabled_skills);
-            notes.push(format!("{} (CM {}, {}){}", e.name, e.id, if e.announced { "announced" } else { "estimated" }, if n > 0 { format!("; left out {n} skills it turns off") } else { String::new() }));
+            notes.push(format!(
+                "{} (CM {}, {}){}",
+                e.name,
+                e.id,
+                if e.announced {
+                    "announced"
+                } else {
+                    "estimated"
+                },
+                if n > 0 {
+                    format!("; left out {n} skills it turns off")
+                } else {
+                    String::new()
+                }
+            ));
         }
         if let Some(q) = text(race, "course") {
             self.sim.course = self.find_sim_course(q)?;
         }
         let s = &mut self.sim;
-        for (key, list, slot) in [("ground", &crate::tab_sim::GROUNDS, &mut s.ground), ("weather", &crate::tab_sim::WEATHERS, &mut s.weather), ("season", &crate::tab_sim::SEASONS, &mut s.season)] {
+        for (key, list, slot) in [
+            ("ground", &crate::tab_sim::GROUNDS, &mut s.ground),
+            ("weather", &crate::tab_sim::WEATHERS, &mut s.weather),
+            ("season", &crate::tab_sim::SEASONS, &mut s.season),
+        ] {
             if let Some(v) = text(race, key).and_then(|v| code(list.as_slice(), v)) {
                 *slot = v;
             }
         }
-        if let Some(t) = text(race, "time").and_then(|t| crate::tab_sim::TIMES.iter().find(|(_, n)| n.eq_ignore_ascii_case(t))) {
+        if let Some(t) = text(race, "time").and_then(|t| {
+            crate::tab_sim::TIMES
+                .iter()
+                .find(|(_, n)| n.eq_ignore_ascii_case(t))
+        }) {
             s.time = t.0;
         }
         for i in 0..2 {
@@ -1424,30 +2309,64 @@ impl App {
         }
         let ql = q.to_lowercase();
         let used = |id: &u32| self.kb.umalator_presets.iter().any(|e| e.course == *id);
-        let mut by_name: Vec<u32> = data.courses.keys().copied().filter(|id| data.course_name(*id).to_lowercase().contains(&ql)).collect();
+        let mut by_name: Vec<u32> = data
+            .courses
+            .keys()
+            .copied()
+            .filter(|id| data.course_name(*id).to_lowercase().contains(&ql))
+            .collect();
         by_name.sort_by_key(|id| (!used(id), *id));
         if let Some(id) = by_name.first() {
             return Ok(*id);
         }
-        let race = self.kb.races.iter().find(|r| r.name.to_lowercase() == ql).or_else(|| self.kb.races.iter().find(|r| r.name.to_lowercase().contains(&ql)));
+        let race = self
+            .kb
+            .races
+            .iter()
+            .find(|r| r.name.to_lowercase() == ql)
+            .or_else(|| {
+                self.kb
+                    .races
+                    .iter()
+                    .find(|r| r.name.to_lowercase().contains(&ql))
+            });
         if let Some(r) = race {
-            let mut fits: Vec<u32> = self.kb.umalator_courses.iter().filter(|c| crate::tab_planner::runs_on(r, c)).map(|c| c.id).filter(|id| data.courses.contains_key(id)).collect();
+            let mut fits: Vec<u32> = self
+                .kb
+                .umalator_courses
+                .iter()
+                .filter(|c| crate::tab_planner::runs_on(r, c))
+                .map(|c| c.id)
+                .filter(|id| data.courses.contains_key(id))
+                .collect();
             fits.sort_by_key(|id| (!used(id), *id));
             if let Some(id) = fits.first() {
                 return Ok(*id);
             }
         }
-        Err(format!("No simulator course matches '{q}'. Try 'Tokyo Turf 2400m' or a race name."))
+        Err(format!(
+            "No simulator course matches '{q}'. Try 'Tokyo Turf 2400m' or a race name."
+        ))
     }
 
     // -----------------------------------------------------------------------
     // Long tools
 
     fn long_tool(&mut self, ctx: &egui::Context, name: &str, input: &Value) -> Exec {
-        let sim = matches!(name, "auto_pick_skills" | "simulate_skills" | "run_compare" | "run_skill_chart" | "run_stamina" | "stat_sensitivity");
+        let sim = matches!(
+            name,
+            "auto_pick_skills"
+                | "simulate_skills"
+                | "run_compare"
+                | "run_skill_chart"
+                | "run_stamina"
+                | "stat_sensitivity"
+        );
         if sim {
             if self.agent.sims >= MAX_SIMS {
-                return Exec::Done(ToolOut::err(format!("That's {MAX_SIMS} simulations for this question. Show the user what you have, and ask before running more.")));
+                return Exec::Done(ToolOut::err(format!(
+                    "That's {MAX_SIMS} simulations for this question. Show the user what you have, and ask before running more."
+                )));
             }
             self.agent.sims += 1;
         }
@@ -1455,8 +2374,17 @@ impl App {
             "career_sim" => Exec::Done(match self.plan_career() {
                 Some(c) => {
                     let names = ["Speed", "Stamina", "Power", "Guts", "Wit"];
-                    let stats: Vec<String> = c.stats_mean.iter().zip(names).map(|(v, n)| format!("{n} {v:.0}")).collect();
-                    let sources: Vec<String> = c.sp_sources.iter().map(|(n, v)| format!("{n} {v:.0}")).collect();
+                    let stats: Vec<String> = c
+                        .stats_mean
+                        .iter()
+                        .zip(names)
+                        .map(|(v, n)| format!("{n} {v:.0}"))
+                        .collect();
+                    let sources: Vec<String> = c
+                        .sp_sources
+                        .iter()
+                        .map(|(n, v)| format!("{n} {v:.0}"))
+                        .collect();
                     let text = format!(
                         "Career simulation of the working plan ({} careers in {}; model output built on knowledge/scenarios.json's assumptions, not game data):\nSkill points at the end: {:.0} on average (10–90%: {:.0}–{:.0}); from {}.\nFinal stats on average: {}.\nRainbow trainings {:.1}, trainings {:.1}, races {:.1} per career.",
                         c.runs,
@@ -1470,9 +2398,21 @@ impl App {
                         c.trainings_mean,
                         c.races_mean
                     );
-                    ToolOut::ok(text, format!("About {:.0} SP ({:.0}–{:.0}) and {}", c.sp_mean, c.sp_p10, c.sp_p90, stats.join(" / "))).open(OpenAt::Plan)
+                    ToolOut::ok(
+                        text,
+                        format!(
+                            "About {:.0} SP ({:.0}–{:.0}) and {}",
+                            c.sp_mean,
+                            c.sp_p10,
+                            c.sp_p90,
+                            stats.join(" / ")
+                        ),
+                    )
+                    .open(OpenAt::Plan)
                 }
-                None => ToolOut::err("No career simulation: the plan needs a trainee, and knowledge/scenarios.json needs the plan's scenario."),
+                None => ToolOut::err(
+                    "No career simulation: the plan needs a trainee, and knowledge/scenarios.json needs the plan's scenario.",
+                ),
             }),
             "auto_pick_skills" => {
                 let undo = self.agent_snapshot("auto-picked skills");
@@ -1489,7 +2429,12 @@ impl App {
                     let msg = self.rating_auto_pick();
                     let chosen = self.planner.plan.skills.clone();
                     let text = format!("{msg}\nSkills to buy: {}", self.skill_names(&chosen));
-                    return Exec::Done(ToolOut::ok(text, msg).visual(Visual::Skills(chosen)).open(OpenAt::Plan).undo(Some(undo)));
+                    return Exec::Done(
+                        ToolOut::ok(text, msg)
+                            .visual(Visual::Skills(chosen))
+                            .open(OpenAt::Plan)
+                            .undo(Some(undo)),
+                    );
                 }
                 let quick = self.auto_pick_skills();
                 match self.start_pick(ctx) {
@@ -1497,21 +2442,39 @@ impl App {
                     Err(e) => {
                         self.after_draft();
                         let chosen = self.planner.plan.skills.clone();
-                        let text = format!("{quick} The optimiser couldn't run ({e}), so these come from single gains or estimates.\nSkills to buy: {}", self.skill_names(&chosen));
-                        Exec::Done(ToolOut::ok(text, quick).visual(Visual::Skills(chosen)).open(OpenAt::Plan).undo(Some(undo)))
+                        let text = format!(
+                            "{quick} The optimiser couldn't run ({e}), so these come from single gains or estimates.\nSkills to buy: {}",
+                            self.skill_names(&chosen)
+                        );
+                        Exec::Done(
+                            ToolOut::ok(text, quick)
+                                .visual(Visual::Skills(chosen))
+                                .open(OpenAt::Plan)
+                                .undo(Some(undo)),
+                        )
                     }
                 }
             }
             "simulate_skills" => match self.start_skill_values(ctx, false) {
-                Ok(()) => Exec::Wait(Wait::SkillValues { top_n: int(input, "top_n").unwrap_or(12) as usize }),
+                Ok(()) => Exec::Wait(Wait::SkillValues {
+                    top_n: int(input, "top_n").unwrap_or(12) as usize,
+                }),
                 Err(e) => Exec::Done(ToolOut::err(e)),
             },
-            "run_compare" | "run_skill_chart" | "run_stamina" => self.start_sim_tool(ctx, name, input),
+            "run_compare" | "run_skill_chart" | "run_stamina" => {
+                self.start_sim_tool(ctx, name, input)
+            }
             "stat_sensitivity" => {
                 if self.sim.compare.is_none() || self.sim.ran.is_none() {
-                    return Exec::Done(ToolOut::err("Run run_compare first: this tests Uma 2 of the last Compare."));
+                    return Exec::Done(ToolOut::err(
+                        "Run run_compare first: this tests Uma 2 of the last Compare.",
+                    ));
                 }
-                let kind = if input["what"].as_str() == Some("skills") { ExtraKind::Contribution } else { ExtraKind::Sensitivity };
+                let kind = if input["what"].as_str() == Some("skills") {
+                    ExtraKind::Contribution
+                } else {
+                    ExtraKind::Sensitivity
+                };
                 self.start_extra(ctx, kind);
                 Exec::Wait(Wait::Extra(kind))
             }
@@ -1521,7 +2484,9 @@ impl App {
 
     fn start_sim_tool(&mut self, ctx: &egui::Context, name: &str, input: &Value) -> Exec {
         if self.sim.job.is_some() {
-            return Exec::Done(ToolOut::err("The Race sim is already running something. Wait for it, then try again."));
+            return Exec::Done(ToolOut::err(
+                "The Race sim is already running something. Wait for it, then try again.",
+            ));
         }
         let undo = self.agent_snapshot(match name {
             "run_compare" => "Race sim setup for a Compare",
@@ -1540,16 +2505,28 @@ impl App {
             match name {
                 "run_compare" => {
                     s.mode = Mode::Compare;
-                    s.opts = crate::sim::run::SimOptions { samples: int(input, "runs").unwrap_or(1000).clamp(100, 2000) as usize, seed, ..Default::default() };
+                    s.opts = crate::sim::run::SimOptions {
+                        samples: int(input, "runs").unwrap_or(1000).clamp(100, 2000) as usize,
+                        seed,
+                        ..Default::default()
+                    };
                 }
                 "run_skill_chart" => {
                     s.mode = Mode::Chart;
-                    s.chart_pool = if input["pool"].as_str() == Some("all") { crate::tab_sim::ChartPool::AllGlobal } else { crate::tab_sim::ChartPool::Account };
+                    s.chart_pool = if input["pool"].as_str() == Some("all") {
+                        crate::tab_sim::ChartPool::AllGlobal
+                    } else {
+                        crate::tab_sim::ChartPool::Account
+                    };
                     s.opts.seed = seed;
                 }
                 _ => {
                     s.mode = Mode::Stamina;
-                    s.opts = crate::sim::run::SimOptions { samples: int(input, "runs").unwrap_or(500).clamp(100, 2000) as usize, seed, ..Default::default() };
+                    s.opts = crate::sim::run::SimOptions {
+                        samples: int(input, "runs").unwrap_or(500).clamp(100, 2000) as usize,
+                        seed,
+                        ..Default::default()
+                    };
                 }
             }
             self.sim_start(ctx);
@@ -1563,7 +2540,10 @@ impl App {
                 self.after_draft();
                 Exec::Wait(match name {
                     "run_compare" => Wait::Compare { undo: Some(undo) },
-                    "run_skill_chart" => Wait::Chart { top_n: int(input, "top_n").unwrap_or(10) as usize, undo: Some(undo) },
+                    "run_skill_chart" => Wait::Chart {
+                        top_n: int(input, "top_n").unwrap_or(10) as usize,
+                        undo: Some(undo),
+                    },
                     _ => Wait::Stamina { undo: Some(undo) },
                 })
             }
@@ -1582,71 +2562,178 @@ impl App {
                     return None;
                 }
                 self.after_draft();
-                let status = self.planner.skill_status.clone().map(|s| s.0).unwrap_or_default();
+                let status = self
+                    .planner
+                    .skill_status
+                    .clone()
+                    .map(|s| s.0)
+                    .unwrap_or_default();
                 let Some(out) = self.current_pick().cloned() else {
-                    return Some(ToolOut::err(format!("Auto-pick didn't finish for this plan: {status}")).undo(undo));
+                    return Some(
+                        ToolOut::err(format!("Auto-pick didn't finish for this plan: {status}"))
+                            .undo(undo),
+                    );
                 };
-                let mut text = format!("{status}\nSkills to buy (simulation output; gains are lengths in this set, from 1000 races):\n");
+                let mut text = format!(
+                    "{status}\nSkills to buy (simulation output; gains are lengths in this set, from 1000 races):\n"
+                );
                 let mut chosen = out.chosen.clone();
-                chosen.sort_by(|a, b| out.marginal.get(b).unwrap_or(&0.0).total_cmp(out.marginal.get(a).unwrap_or(&0.0)));
+                chosen.sort_by(|a, b| {
+                    out.marginal
+                        .get(b)
+                        .unwrap_or(&0.0)
+                        .total_cmp(out.marginal.get(a).unwrap_or(&0.0))
+                });
                 for id in &chosen {
-                    let gain = out.marginal.get(id).map_or(String::new(), |g| format!(" +{g:.2} L in the set"));
-                    let act = out.activation.get(id).map_or(String::new(), |r| format!(", triggers {:.0}%", r * 100.0));
+                    let gain = out
+                        .marginal
+                        .get(id)
+                        .map_or(String::new(), |g| format!(" +{g:.2} L in the set"));
+                    let act = out
+                        .activation
+                        .get(id)
+                        .map_or(String::new(), |r| format!(", triggers {:.0}%", r * 100.0));
                     text += &format!("- {}{gain}{act}\n", self.kb.skill_name(*id));
                 }
-                let budget = self.pick_budget().map_or(String::new(), |b| format!(" of {b:.0}"));
+                let budget = self
+                    .pick_budget()
+                    .map_or(String::new(), |b| format!(" of {b:.0}"));
                 let summary = match &out.verify {
                     Some(v) => {
-                        text += &format!("The set gains {:+.2} L on average (95% interval {:+.2} to {:+.2}, {} races) over the trainee with only her unique. Spends about {:.0} SP{budget}; took {:.0} s.\n", v.mean, v.lo, v.hi, v.runs, out.spent, out.seconds);
-                        format!("{} skills, {:+.2} L ({:.0} SP{budget})", chosen.len(), v.mean, out.spent)
+                        text += &format!(
+                            "The set gains {:+.2} L on average (95% interval {:+.2} to {:+.2}, {} races) over the trainee with only her unique. Spends about {:.0} SP{budget}; took {:.0} s.\n",
+                            v.mean, v.lo, v.hi, v.runs, out.spent, out.seconds
+                        );
+                        format!(
+                            "{} skills, {:+.2} L ({:.0} SP{budget})",
+                            chosen.len(),
+                            v.mean,
+                            out.spent
+                        )
                     }
                     None => "Nothing on offer gains enough to buy".to_string(),
                 };
-                Some(ToolOut::ok(text, summary).visual(Visual::Skills(out.chosen.clone())).open(OpenAt::Plan).undo(undo))
+                Some(
+                    ToolOut::ok(text, summary)
+                        .visual(Visual::Skills(out.chosen.clone()))
+                        .open(OpenAt::Plan)
+                        .undo(undo),
+                )
             }
             Wait::SkillValues { top_n } => {
                 if self.planner.skill_job.is_some() {
                     return None;
                 }
-                let status = self.planner.skill_status.clone().map(|s| s.0).unwrap_or_default();
-                let Some(v) = self.planner.current_skill_values(self.plan_key()) else { return Some(ToolOut::err(format!("The skill simulation didn't finish: {status}"))) };
+                let status = self
+                    .planner
+                    .skill_status
+                    .clone()
+                    .map(|s| s.0)
+                    .unwrap_or_default();
+                let Some(v) = self.planner.current_skill_values(self.plan_key()) else {
+                    return Some(ToolOut::err(format!(
+                        "The skill simulation didn't finish: {status}"
+                    )));
+                };
                 let mut rows: Vec<&crate::sim::run::ChartRow> = v.rows.values().collect();
                 rows.sort_by(|a, b| b.mean.total_cmp(&a.mean));
-                let mut text = format!("{status}\nBest skills on {} (simulation output, lengths over the trainee alone; chart mode: no wit checks or rushing):\n", v.label);
+                let mut text = format!(
+                    "{status}\nBest skills on {} (simulation output, lengths over the trainee alone; chart mode: no wit checks or rushing):\n",
+                    v.label
+                );
                 for r in rows.iter().take(top_n.max(1)) {
                     let sp = self.kb.skills.get(&r.id).map_or(0, |s| s.sp);
-                    text += &format!("- {} ({sp} SP): {:+.2} L mean, median {:+.2}, range {:+.2} to {:+.2}\n", self.kb.skill_name(r.id), r.mean, r.median, r.min, r.max);
+                    text += &format!(
+                        "- {} ({sp} SP): {:+.2} L mean, median {:+.2}, range {:+.2} to {:+.2}\n",
+                        self.kb.skill_name(r.id),
+                        r.mean,
+                        r.median,
+                        r.min,
+                        r.max
+                    );
                 }
-                let bars = rows.iter().take(8).map(|r| (self.kb.skill_name(r.id), r.mean)).collect();
-                Some(ToolOut::ok(text, format!("Simulated {} skills", v.rows.len())).visual(Visual::Bars(bars)).open(OpenAt::Plan))
+                let bars = rows
+                    .iter()
+                    .take(8)
+                    .map(|r| (self.kb.skill_name(r.id), r.mean))
+                    .collect();
+                Some(
+                    ToolOut::ok(text, format!("Simulated {} skills", v.rows.len()))
+                        .visual(Visual::Bars(bars))
+                        .open(OpenAt::Plan),
+                )
             }
             Wait::Compare { undo } => {
                 if self.sim.job.is_some() {
                     return None;
                 }
-                let Some(r) = self.sim.compare.clone() else { return Some(ToolOut::err("The Compare stopped before it finished.").undo(undo)) };
+                let Some(r) = self.sim.compare.clone() else {
+                    return Some(
+                        ToolOut::err("The Compare stopped before it finished.").undo(undo),
+                    );
+                };
                 Some(self.compare_out(&r).undo(undo))
             }
             Wait::Chart { top_n, undo } => {
                 if self.sim.job.is_some() {
                     return None;
                 }
-                let Some(mut rows) = self.sim.chart.clone() else { return Some(ToolOut::err("The skill chart stopped before it finished.").undo(undo)) };
+                let Some(mut rows) = self.sim.chart.clone() else {
+                    return Some(
+                        ToolOut::err("The skill chart stopped before it finished.").undo(undo),
+                    );
+                };
                 rows.sort_by(|a, b| b.mean.total_cmp(&a.mean));
-                let mut text = format!("Skill chart for Uma 1 ({}). Simulation output: lengths each skill adds alone, chart mode (no wit checks or rushing).\n", self.sim_builds_text().lines().next().unwrap_or_default());
+                let mut text = format!(
+                    "Skill chart for Uma 1 ({}). Simulation output: lengths each skill adds alone, chart mode (no wit checks or rushing).\n",
+                    self.sim_builds_text().lines().next().unwrap_or_default()
+                );
                 for r in rows.iter().take(top_n.max(1)) {
                     let sp = self.kb.skills.get(&r.id).map_or(0, |s| s.sp);
-                    let per = if sp > 0 { format!(", {:.2} L per 100 SP", r.mean / f64::from(sp) * 100.0) } else { String::new() };
-                    text += &format!("- {} ({sp} SP): {:+.2} L mean, median {:+.2}{per}\n", self.skill_label_any(r.id), r.mean, r.median);
+                    let per = if sp > 0 {
+                        format!(", {:.2} L per 100 SP", r.mean / f64::from(sp) * 100.0)
+                    } else {
+                        String::new()
+                    };
+                    text += &format!(
+                        "- {} ({sp} SP): {:+.2} L mean, median {:+.2}{per}\n",
+                        self.skill_label_any(r.id),
+                        r.mean,
+                        r.median
+                    );
                 }
-                let bars = rows.iter().take(8).map(|r| (self.skill_label_any(r.id), r.mean)).collect();
-                Some(ToolOut::ok(text, format!("Charted {} skills; best {}", rows.len(), rows.first().map_or(String::new(), |r| format!("{} {:+.2} L", self.skill_label_any(r.id), r.mean)))).visual(Visual::Bars(bars)).open(OpenAt::Race).undo(undo))
+                let bars = rows
+                    .iter()
+                    .take(8)
+                    .map(|r| (self.skill_label_any(r.id), r.mean))
+                    .collect();
+                Some(
+                    ToolOut::ok(
+                        text,
+                        format!(
+                            "Charted {} skills; best {}",
+                            rows.len(),
+                            rows.first().map_or(String::new(), |r| format!(
+                                "{} {:+.2} L",
+                                self.skill_label_any(r.id),
+                                r.mean
+                            ))
+                        ),
+                    )
+                    .visual(Visual::Bars(bars))
+                    .open(OpenAt::Race)
+                    .undo(undo),
+                )
             }
             Wait::Stamina { undo } => {
                 if self.sim.job.is_some() {
                     return None;
                 }
-                let Some(r) = self.sim.stamina.clone() else { return Some(ToolOut::err("The stamina run stopped before it finished.").undo(undo)) };
+                let Some(r) = self.sim.stamina.clone() else {
+                    return Some(
+                        ToolOut::err("The stamina run stopped before it finished.").undo(undo),
+                    );
+                };
                 Some(self.stamina_out(&r).undo(undo))
             }
             Wait::Extra(kind) => {
@@ -1658,12 +2745,27 @@ impl App {
                     ExtraKind::Sensitivity => self.sim.sensitivity.clone(),
                 }?;
                 let head = match kind {
-                    ExtraKind::Contribution => "What each of Uma 2's skills is worth: the gap with it minus without it (200 races each). Simulation output.",
-                    ExtraKind::Sensitivity => "Where Uma 2's next training points matter: +50 in each stat (300 races each). Simulation output.",
+                    ExtraKind::Contribution => {
+                        "What each of Uma 2's skills is worth: the gap with it minus without it (200 races each). Simulation output."
+                    }
+                    ExtraKind::Sensitivity => {
+                        "Where Uma 2's next training points matter: +50 in each stat (300 races each). Simulation output."
+                    }
                 };
-                let lines: Vec<String> = items.iter().map(|(l, v)| format!("- {l}: {v:+.2} L")).collect();
-                let summary = items.first().map_or("Nothing to test".to_string(), |(l, v)| format!("Most: {l} {v:+.2} L"));
-                Some(ToolOut::ok(format!("{head}\n{}", lines.join("\n")), summary).visual(Visual::Bars(items)).open(OpenAt::Race))
+                let lines: Vec<String> = items
+                    .iter()
+                    .map(|(l, v)| format!("- {l}: {v:+.2} L"))
+                    .collect();
+                let summary = items
+                    .first()
+                    .map_or("Nothing to test".to_string(), |(l, v)| {
+                        format!("Most: {l} {v:+.2} L")
+                    });
+                Some(
+                    ToolOut::ok(format!("{head}\n{}", lines.join("\n")), summary)
+                        .visual(Visual::Bars(items))
+                        .open(OpenAt::Race),
+                )
             }
         }
     }
@@ -1671,7 +2773,10 @@ impl App {
     fn skill_label_any(&self, id: u32) -> String {
         match self.kb.skills.get(&id) {
             Some(s) => s.name.clone(),
-            None => self.sim_data.as_ref().map_or(format!("Skill {id}"), |d| d.skill_name(id)),
+            None => self
+                .sim_data
+                .as_ref()
+                .map_or(format!("Skill {id}"), |d| d.skill_name(id)),
         }
     }
 
@@ -1680,12 +2785,25 @@ impl App {
         let runs = r.gaps.len().max(1);
         let n = runs as f64;
         let ahead = r.gaps.iter().filter(|g| **g > 0.0).count() as f64 / n * 100.0;
-        let (winner, lead, share) = if r.mean >= 0.0 { ("Uma 2", r.mean, ahead) } else { ("Uma 1", -r.mean, 100.0 - ahead) };
-        let sd = (r.gaps.iter().map(|g| (g - r.mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+        let (winner, lead, share) = if r.mean >= 0.0 {
+            ("Uma 2", r.mean, ahead)
+        } else {
+            ("Uma 1", -r.mean, 100.0 - ahead)
+        };
+        let sd =
+            (r.gaps.iter().map(|g| (g - r.mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
         let half = 1.96 * sd / n.sqrt();
-        let pct = |p: f64| r.gaps.get(((runs - 1) as f64 * p).round() as usize).copied().unwrap_or(0.0);
+        let pct = |p: f64| {
+            r.gaps
+                .get(((runs - 1) as f64 * p).round() as usize)
+                .copied()
+                .unwrap_or(0.0)
+        };
         let line = format!("{winner} wins {share:.0}% of {runs} races, by {lead:.2} L on average");
-        let mut text = format!("Compare (simulation output, Moomoolator's engine):\n{}", self.ran_setup_text());
+        let mut text = format!(
+            "Compare (simulation output, Moomoolator's engine):\n{}",
+            self.ran_setup_text()
+        );
         text += &format!(
             "Result: {line} (gap Uma 2 − Uma 1: mean {:+.2}, median {:+.2}, 95% interval {:+.2} to {:+.2}, P10 {:+.2}, P90 {:+.2}, min {:+.2}, max {:+.2}; 1 L = 2.5 m).\n",
             r.mean,
@@ -1713,37 +2831,78 @@ impl App {
         let mut acts: Vec<&crate::sim::run::SkillStat> = r.umas[1].skills.iter().collect();
         acts.sort_by(|a, b| b.rate.total_cmp(&a.rate));
         if !acts.is_empty() {
-            let list: Vec<String> = acts.iter().map(|s| format!("{} {:.0}% at {:.0} m", self.skill_label_any(s.id), s.rate, s.mean_start)).collect();
+            let list: Vec<String> = acts
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{} {:.0}% at {:.0} m",
+                        self.skill_label_any(s.id),
+                        s.rate,
+                        s.mean_start
+                    )
+                })
+                .collect();
             text += &format!("Uma 2's skill activations: {}.\n", list.join("; "));
         }
         if let Some(ran) = &self.sim.ran {
-            let fired: Vec<u32> = r.umas[1].skills.iter().filter(|s| s.rate > 0.0).map(|s| s.id).collect();
-            let never: Vec<String> = ran.umas[1].skills.iter().filter(|s| !fired.contains(s) && self.skill_not_logged(**s).is_none()).map(|s| self.skill_label_any(*s)).collect();
+            let fired: Vec<u32> = r.umas[1]
+                .skills
+                .iter()
+                .filter(|s| s.rate > 0.0)
+                .map(|s| s.id)
+                .collect();
+            let never: Vec<String> = ran.umas[1]
+                .skills
+                .iter()
+                .filter(|s| !fired.contains(s) && self.skill_not_logged(**s).is_none())
+                .map(|s| self.skill_label_any(*s))
+                .collect();
             if !never.is_empty() {
-                text += &format!("Never fired for Uma 2: {} (conditions not met on this course, or failed wit checks).\n", never.join(", "));
+                text += &format!(
+                    "Never fired for Uma 2: {} (conditions not met on this course, or failed wit checks).\n",
+                    never.join(", ")
+                );
             }
         }
         if !r.warnings.is_empty() {
             text += &format!("Left out: {}\n", r.warnings.join("; "));
         }
         if let Ok(md) = self.sim_markdown()
-            && let Some(link) = md.lines().find(|l| l.starts_with("Reproduce in Moomoolator"))
+            && let Some(link) = md
+                .lines()
+                .find(|l| l.starts_with("Reproduce in Moomoolator"))
         {
             text += &format!("{link}\n");
         }
-        ToolOut::ok(text, line.clone()).visual(Visual::Verdict { line, gaps: r.gaps.clone() }).open(OpenAt::Race)
+        ToolOut::ok(text, line.clone())
+            .visual(Visual::Verdict {
+                line,
+                gaps: r.gaps.clone(),
+            })
+            .open(OpenAt::Race)
     }
 
     fn ran_setup_text(&self) -> String {
-        let Some(ran) = &self.sim.ran else { return String::new() };
-        let course = self.sim_data.as_ref().map_or(format!("course {}", ran.course), |d| d.course_name(ran.course));
+        let Some(ran) = &self.sim.ran else {
+            return String::new();
+        };
+        let course = self
+            .sim_data
+            .as_ref()
+            .map_or(format!("course {}", ran.course), |d| {
+                d.course_name(ran.course)
+            });
         let o = &ran.opts;
-        let mut out = format!("Setup: {course}, {}; {} races, seed {}; sync RNG {}, wit check {}, rushed {}\n", ran.conditions, o.samples, o.seed, o.sync_rng, o.wit_check, o.rushed);
+        let mut out = format!(
+            "Setup: {course}, {}; {} races, seed {}; sync RNG {}, wit check {}, rushed {}\n",
+            ran.conditions, o.samples, o.seed, o.sync_rng, o.wit_check, o.rushed
+        );
         for (k, u) in ran.umas.iter().enumerate() {
             out += &format!(
                 "Uma {}: {}, {}/{}/{}/{}/{} {}, skills: {}\n",
                 k + 1,
-                u.outfit.map_or("no outfit".to_string(), |o| self.uma_label(o)),
+                u.outfit
+                    .map_or("no outfit".to_string(), |o| self.uma_label(o)),
                 u.desc.speed,
                 u.desc.stamina,
                 u.desc.power,
@@ -1760,10 +2919,19 @@ impl App {
         let runs = r.runs.max(1);
         let full = r.full_spurt_runs as f64 / runs as f64 * 100.0;
         let rem = &r.remaining;
-        let at = |p: f64| rem.get(((rem.len().max(1) - 1) as f64 * p).round() as usize).copied().unwrap_or(0.0);
+        let at = |p: f64| {
+            rem.get(((rem.len().max(1) - 1) as f64 * p).round() as usize)
+                .copied()
+                .unwrap_or(0.0)
+        };
         let mut text = format!(
             "Stamina check for Uma 1 (simulation output):\n{}Max HP {:.0}. HP for a full spurt in {full:.0}% of {runs} races. HP left at the finish: median {:.0}, P10 {:.0}, P90 {:.0} (negative: ran out).\n",
-            self.ran_setup_text().lines().take(2).collect::<Vec<_>>().join("\n") + "\n",
+            self.ran_setup_text()
+                .lines()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
             r.max_hp,
             at(0.5),
             at(0.1),
@@ -1781,7 +2949,15 @@ impl App {
                 OIKOMI => 3,
                 _ => 4,
             };
-            let e = crate::sim::hpcalc::estimate(course, u.desc.stamina, u.desc.guts, u.desc.wisdom, u.desc.speed, style, 0.0);
+            let e = crate::sim::hpcalc::estimate(
+                course,
+                u.desc.stamina,
+                u.desc.guts,
+                u.desc.wisdom,
+                u.desc.speed,
+                style,
+                0.0,
+            );
             text += &format!(
                 "Closed-form estimate (the HP Calculator): needs {:.0} HP, has {:.0}; {}. Stamina for a full spurt: about {} ({} with downhill savings).\n",
                 e.total_needed,
@@ -1791,7 +2967,14 @@ impl App {
                 e.adjusted_min_stamina
             );
         }
-        ToolOut::ok(text, format!("Full spurt in {full:.0}% of races; median HP left {:.0}", at(0.5))).open(OpenAt::Race)
+        ToolOut::ok(
+            text,
+            format!(
+                "Full spurt in {full:.0}% of races; median HP left {:.0}",
+                at(0.5)
+            ),
+        )
+        .open(OpenAt::Race)
     }
 
     // -----------------------------------------------------------------------
@@ -1823,7 +3006,16 @@ impl App {
                             if !a.open_plan_file(&path) {
                                 return Err("That plan file has no app data block.".into());
                             }
-                            Ok(ToolOut::ok(a.plan_brief(), format!("Opened {}", path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default())).open(OpenAt::Plan))
+                            Ok(ToolOut::ok(
+                                a.plan_brief(),
+                                format!(
+                                    "Opened {}",
+                                    path.file_name()
+                                        .map(|f| f.to_string_lossy().to_string())
+                                        .unwrap_or_default()
+                                ),
+                            )
+                            .open(OpenAt::Plan))
                         });
                     }
                 };
@@ -1837,13 +3029,23 @@ impl App {
         let page = at.page();
         if self.agent.bridge.is_some() {
             self.bridge_ui_request(&at);
-            return ToolOut::ok(format!("Asked the umaLord window to open {page} when this answer finishes."), format!("Will open {page}"));
+            return ToolOut::ok(
+                format!("Asked the UmaYu window to open {page} when this answer finishes."),
+                format!("Will open {page}"),
+            );
         }
         if self.agent.mcp {
-            return ToolOut::ok("No umaLord window is attached to this server, so nothing opened. Tell the user where to look in the app.", "No window to open it in");
+            return ToolOut::ok(
+                "No UmaYu window is attached to this server, so nothing opened. Tell the user where to look in the app.",
+                "No window to open it in",
+            );
         }
         self.agent.open_after = Some(at.clone());
-        ToolOut::ok(format!("It opens {page} when this answer finishes."), format!("Will open {page}")).open(at)
+        ToolOut::ok(
+            format!("It opens {page} when this answer finishes."),
+            format!("Will open {page}"),
+        )
+        .open(at)
     }
 
     // -----------------------------------------------------------------------
@@ -1854,21 +3056,62 @@ impl App {
         match name {
             "save_plan" => {
                 let p = &self.planner.plan;
-                let u = p.trainee.and_then(|t| self.owned_uma(t)).ok_or("The plan needs an owned trainee before it can be saved.")?;
-                let title = text(input, "title").map(String::from).unwrap_or_else(|| if p.title.is_empty() { format!("{} [{}] — {}", u.name, u.outfit, p.purpose.label()) } else { p.title.clone() });
-                let file = self.planner.open_file.as_ref().and_then(|f| f.file_name()).map_or("a new file in plans/".to_string(), |f| format!("plans/{}", f.to_string_lossy()));
-                let sim = if input["with_simulation"].as_bool().unwrap_or(true) && self.sim.compare.is_some() && self.sim.from_plan { ", with the last Compare as its Simulation section" } else { "" };
-                Ok(Approval { question: format!("Save plan '{title}' to {file}{sim}?"), always_ask: false })
+                let u = p
+                    .trainee
+                    .and_then(|t| self.owned_uma(t))
+                    .ok_or("The plan needs an owned trainee before it can be saved.")?;
+                let title = text(input, "title").map(String::from).unwrap_or_else(|| {
+                    if p.title.is_empty() {
+                        format!("{} [{}] — {}", u.name, u.outfit, p.purpose.label())
+                    } else {
+                        p.title.clone()
+                    }
+                });
+                let file = self
+                    .planner
+                    .open_file
+                    .as_ref()
+                    .and_then(|f| f.file_name())
+                    .map_or("a new file in plans/".to_string(), |f| {
+                        format!("plans/{}", f.to_string_lossy())
+                    });
+                let sim = if input["with_simulation"].as_bool().unwrap_or(true)
+                    && self.sim.compare.is_some()
+                    && self.sim.from_plan
+                {
+                    ", with the last Compare as its Simulation section"
+                } else {
+                    ""
+                };
+                Ok(Approval {
+                    question: format!("Save plan '{title}' to {file}{sim}?"),
+                    always_ask: false,
+                })
             }
             "log_result" => {
                 let (i, row) = self.result_row(input)?;
                 let headers = self.result_headers(i);
-                let filled: Vec<String> = headers.iter().zip(&row).filter(|(_, v)| !v.is_empty()).map(|(h, v)| format!("{h}: {v}")).collect();
-                Ok(Approval { question: format!("Add to {}: {}?", crate::tab_results::LOGS[i].1, filled.join(" · ")), always_ask: false })
+                let filled: Vec<String> = headers
+                    .iter()
+                    .zip(&row)
+                    .filter(|(_, v)| !v.is_empty())
+                    .map(|(h, v)| format!("{h}: {v}"))
+                    .collect();
+                Ok(Approval {
+                    question: format!(
+                        "Add to {}: {}?",
+                        crate::tab_results::LOGS[i].1,
+                        filled.join(" · ")
+                    ),
+                    always_ask: false,
+                })
             }
             "update_owned" => {
                 let (_, what) = self.owned_edit(input)?;
-                Ok(Approval { question: format!("Change your roster: {what}?"), always_ask: true })
+                Ok(Approval {
+                    question: format!("Change your roster: {what}?"),
+                    always_ask: true,
+                })
             }
             other => Err(format!("Unknown tool {other}")),
         }
@@ -1881,15 +3124,29 @@ impl App {
                 if let Some(t) = text(input, "title") {
                     self.planner.plan.title = t.to_string();
                 }
-                let before = std::fs::metadata(self.planner.open_file.clone().unwrap_or_default()).and_then(|m| m.modified()).ok();
+                let before = std::fs::metadata(self.planner.open_file.clone().unwrap_or_default())
+                    .and_then(|m| m.modified())
+                    .ok();
                 self.save_plan();
-                let Some(path) = self.planner.open_file.clone() else { return ToolOut::err("Couldn't save the plan (no trainee, or the folder isn't writable).") };
+                let Some(path) = self.planner.open_file.clone() else {
+                    return ToolOut::err(
+                        "Couldn't save the plan (no trainee, or the folder isn't writable).",
+                    );
+                };
                 let after = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
                 if after.is_none() || (before.is_some() && before == after) {
                     return ToolOut::err(format!("Couldn't write {}.", path.display()));
                 }
-                let mut text = format!("Saved {}.", path.file_name().map(|f| format!("plans/{}", f.to_string_lossy())).unwrap_or_default());
-                if input["with_simulation"].as_bool().unwrap_or(true) && self.sim.compare.is_some() && self.sim.from_plan {
+                let mut text = format!(
+                    "Saved {}.",
+                    path.file_name()
+                        .map(|f| format!("plans/{}", f.to_string_lossy()))
+                        .unwrap_or_default()
+                );
+                if input["with_simulation"].as_bool().unwrap_or(true)
+                    && self.sim.compare.is_some()
+                    && self.sim.from_plan
+                {
                     match self.save_sim_to_plan() {
                         Ok(_) => text += " The last Compare is in its ## Simulation section.",
                         Err(e) => text += &format!(" The Simulation section wasn't written: {e}"),
@@ -1900,7 +3157,11 @@ impl App {
             }
             "log_result" => match self.result_row(input) {
                 Ok((i, row)) => match self.add_result_row(i, &row) {
-                    Ok(path) => ToolOut::ok(format!("Added to {}.", path.display()), format!("Added to {}", crate::tab_results::LOGS[i].1)).open(OpenAt::Results(i)),
+                    Ok(path) => ToolOut::ok(
+                        format!("Added to {}.", path.display()),
+                        format!("Added to {}", crate::tab_results::LOGS[i].1),
+                    )
+                    .open(OpenAt::Results(i)),
                     Err(e) => ToolOut::err(e),
                 },
                 Err(e) => ToolOut::err(e),
@@ -1922,23 +3183,51 @@ impl App {
     /// The results log and row a `log_result` call describes.
     fn result_row(&self, input: &Value) -> Result<(usize, Vec<String>), String> {
         let key = input["log"].as_str().unwrap_or_default();
-        let i = LOG_KEYS.iter().position(|k| *k == key).ok_or("Unknown log.")?;
+        let i = LOG_KEYS
+            .iter()
+            .position(|k| *k == key)
+            .ok_or("Unknown log.")?;
         let headers = self.result_headers(i);
         if headers.is_empty() {
-            return Err(format!("{} has no table to add to.", crate::tab_results::LOGS[i].1));
+            return Err(format!(
+                "{} has no table to add to.",
+                crate::tab_results::LOGS[i].1
+            ));
         }
-        let fields = input["fields"].as_object().ok_or("fields should map column names to values.")?;
-        let mut row: Vec<String> = headers.iter().map(|h| if h.starts_with("Date") { crate::ui_util::local_today() } else { String::new() }).collect();
+        let fields = input["fields"]
+            .as_object()
+            .ok_or("fields should map column names to values.")?;
+        let mut row: Vec<String> = headers
+            .iter()
+            .map(|h| {
+                if h.starts_with("Date") {
+                    crate::ui_util::local_today()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
         let mut unknown = Vec::new();
         for (k, v) in fields {
-            let value = v.as_str().map(String::from).unwrap_or_else(|| v.to_string());
-            match headers.iter().position(|h| h.eq_ignore_ascii_case(k.trim())) {
+            let value = v
+                .as_str()
+                .map(String::from)
+                .unwrap_or_else(|| v.to_string());
+            match headers
+                .iter()
+                .position(|h| h.eq_ignore_ascii_case(k.trim()))
+            {
                 Some(c) => row[c] = value,
                 None => unknown.push(k.clone()),
             }
         }
         if !unknown.is_empty() {
-            return Err(format!("{} has no column {}. Its columns: {}.", crate::tab_results::LOGS[i].1, unknown.join(", "), headers.join(", ")));
+            return Err(format!(
+                "{} has no column {}. Its columns: {}.",
+                crate::tab_results::LOGS[i].1,
+                unknown.join(", "),
+                headers.join(", ")
+            ));
         }
         if row.iter().filter(|c| !c.is_empty()).count() <= 1 {
             return Err("Fill in more than the date.".into());
@@ -1958,21 +3247,42 @@ impl App {
                 now.ok_or(format!("{name} isn't in the roster."))?;
                 return Ok((Edit::RemoveUma(id), format!("remove {name}")));
             }
-            let (stars, potential) = (int(input, "stars").map(|v| v as u8).or(now.map(|n| n.0)).unwrap_or(1), int(input, "potential").map(|v| v as u8).or(now.map(|n| n.1)).unwrap_or(1));
+            let (stars, potential) = (
+                int(input, "stars")
+                    .map(|v| v as u8)
+                    .or(now.map(|n| n.0))
+                    .unwrap_or(1),
+                int(input, "potential")
+                    .map(|v| v as u8)
+                    .or(now.map(|n| n.1))
+                    .unwrap_or(1),
+            );
             let what = match now {
                 Some((s, p)) => format!("{name}: {s}★ P{p} → {stars}★ P{potential}"),
                 None => format!("add {name} at {stars}★ P{potential}"),
             };
-            Ok((Edit::Uma { id, stars, potential }, what))
+            Ok((
+                Edit::Uma {
+                    id,
+                    stars,
+                    potential,
+                },
+                what,
+            ))
         } else {
             let id = self.find_card_id(q)?;
-            let name = self.kb.cards.get(&id).map_or(format!("card {id}"), |c| format!("{} [{}] ({} {})", c.uma, c.title, c.rarity, c.kind));
+            let name = self.kb.cards.get(&id).map_or(format!("card {id}"), |c| {
+                format!("{} [{}] ({} {})", c.uma, c.title, c.rarity, c.kind)
+            });
             let now = self.owned_card(id).map(|c| (c.lb, c.level));
             if remove {
                 now.ok_or(format!("{name} isn't in the roster."))?;
                 return Ok((Edit::RemoveCard(id), format!("remove {name}")));
             }
-            let lb = int(input, "lb").map(|v| v as u8).or(now.map(|n| n.0)).unwrap_or(0);
+            let lb = int(input, "lb")
+                .map(|v| v as u8)
+                .or(now.map(|n| n.0))
+                .unwrap_or(0);
             let level = int(input, "level").map(|v| v as u8);
             let max = crate::data::Rarity::from_id(id).map_or(50, |r| r.max_level(lb));
             if level.is_some_and(|l| l > max) {

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::conditions::{Dyn, ParseError, Policy, parse, Ctx};
+use super::conditions::{Ctx, Dyn, ParseError, Policy, parse};
 use super::course::{Course, phase_start};
 use super::data::{SimData, SkillAlternative};
 use super::hp::{GameHp, Hp};
@@ -12,8 +12,8 @@ use super::params::{Horse, HorseDesc, NIGE, RaceParams, adjusted_stats, base_sta
 use super::region::{Region, clip};
 use super::rng::Rng;
 use super::solver::{
-    ACCEL, ASITAME, DuelingRates, EXTEND_EVOLVED_DURATION, Effect, KNOWN_EFFECTS, NOOP, PendingSkill, Perspective, PosKeepMode, Solver,
-    SolverParams,
+    ACCEL, ASITAME, DuelingRates, EXTEND_EVOLVED_DURATION, Effect, KNOWN_EFFECTS, NOOP,
+    PendingSkill, Perspective, PosKeepMode, Solver, SolverParams,
 };
 
 /// Skill level scaling from master.mdb's skill_level_value table (unique skill levels).
@@ -55,7 +55,11 @@ fn build_effects(alt: &SkillAlternative, p: Perspective, level: u32) -> Vec<Effe
         .effects
         .iter()
         .map(|e| Effect {
-            kind: if KNOWN_EFFECTS.contains(&e.kind) && is_target(p, e.target) { e.kind } else { NOOP },
+            kind: if KNOWN_EFFECTS.contains(&e.kind) && is_target(p, e.target) {
+                e.kind
+            } else {
+                NOOP
+            },
             base_duration: alt.base_duration / 10000.0,
             modifier: e.modifier / 10000.0 * level_coef(e.kind, level),
             duration_scaling: alt.duration_scaling.filter(|d| *d != 0).unwrap_or(1),
@@ -69,11 +73,31 @@ fn build_effects(alt: &SkillAlternative, p: Perspective, level: u32) -> Vec<Effe
 
 /// The trigger regions, sample policy and dynamic check for each alternative of a skill that can
 /// activate on this course. Returns why it can't be built, e.g. a condition the engine doesn't model.
-pub fn build_skill_data(data: &SimData, horse: &Horse, race: &RaceParams, course: &Course, id: u32, p: Perspective, level: u32) -> Result<Vec<SkillData>, String> {
-    let def = data.skills.get(&id).ok_or_else(|| format!("unknown skill {id}"))?;
+pub fn build_skill_data(
+    data: &SimData,
+    horse: &Horse,
+    race: &RaceParams,
+    course: &Course,
+    id: u32,
+    p: Perspective,
+    level: u32,
+) -> Result<Vec<SkillData>, String> {
+    let def = data
+        .skills
+        .get(&id)
+        .ok_or_else(|| format!("unknown skill {id}"))?;
     let whole = vec![Region::new(0.0, course.distance)];
-    let ctx = Ctx { course, horse, race, skill_id: id };
-    let rarity = if (3..=5).contains(&def.rarity) { 3 } else { def.rarity };
+    let ctx = Ctx {
+        course,
+        horse,
+        race,
+        skill_id: id,
+    };
+    let rarity = if (3..=5).contains(&def.rarity) {
+        3
+    } else {
+        def.rarity
+    };
     let mut out: Vec<SkillData> = Vec::new();
     for alt in &def.alternatives {
         let mut full = whole.clone();
@@ -84,7 +108,9 @@ pub fn build_skill_data(data: &SimData, horse: &Horse, race: &RaceParams, course
                 Err(ParseError::Syntax(e)) => return Err(e),
             };
             let (pre_regions, _) = pre.apply(&whole, &ctx)?;
-            let Some(first) = pre_regions.first() else { continue };
+            let Some(first) = pre_regions.first() else {
+                continue;
+            };
             full = clip(&full, Region::new(first.start, course.distance));
         }
         let op = match parse(&alt.condition) {
@@ -97,12 +123,23 @@ pub fn build_skill_data(data: &SimData, horse: &Horse, race: &RaceParams, course
             continue;
         }
         // Only skills whose second trigger depends on the first place two triggers.
-        if !out.is_empty() && !(alt.condition.contains("is_activate_other_skill_detail") || alt.condition.contains("is_used_skill_id")) {
+        if !out.is_empty()
+            && !(alt.condition.contains("is_activate_other_skill_detail")
+                || alt.condition.contains("is_used_skill_id"))
+        {
             continue;
         }
         let effects = build_effects(alt, p, level);
         if !effects.is_empty() {
-            out.push(SkillData { id, perspective: p, rarity, policy: op.policy()?, regions, cond: Arc::new(cond), effects: Arc::new(effects) });
+            out.push(SkillData {
+                id,
+                perspective: p,
+                rarity,
+                policy: op.policy()?,
+                regions,
+                cond: Arc::new(cond),
+                effects: Arc::new(effects),
+            });
         }
     }
     if !out.is_empty() {
@@ -110,7 +147,9 @@ pub fn build_skill_data(data: &SimData, horse: &Horse, race: &RaceParams, course
     }
     // Nothing can trigger here; keep the skill (past the finish, never true) so random-gold
     // effects can still pick it.
-    let Some(first) = def.alternatives.first() else { return Ok(Vec::new()) };
+    let Some(first) = def.alternatives.first() else {
+        return Ok(Vec::new());
+    };
     let effects = build_effects(first, p, level);
     if effects.is_empty() {
         return Ok(Vec::new());
@@ -135,7 +174,9 @@ fn asitame_modifier(power: f64, strategy: i32, distance_type: i32) -> f64 {
         [0.0, 1.0, 0.9, 0.875, 0.86, 1.0],
         [0.0, 1.0, 0.9, 1.0, 0.9, 1.0],
     ];
-    0.00875 * (power - 1200.0).sqrt() * COEF[distance_type.clamp(0, 4) as usize][strategy.clamp(0, 5) as usize]
+    0.00875
+        * (power - 1200.0).sqrt()
+        * COEF[distance_type.clamp(0, 4) as usize][strategy.clamp(0, 5) as usize]
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -221,8 +262,20 @@ impl Builder {
         self.horse = Some(h);
     }
 
-    pub fn add_skill(&mut self, id: u32, p: Perspective, origin_wisdom: Option<f64>, level: u32, forced: Option<f64>) {
-        self.skills.push(SkillReq { id, perspective: p, origin_wisdom, level });
+    pub fn add_skill(
+        &mut self,
+        id: u32,
+        p: Perspective,
+        origin_wisdom: Option<f64>,
+        level: u32,
+        forced: Option<f64>,
+    ) {
+        self.skills.push(SkillReq {
+            id,
+            perspective: p,
+            origin_wisdom,
+            level,
+        });
         if let Some(pos) = forced {
             self.forced.insert((id, p), pos);
         }
@@ -236,7 +289,9 @@ impl Builder {
     }
 
     fn policy_for(&self, sd: &SkillData) -> Policy {
-        self.forced.get(&(sd.id, sd.perspective)).map_or(sd.policy, |p| Policy::Fixed(*p))
+        self.forced
+            .get(&(sd.id, sd.perspective))
+            .map_or(sd.policy, |p| Policy::Fixed(*p))
     }
 
     /// The default pacemaker for approximate position keep: this uma's stats as a front runner,
@@ -253,14 +308,31 @@ impl Builder {
                 rarity: 1,
                 trigger: Region::new(0.0, 100.0),
                 cond: Arc::new(Dyn::True),
-                effects: Arc::new(vec![Effect { kind: ACCEL, base_duration: dur, modifier: 0.2, duration_scaling: 1, value_scaling: None }]),
+                effects: Arc::new(vec![Effect {
+                    kind: ACCEL,
+                    base_duration: dur,
+                    modifier: 0.2,
+                    duration_scaling: 1,
+                    value_scaling: None,
+                }]),
                 origin_wisdom: None,
             })
             .collect();
         self.pacer_skill_data = skill_ids
             .iter()
             .filter(|id| data.skills.contains_key(id))
-            .flat_map(|id| build_skill_data(data, &base, &self.race, &self.course, *id, Perspective::Mine, 1).unwrap_or_default())
+            .flat_map(|id| {
+                build_skill_data(
+                    data,
+                    &base,
+                    &self.race,
+                    &self.course,
+                    *id,
+                    Perspective::Mine,
+                    1,
+                )
+                .unwrap_or_default()
+            })
             .collect();
         adjusted_stats(&base, &self.course, self.race.ground)
     }
@@ -269,8 +341,14 @@ impl Builder {
         let skills: Vec<PendingSkill> = if self.pacer_skill_data.is_empty() {
             self.pacer_default_skills.clone()
         } else {
-            let triggers: Vec<Vec<Region>> =
-                self.pacer_skill_data.iter().map(|sd| self.policy_for(sd).sample(&sd.regions, self.nsamples, &mut rng)).collect();
+            let triggers: Vec<Vec<Region>> = self
+                .pacer_skill_data
+                .iter()
+                .map(|sd| {
+                    self.policy_for(sd)
+                        .sample(&sd.regions, self.nsamples, &mut rng)
+                })
+                .collect();
             self.pacer_skill_data
                 .iter()
                 .zip(&triggers)
@@ -316,7 +394,15 @@ impl Builder {
             if !data.skills.contains_key(&req.id) {
                 continue;
             }
-            match build_skill_data(data, &base, &self.race, &self.course, req.id, req.perspective, req.level) {
+            match build_skill_data(
+                data,
+                &base,
+                &self.race,
+                &self.course,
+                req.id,
+                req.perspective,
+                req.level,
+            ) {
                 Ok(list) => skilldata.extend(list.into_iter().map(|sd| (sd, req.origin_wisdom))),
                 Err(e) => warnings.push(format!("{}: {e}", data.skill_name(req.id))),
             }
@@ -325,7 +411,12 @@ impl Builder {
             let power = skilldata
                 .iter()
                 .filter(|(sd, _)| sd.regions.first().is_some_and(|r| r.start < 9999.0))
-                .filter_map(|(sd, _)| sd.effects.iter().find(|e| e.kind == super::solver::POWER_UP).map(|e| e.modifier))
+                .filter_map(|(sd, _)| {
+                    sd.effects
+                        .iter()
+                        .find(|e| e.kind == super::solver::POWER_UP)
+                        .map(|e| e.modifier)
+                })
                 .fold(display_power, |a, b| a + b);
             if power > 1200.0 {
                 let d = self.course.distance;
@@ -340,7 +431,11 @@ impl Builder {
                         effects: Arc::new(vec![Effect {
                             kind: ACCEL,
                             base_duration: 3.0 / (d / 1000.0),
-                            modifier: asitame_modifier(power, base.strategy, self.course.distance_type),
+                            modifier: asitame_modifier(
+                                power,
+                                base.strategy,
+                                self.course.distance_type,
+                            ),
                             duration_scaling: 1,
                             value_scaling: None,
                         }]),
@@ -349,8 +444,13 @@ impl Builder {
                 ));
             }
         }
-        let triggers: Vec<Vec<Region>> =
-            skilldata.iter().map(|(sd, _)| self.policy_for(sd).sample(&sd.regions, self.nsamples, &mut skill_rng)).collect();
+        let triggers: Vec<Vec<Region>> = skilldata
+            .iter()
+            .map(|(sd, _)| {
+                self.policy_for(sd)
+                    .sample(&sd.regions, self.nsamples, &mut skill_rng)
+            })
+            .collect();
         Built {
             horse: adjusted_stats(&base, &self.course, self.race.ground),
             skilldata,
@@ -399,7 +499,13 @@ impl Built {
         let game = || GameHp::new(&b.course, b.race.ground, hp_rng.clone());
         let hp = match b.hp_kind {
             HpKind::Game => Hp::Game(game()),
-            HpKind::ForceFull(force) => Hp::ForceFull { hp: game(), force, balance: f64::INFINITY, was_full: false, downhill_save: 0.0 },
+            HpKind::ForceFull(force) => Hp::ForceFull {
+                hp: game(),
+                force,
+                balance: f64::INFINITY,
+                was_full: false,
+                downhill_save: 0.0,
+            },
             HpKind::CalcRequired => Hp::CalcRequired(game()),
         };
         Solver::new(SolverParams {

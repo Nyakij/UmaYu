@@ -76,7 +76,11 @@ pub struct HorseDesc {
 }
 
 fn adjust_overcap(stat: f64) -> f64 {
-    if stat > 1200.0 { 1200.0 + ((stat - 1200.0) / 2.0).floor() } else { stat }
+    if stat > 1200.0 {
+        1200.0 + ((stat - 1200.0) / 2.0).floor()
+    } else {
+        stat
+    }
 }
 
 /// Stats past 1200 count half, then mood scales everything by 2% per step.
@@ -98,7 +102,10 @@ pub fn base_stats(h: &HorseDesc) -> Horse {
 }
 
 const GROUND_SPEED: [[f64; 5]; 2] = [[0.0, 0.0, 0.0, 0.0, -50.0], [0.0, 0.0, 0.0, 0.0, -50.0]];
-const GROUND_POWER: [[f64; 5]; 2] = [[0.0, 0.0, -50.0, -50.0, -50.0], [0.0, -100.0, -50.0, -100.0, -100.0]];
+const GROUND_POWER: [[f64; 5]; 2] = [
+    [0.0, 0.0, -50.0, -50.0, -50.0],
+    [0.0, -100.0, -50.0, -100.0, -100.0],
+];
 const STRATEGY_PROFICIENCY: [f64; 8] = [1.1, 1.0, 0.85, 0.75, 0.6, 0.4, 0.2, 0.1];
 
 /// The Wit multiplier for a style aptitude (index 0 = S … 7 = G).
@@ -136,7 +143,17 @@ pub struct RaceParams {
 
 impl Default for RaceParams {
     fn default() -> Self {
-        RaceParams { mood: 2, ground: 1, weather: 1, season: 1, time: 2, grade: 100, popularity: 1, order_range: None, num_umas: None }
+        RaceParams {
+            mood: 2,
+            ground: 1,
+            weather: 1,
+            season: 1,
+            time: 2,
+            grade: 100,
+            popularity: 1,
+            order_range: None,
+            num_umas: None,
+        }
     }
 }
 

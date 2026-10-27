@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   The README's art, in the style of the social preview: a hero banner, feature cards, the
   themes board, a "get started" banner, and the social preview itself.
@@ -41,7 +41,7 @@ $need = [ordered]@{
 }
 
 if ($Take) {
-    $exe = Join-Path $repo 'app\target\release\umalord.exe'
+    $exe = Join-Path $repo 'app\target\release\umayu.exe'
     if (-not (Test-Path $exe)) { throw "Build the app first: $exe is missing." }
     if (-not $ProfileFile) {
         $ProfileFile = Get-ChildItem (Join-Path $repo 'profiles') -Filter 'friend-*.umalord.json' -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1 -ExpandProperty FullName
@@ -219,7 +219,7 @@ Window $hero (Crop $homeShot 0 0 1300 836) 700 196 800 514 $blue
 Layer $hero {
     param($dc)
     $dc.DrawImage($chibi, (Box 70 40 210 210))
-    $dc.DrawText((Words 'umaLord' 128 (C $text) 'SemiBold'), (Pt 74 236))
+    $dc.DrawText((Words 'UmaYu' 128 (C $text) 'SemiBold'), (Pt 74 236))
     $dc.DrawText((Words 'Your Uma Musume (Global) companion. Plan careers on the community meta, race them in a real simulator, and keep your whole collection at hand.' 29 (C $soft) 'Normal' 580), (Pt 82 420))
     $x = 82
     foreach ($p in 'Free and open source', 'Windows 10 and 11', 'Runs offline') { $x += (Pill $dc $p $x 600 $blue) + 12 }
@@ -316,8 +316,8 @@ Window $social (Crop (Shot 'plan') 0 0 1400 900) 560 120 680 437 $blue
 Layer $social {
     param($dc)
     $dc.DrawImage($chibi, (Box 70 50 190 190))
-    $dc.DrawText((Words 'umaLord' 100 (C $text) 'SemiBold'), (Pt 58 250))
+    $dc.DrawText((Words 'UmaYu' 100 (C $text) 'SemiBold'), (Pt 58 250))
     $dc.DrawText((Words 'Your Uma Musume (Global) account: collection, career plans built on the community meta, and a race simulator. All offline, on Windows.' 27 (C $soft) 'Normal' 440), (Pt 62 386))
-    $dc.DrawText((Words 'github.com/brickc4/umaLord' 24 (C $blue) 'SemiBold'), (Pt 62 560))
+    $dc.DrawText((Words 'github.com/Nyakij/UmaYu' 24 (C $blue) 'SemiBold'), (Pt 62 560))
 }
 Save-Art $social (Join-Path $repo 'docs\social-preview.png')

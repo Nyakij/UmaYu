@@ -1,10 +1,10 @@
-//! The Ask tab's free backend: OpenCode (opencode.ai) run in the umaLord folder, read-only.
+//! The Ask tab's free backend: OpenCode (opencode.ai) run in the UmaYu folder, read-only.
 //!
 //! Each question runs `opencode run --format json`, which prints one JSON event per line:
-//! `tool_use` (a file read or search, or one of umaLord's tools), `text` (part of the answer),
+//! `tool_use` (a file read or search, or one of UmaYu's tools), `text` (part of the answer),
 //! `step_finish` (token counts) and `error`. Follow-up questions pass `--session <id>` so OpenCode
 //! keeps the conversation. OpenCode reads AGENTS.md for its instructions and
-//! knowledge/digest/owned.md for the roster, and gets umaLord's agent tools from this exe run as
+//! knowledge/digest/owned.md for the roster, and gets UmaYu's agent tools from this exe run as
 //! an MCP server (`mcp_config`, passed in `OPENCODE_CONFIG_CONTENT`).
 
 use std::io::{BufRead, BufReader, Read};
@@ -52,18 +52,31 @@ pub fn strip_ansi(s: &str) -> String {
 /// One readable line from OpenCode's stderr.
 fn error_summary(stderr: &str) -> String {
     let text = strip_ansi(stderr);
-    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    if lines.is_empty() { "OpenCode stopped with an error".to_string() } else { lines.join(" ") }
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        t!("OpenCode stopped with an error").to_string()
+    } else {
+        lines.join(" ")
+    }
 }
 
 /// Data-use notes for OpenCode's free models, from opencode.ai/docs/zen (checked 2026-10-16).
 pub fn model_note(model: &str) -> &'static str {
     let m = model.strip_prefix("opencode/").unwrap_or(model);
     match m {
-        "deepseek-v4.1-flash-free" | "glm-5.3-flash-free" | "space-bunny-free" | "longcat-2.5-preview-free" => "keeps nothing, not used for training",
+        "deepseek-v4.1-flash-free"
+        | "glm-5.3-flash-free"
+        | "space-bunny-free"
+        | "longcat-2.5-preview-free" => "keeps nothing, not used for training",
         "beam-free" => "not used for training; kept 30 days",
         "ll-alpha-free" => "may be used to improve the model; kept 30 days",
-        "big-pickle" | "exo-free" | "mimo-v2.6-flash-free" | "mimo-v2.5-free" => "may be used to improve the model",
+        "big-pickle" | "exo-free" | "mimo-v2.6-flash-free" | "mimo-v2.5-free" => {
+            "may be used to improve the model"
+        }
         m if m.starts_with("nemotron") => "NVIDIA trial: use is logged",
         "muse-spark-1.3-contributor-free" => "used to train Meta models",
         _ if model.starts_with("opencode/") => "no data policy listed",
@@ -97,18 +110,28 @@ pub enum OcEvent {
 
 /// The bundled tools/opencode/opencode.exe, else `opencode` on PATH.
 pub fn find_exe(root: Option<&Path>) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "opencode.exe" } else { "opencode" };
+    let name = if cfg!(windows) {
+        "opencode.exe"
+    } else {
+        "opencode"
+    };
     if let Some(p) = root.map(|r| r.join("tools").join("opencode").join(name))
         && p.is_file()
     {
         return Some(p);
     }
-    std::env::var_os("PATH")?.to_str()?.split(if cfg!(windows) { ';' } else { ':' }).map(|d| Path::new(d).join(name)).find(|p| p.is_file())
+    std::env::var_os("PATH")?
+        .to_str()?
+        .split(if cfg!(windows) { ';' } else { ':' })
+        .map(|d| Path::new(d).join(name))
+        .find(|p| p.is_file())
 }
 
 fn command(exe: &Path) -> Command {
     let mut cmd = Command::new(exe);
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     crate::ask::hidden(&mut cmd);
     cmd
 }
@@ -119,16 +142,24 @@ pub fn list_models(exe: PathBuf) -> Receiver<Result<Vec<String>, String>> {
     std::thread::spawn(move || {
         let list = || {
             let _lock = run_lock();
-            command(&exe).arg("models").output().map_err(|e| e.to_string()).and_then(|out| {
-                let mut models: Vec<String> = String::from_utf8_lossy(&out.stdout)
-                    .lines()
-                    .map(str::trim)
-                    .filter(|l| l.contains('/') && !l.contains(' '))
-                    .map(String::from)
-                    .collect();
-                models.sort_by_key(|m| (!is_free(m), m.clone()));
-                if models.is_empty() { Err(error_summary(&String::from_utf8_lossy(&out.stderr))) } else { Ok(models) }
-            })
+            command(&exe)
+                .arg("models")
+                .output()
+                .map_err(|e| e.to_string())
+                .and_then(|out| {
+                    let mut models: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        .map(str::trim)
+                        .filter(|l| l.contains('/') && !l.contains(' '))
+                        .map(String::from)
+                        .collect();
+                    models.sort_by_key(|m| (!is_free(m), m.clone()));
+                    if models.is_empty() {
+                        Err(error_summary(&String::from_utf8_lossy(&out.stderr)))
+                    } else {
+                        Ok(models)
+                    }
+                })
         };
         let mut result = list();
         // Another OpenCode (say, one the user runs) may hold the database; try again shortly.
@@ -146,7 +177,9 @@ pub fn list_models(exe: PathBuf) -> Receiver<Result<Vec<String>, String>> {
 
 /// Turn one line of `--format json` output into events.
 pub fn parse_line(line: &str) -> Vec<OcEvent> {
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     if let Some(s) = v["sessionID"].as_str() {
         out.push(OcEvent::Session(s.to_string()));
@@ -161,8 +194,14 @@ pub fn parse_line(line: &str) -> Vec<OcEvent> {
         "tool_use" => {
             let state = &part["state"];
             let input = &state["input"];
-            let target = ["filePath", "pattern", "path", "description", "query"].iter().find_map(|k| input[k].as_str()).unwrap_or_default();
-            let output = state["output"].as_str().or_else(|| state["error"].as_str()).unwrap_or_default();
+            let target = ["filePath", "pattern", "path", "description", "query"]
+                .iter()
+                .find_map(|k| input[k].as_str())
+                .unwrap_or_default();
+            let output = state["output"]
+                .as_str()
+                .or_else(|| state["error"].as_str())
+                .unwrap_or_default();
             out.push(OcEvent::Tool(ToolEvent {
                 tool: part["tool"].as_str().unwrap_or("tool").to_string(),
                 target: target.to_string(),
@@ -172,12 +211,21 @@ pub fn parse_line(line: &str) -> Vec<OcEvent> {
         }
         "step_finish" => {
             let t = &part["tokens"];
-            let input = t["input"].as_u64().unwrap_or(0) + t["cache"]["read"].as_u64().unwrap_or(0) + t["cache"]["write"].as_u64().unwrap_or(0);
-            out.push(OcEvent::Tokens(input, t["output"].as_u64().unwrap_or(0) + t["reasoning"].as_u64().unwrap_or(0)));
+            let input = t["input"].as_u64().unwrap_or(0)
+                + t["cache"]["read"].as_u64().unwrap_or(0)
+                + t["cache"]["write"].as_u64().unwrap_or(0);
+            out.push(OcEvent::Tokens(
+                input,
+                t["output"].as_u64().unwrap_or(0) + t["reasoning"].as_u64().unwrap_or(0),
+            ));
         }
         "error" => {
             let e = &v["error"];
-            let msg = e["data"]["message"].as_str().or_else(|| e["message"].as_str()).or_else(|| e["name"].as_str()).unwrap_or("OpenCode reported an error");
+            let msg = e["data"]["message"]
+                .as_str()
+                .or_else(|| e["message"].as_str())
+                .or_else(|| e["name"].as_str())
+                .unwrap_or(t!("OpenCode reported an error"));
             out.push(OcEvent::Error(msg.to_string()));
         }
         _ => {}
@@ -192,7 +240,10 @@ pub fn parse_line(line: &str) -> Vec<OcEvent> {
 pub fn mcp_config(exe: &Path, root: &Path, bridge: Option<&Path>) -> String {
     let mut env = serde_json::Map::new();
     if let Some(b) = bridge {
-        env.insert(crate::agent::bridge::ENV.into(), Value::String(b.display().to_string()));
+        env.insert(
+            crate::agent::bridge::ENV.into(),
+            Value::String(b.display().to_string()),
+        );
     }
     serde_json::json!({
         "mcp": {"umalord": {
@@ -227,7 +278,10 @@ pub fn ask(
             wake();
         };
         let mut cmd = command(&exe);
-        cmd.current_dir(&root).env("OPENCODE_PERMISSION", READ_ONLY).args(["run", "--format", "json", "--model", &model, "--dir"]).arg(&root);
+        cmd.current_dir(&root)
+            .env("OPENCODE_PERMISSION", READ_ONLY)
+            .args(["run", "--format", "json", "--model", &model, "--dir"])
+            .arg(&root);
         if let Some(m) = &mcp {
             cmd.env("OPENCODE_CONFIG_CONTENT", m);
         }
@@ -238,7 +292,12 @@ pub fn ask(
         let _lock = run_lock();
         let mut proc = match cmd.spawn() {
             Ok(p) => p,
-            Err(e) => return send(&tx, OcEvent::Done(Err(format!("couldn't start OpenCode: {e}")))),
+            Err(e) => {
+                return send(
+                    &tx,
+                    OcEvent::Done(Err(tf!("couldn't start OpenCode: {}", e))),
+                );
+            }
         };
         let stdout = proc.stdout.take();
         let mut stderr = proc.stderr.take();
@@ -259,12 +318,16 @@ pub fn ask(
                 }
             }
         }
-        let status = child.lock().unwrap_or_else(|p| p.into_inner()).take().and_then(|mut p| p.wait().ok());
+        let status = child
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .and_then(|mut p| p.wait().ok());
         let err = err_text.join().unwrap_or_default();
         let result = match status {
             Some(s) if s.success() || saw_error => Ok(()),
             Some(_) => Err(error_summary(&err)),
-            None => Err("Stopped.".to_string()),
+            None => Err(t!("Stopped.").to_string()),
         };
         send(&tx, OcEvent::Done(result));
     });
@@ -278,7 +341,8 @@ pub fn ask(
 /// To update: take the new release's `opencode-windows-x64.zip` URL, size and `digest` from
 /// https://api.github.com/repos/anomalyco/opencode/releases/latest.
 pub const RELEASE: &str = "v1.19.3";
-const ZIP_URL: &str = "https://github.com/anomalyco/opencode/releases/download/v1.19.3/opencode-windows-x64.zip";
+const ZIP_URL: &str =
+    "https://github.com/anomalyco/opencode/releases/download/v1.19.3/opencode-windows-x64.zip";
 const ZIP_SHA256: &str = "e4ce9117f55fc068414513789f8c7d1049f855d7518bb4e350b9170a3a20d8c3";
 pub const ZIP_SIZE: u64 = 62_204_138;
 
@@ -304,20 +368,30 @@ fn sha256_file(path: &Path) -> std::io::Result<String> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// Download the pinned release with Windows' curl.exe, check its size and SHA-256, and extract
 /// opencode.exe into `dir`. Nothing is extracted unless the checksum matches.
 pub fn install_blocking(dir: &Path, progress: impl Fn(u64)) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| tf!("couldn't create {}: {}", dir.display(), e))?;
     let part = dir.join("opencode-download.zip.part");
     let _ = std::fs::remove_file(&part);
     let mut cmd = Command::new("curl.exe");
-    cmd.args(["-L", "--fail", "--silent", "--show-error", "-o"]).arg(&part).arg(ZIP_URL);
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(["-L", "--fail", "--silent", "--show-error", "-o"])
+        .arg(&part)
+        .arg(ZIP_URL);
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
     crate::ask::hidden(&mut cmd);
-    let mut curl = cmd.spawn().map_err(|e| format!("couldn't start curl.exe: {e}"))?;
+    let mut curl = cmd
+        .spawn()
+        .map_err(|e| tf!("couldn't start curl.exe: {}", e))?;
     let status = loop {
         if let Some(s) = curl.try_wait().map_err(|e| e.to_string())? {
             break s;
@@ -331,19 +405,25 @@ pub fn install_blocking(dir: &Path, progress: impl Fn(u64)) -> Result<PathBuf, S
             let _ = e.read_to_string(&mut err);
         }
         let _ = std::fs::remove_file(&part);
-        return Err(format!("Download failed: {}", err.trim()));
+        return Err(tf!("Download failed: {}", err.trim()));
     }
     let size = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
     progress(size);
     let hash = sha256_file(&part).map_err(|e| e.to_string())?;
     if size != ZIP_SIZE || hash != ZIP_SHA256 {
         let _ = std::fs::remove_file(&part);
-        return Err(format!("The download didn't match the published checksum ({size} bytes, sha256 {hash}), so nothing was installed."));
+        return Err(tf!(
+            "The download didn't match the published checksum ({} bytes, sha256 {}), so nothing was installed.",
+            size,
+            hash
+        ));
     }
     let extracted = (|| -> Result<PathBuf, String> {
         let file = std::fs::File::open(&part).map_err(|e| e.to_string())?;
         let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        let mut entry = zip.by_name("opencode.exe").map_err(|e| format!("opencode.exe not found in the download: {e}"))?;
+        let mut entry = zip
+            .by_name("opencode.exe")
+            .map_err(|e| tf!("opencode.exe not found in the download: {}", e))?;
         let tmp = dir.join("opencode.exe.part");
         let mut out = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
         std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
@@ -381,36 +461,80 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("umalord-oc-test-{}", std::process::id()));
         let exe = install_blocking(&dir, |_| {}).expect("install");
         let out = Command::new(&exe).arg("--version").output().expect("run");
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), RELEASE.trim_start_matches('v'));
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            RELEASE.trim_start_matches('v')
+        );
         eprintln!("installed and ran {}", exe.display());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn errors_are_readable() {
-        assert_eq!(strip_ansi("\u{1b}[91m\u{1b}[1mError: \u{1b}[0mUnexpected error"), "Error: Unexpected error");
-        assert_eq!(error_summary("\u{1b}[91mError:\u{1b}[0m Unexpected error\n\ndatabase is locked\n"), "Error: Unexpected error database is locked");
+        assert_eq!(
+            strip_ansi("\u{1b}[91m\u{1b}[1mError: \u{1b}[0mUnexpected error"),
+            "Error: Unexpected error"
+        );
+        assert_eq!(
+            error_summary("\u{1b}[91mError:\u{1b}[0m Unexpected error\n\ndatabase is locked\n"),
+            "Error: Unexpected error database is locked"
+        );
     }
 
     #[test]
     fn sha256_known_answer() {
         let path = std::env::temp_dir().join(format!("umalord-sha-{}.txt", std::process::id()));
         std::fs::write(&path, "abc").unwrap();
-        assert_eq!(sha256_file(&path).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            sha256_file(&path).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn parses_opencode_events() {
-        let text = r#"{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"OK umaLord"}}"#;
-        assert_eq!(parse_line(text), vec![OcEvent::Session("ses_1".into()), OcEvent::Text("OK umaLord".into())]);
+        let text =
+            r#"{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"OK umaLord"}}"#;
+        assert_eq!(
+            parse_line(text),
+            vec![
+                OcEvent::Session("ses_1".into()),
+                OcEvent::Text("OK umaLord".into())
+            ]
+        );
         let tool = r#"{"type":"tool_use","sessionID":"ses_1","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"notes.txt"}}}}"#;
-        assert_eq!(parse_line(tool)[1], OcEvent::Tool(ToolEvent { tool: "read".into(), target: "notes.txt".into(), ..Default::default() }));
+        assert_eq!(
+            parse_line(tool)[1],
+            OcEvent::Tool(ToolEvent {
+                tool: "read".into(),
+                target: "notes.txt".into(),
+                ..Default::default()
+            })
+        );
         let mcp = r#"{"type":"tool_use","part":{"type":"tool","tool":"umalord_run_compare","state":{"status":"completed","input":{},"output":"Compare (simulation output)"}}}"#;
-        assert_eq!(parse_line(mcp)[0], OcEvent::Tool(ToolEvent { tool: "umalord_run_compare".into(), output: "Compare (simulation output)".into(), ..Default::default() }));
-        let cfg: Value = serde_json::from_str(&mcp_config(Path::new("C:/u/umalord.exe"), Path::new("C:/u"), Some(Path::new("C:/a")))).unwrap();
-        assert_eq!(cfg["mcp"]["umalord"]["command"], serde_json::json!(["C:/u/umalord.exe", "--mcp", "C:/u"]));
-        assert_eq!(cfg["mcp"]["umalord"]["environment"][crate::agent::bridge::ENV], "C:/a");
+        assert_eq!(
+            parse_line(mcp)[0],
+            OcEvent::Tool(ToolEvent {
+                tool: "umalord_run_compare".into(),
+                output: "Compare (simulation output)".into(),
+                ..Default::default()
+            })
+        );
+        let cfg: Value = serde_json::from_str(&mcp_config(
+            Path::new("C:/u/umalord.exe"),
+            Path::new("C:/u"),
+            Some(Path::new("C:/a")),
+        ))
+        .unwrap();
+        assert_eq!(
+            cfg["mcp"]["umalord"]["command"],
+            serde_json::json!(["C:/u/umalord.exe", "--mcp", "C:/u"])
+        );
+        assert_eq!(
+            cfg["mcp"]["umalord"]["environment"][crate::agent::bridge::ENV],
+            "C:/a"
+        );
         let fin = r#"{"type":"step_finish","sessionID":"ses_1","part":{"tokens":{"input":972,"output":39,"reasoning":10,"cache":{"read":4096,"write":0}},"cost":0}}"#;
         assert_eq!(parse_line(fin)[1], OcEvent::Tokens(5068, 49));
         assert!(parse_line("not json").is_empty());
@@ -420,6 +544,9 @@ mod tests {
     fn free_model_notes() {
         assert!(is_free("opencode/deepseek-v4.1-flash-free") && is_free("opencode/big-pickle"));
         assert!(!is_free("anthropic/claude-opus-5-5"));
-        assert_eq!(model_note(DEFAULT_MODEL), "keeps nothing, not used for training");
+        assert_eq!(
+            model_note(DEFAULT_MODEL),
+            "keeps nothing, not used for training"
+        );
     }
 }

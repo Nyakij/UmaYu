@@ -11,7 +11,9 @@ use super::data::SimData;
 use super::hp::Hp;
 use super::params::{HorseDesc, RaceParams, adjusted_stats, base_stats, order_range_for};
 use super::rng::Rng;
-use super::solver::{DuelingRates, Perspective, PosKeepMode, Solver, get_pacer, step, update_first_in_late_race};
+use super::solver::{
+    DuelingRates, Perspective, PosKeepMode, Solver, get_pacer, step, update_first_in_late_race,
+};
 
 pub const DT: f64 = 1.0 / 15.0;
 
@@ -191,11 +193,19 @@ fn median(sorted: &[f64]) -> f64 {
         return 0.0;
     }
     let mid = sorted.len() / 2;
-    if mid > 0 && sorted.len().is_multiple_of(2) { (sorted[mid - 1] + sorted[mid]) / 2.0 } else { sorted[mid] }
+    if mid > 0 && sorted.len().is_multiple_of(2) {
+        (sorted[mid - 1] + sorted[mid]) / 2.0
+    } else {
+        sorted[mid]
+    }
 }
 
 fn mean(v: &[f64]) -> f64 {
-    if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
+    if v.is_empty() {
+        0.0
+    } else {
+        v.iter().sum::<f64>() / v.len() as f64
+    }
 }
 
 #[derive(Default)]
@@ -228,7 +238,11 @@ impl Tally {
             self.speed_loss.push(v);
         }
         if let Some((a, b)) = s.rushed_span {
-            self.rushed.push(if b < 0.0 { s.course.distance - a } else { b - a });
+            self.rushed.push(if b < 0.0 {
+                s.course.distance - a
+            } else {
+                b - a
+            });
         }
         self.lead += usize::from(s.lead_start.is_some());
         self.dueling += usize::from(s.compete_start.is_some());
@@ -247,8 +261,11 @@ impl Tally {
         let mut seen = Vec::new();
         for a in &s.activations {
             self.skill_starts.entry(a.id).or_default().push(a.start);
-            let bin = ((a.start / d * START_BINS as f64).floor().max(0.0) as usize).min(START_BINS - 1);
-            self.skill_hist.entry(a.id).or_insert_with(|| vec![0; START_BINS])[bin] += 1;
+            let bin =
+                ((a.start / d * START_BINS as f64).floor().max(0.0) as usize).min(START_BINS - 1);
+            self.skill_hist
+                .entry(a.id)
+                .or_insert_with(|| vec![0; START_BINS])[bin] += 1;
             if !seen.contains(&a.id) {
                 seen.push(a.id);
                 *self.skill_runs.entry(a.id).or_default() += 1;
@@ -340,13 +357,21 @@ pub fn run_comparison(
     }
 
     // Skills both umas share (by group) go first in the same order, so their activation rolls stay in sync.
-    let (k1, k2) = (group_keys(data, &uma1.skills), group_keys(data, &uma2.skills));
+    let (k1, k2) = (
+        group_keys(data, &uma1.skills),
+        group_keys(data, &uma2.skills),
+    );
     let mut common: Vec<String> = k1.iter().filter(|k| k2.contains(k)).cloned().collect();
     common.sort_by(|a, b| match (a.parse::<f64>(), b.parse::<f64>()) {
         (Ok(x), Ok(y)) => x.total_cmp(&y),
         _ => std::cmp::Ordering::Equal,
     });
-    let common_idx = |id: u32| common.iter().position(|g| *g == data.group_of(id).to_string()).unwrap_or(common.len());
+    let common_idx = |id: u32| {
+        common
+            .iter()
+            .position(|g| *g == data.group_of(id).to_string())
+            .unwrap_or(common.len())
+    };
     let sorted = |skills: &[u32]| {
         let mut v = skills.to_vec();
         v.sort_by(|a, b| common_idx(*a).cmp(&common_idx(*b)).then(a.cmp(b)));
@@ -356,18 +381,48 @@ pub fn run_comparison(
     let wisdom = |u: &UmaBuild| adjusted_stats(&base_stats(&u.desc), course, race.ground).wisdom;
     let (w1, w2) = (wisdom(uma1), wisdom(uma2));
     let (u1, u2) = (uma1.unique(data), uma2.unique(data));
-    let level = |id: u32, unique: Option<u32>, u: &UmaBuild| if Some(id) == unique { u.unique_level.max(1) } else { 1 };
+    let level = |id: u32, unique: Option<u32>, u: &UmaBuild| {
+        if Some(id) == unique {
+            u.unique_level.max(1)
+        } else {
+            1
+        }
+    };
     for &id in &s1 {
-        standard.add_skill(id, Perspective::Mine, None, level(id, u1, uma1), uma1.forced.get(&id).copied());
+        standard.add_skill(
+            id,
+            Perspective::Mine,
+            None,
+            level(id, u1, uma1),
+            uma1.forced.get(&id).copied(),
+        );
     }
     for &id in &s2 {
-        compare.add_skill(id, Perspective::Mine, None, level(id, u2, uma2), uma2.forced.get(&id).copied());
+        compare.add_skill(
+            id,
+            Perspective::Mine,
+            None,
+            level(id, u2, uma2),
+            uma2.forced.get(&id).copied(),
+        );
     }
     for &id in &s1 {
-        compare.add_skill(id, Perspective::Other, Some(w1), level(id, u1, uma1), uma1.forced.get(&id).copied());
+        compare.add_skill(
+            id,
+            Perspective::Other,
+            Some(w1),
+            level(id, u1, uma1),
+            uma1.forced.get(&id).copied(),
+        );
     }
     for &id in &s2 {
-        standard.add_skill(id, Perspective::Other, Some(w2), level(id, u2, uma2), uma2.forced.get(&id).copied());
+        standard.add_skill(
+            id,
+            Perspective::Other,
+            Some(w2),
+            level(id, u2, uma2),
+            uma2.forced.get(&id).copied(),
+        );
     }
     standard.with_asitame();
     compare.with_asitame();
@@ -424,7 +479,10 @@ pub fn run_comparison(
             if solvers[2].pos < d {
                 step(&mut solvers, 2, DT);
             }
-            for (idx, fin, time, ps, tr) in [(1usize, &mut f2, &mut time2, &mut p2, &mut tr2), (0, &mut f1, &mut time1, &mut p1, &mut tr1)] {
+            for (idx, fin, time, ps, tr) in [
+                (1usize, &mut f2, &mut time2, &mut p2, &mut tr2),
+                (0, &mut f1, &mut time1, &mut p1, &mut tr1),
+            ] {
                 let s = &solvers[idx];
                 if s.pos < d {
                     step(&mut solvers, idx, DT);
@@ -448,7 +506,11 @@ pub fn run_comparison(
         solvers[1].cleanup();
         solvers[0].cleanup();
         let m = p1.len().min(p2.len());
-        let gap = if m == 0 { 0.0 } else { (p2[m - 1] - p1[m - 1]) / 2.5 };
+        let gap = if m == 0 {
+            0.0
+        } else {
+            (p2[m - 1] - p1[m - 1]) / 2.5
+        };
         gaps.push(gap);
         if !p1.is_empty() && !p2.is_empty() {
             let mut curve = [0f32; 101];
@@ -474,8 +536,14 @@ pub fn run_comparison(
             best_median_diff = (gap - est_median).abs();
             for (k, tr) in [(0usize, &mut tr1), (1, &mut tr2)] {
                 let s = &solvers[k];
-                tr.skills = s.activations.iter().map(|a| (a.id, a.start as f32, a.end as f32)).collect();
-                tr.rushed = s.rushed_span.map(|(a, b)| (a as f32, if b < 0.0 { d as f32 } else { b as f32 }));
+                tr.skills = s
+                    .activations
+                    .iter()
+                    .map(|a| (a.id, a.start as f32, a.end as f32))
+                    .collect();
+                tr.rushed = s
+                    .rushed_span
+                    .map(|(a, b)| (a as f32, if b < 0.0 { d as f32 } else { b as f32 }));
                 tr.spurt_start = spurt_start(s).map(|m| m as f32);
                 tr.hp_out = s.hp_died_position.map(|left| (d - left) as f32);
             }
@@ -490,8 +558,17 @@ pub fn run_comparison(
         .map(|k| {
             let mut col: Vec<f32> = curves.iter().map(|c| c[k]).collect();
             col.sort_by(f32::total_cmp);
-            let at = |q: f64| col.get(((col.len().saturating_sub(1)) as f64 * q).round() as usize).copied().unwrap_or(0.0);
-            GapPoint { m: (d * k as f64 / 100.0) as f32, p10: at(0.1), p50: at(0.5), p90: at(0.9) }
+            let at = |q: f64| {
+                col.get(((col.len().saturating_sub(1)) as f64 * q).round() as usize)
+                    .copied()
+                    .unwrap_or(0.0)
+            };
+            GapPoint {
+                m: (d * k as f64 / 100.0) as f32,
+                p10: at(0.1),
+                p50: at(0.5),
+                p90: at(0.9),
+            }
         })
         .collect();
     CompareResult {
@@ -509,7 +586,13 @@ pub fn run_comparison(
 
 /// Race parameters for one course and conditions. `order_for` sets the expected field position
 /// for that style, which the skill chart uses for order conditions.
-pub fn race_params(ground: i32, weather: i32, season: i32, time: i32, order_for: Option<i32>) -> RaceParams {
+pub fn race_params(
+    ground: i32,
+    weather: i32,
+    season: i32,
+    time: i32,
+    order_for: Option<i32>,
+) -> RaceParams {
     RaceParams {
         ground,
         weather,
@@ -551,7 +634,12 @@ pub fn chart_options(seed: f64, samples: usize) -> SimOptions {
 /// the same random numbers so the difference is the skill's. Lane movement and spot struggle stay
 /// off (noise the comparison doesn't need).
 pub fn realistic_options(seed: f64, samples: usize) -> SimOptions {
-    SimOptions { wit_check: true, rushed: true, sync_rng: true, ..chart_options(seed, samples) }
+    SimOptions {
+        wit_check: true,
+        rushed: true,
+        sync_rng: true,
+        ..chart_options(seed, samples)
+    }
 }
 
 /// `base` with `id` added, replacing a skill of its group.
@@ -559,24 +647,59 @@ pub fn with_skill(data: &SimData, base: &UmaBuild, id: u32) -> UmaBuild {
     let mut u = base.clone();
     let g = data.group_of(id);
     if !data.is_debuff(id) {
-        u.skills.retain(|s| data.is_debuff(*s) || data.group_of(*s) != g);
+        u.skills
+            .retain(|s| data.is_debuff(*s) || data.group_of(*s) != g);
     }
     u.skills.push(id);
     u
 }
 
 #[allow(clippy::too_many_arguments)]
-fn chart_round(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, skills: &[u32], seed: f64, samples: usize, realistic: bool, progress: &Progress) -> Vec<ChartRow> {
-    let opts = if realistic { realistic_options(seed, samples) } else { chart_options(seed, samples) };
+fn chart_round(
+    data: &SimData,
+    course: &Arc<Course>,
+    race: &RaceParams,
+    uma: &UmaBuild,
+    skills: &[u32],
+    seed: f64,
+    samples: usize,
+    realistic: bool,
+    progress: &Progress,
+) -> Vec<ChartRow> {
+    let opts = if realistic {
+        realistic_options(seed, samples)
+    } else {
+        chart_options(seed, samples)
+    };
     skills
         .iter()
         .map(|&id| {
             if progress.cancelled() {
-                return ChartRow { id, ..Default::default() };
+                return ChartRow {
+                    id,
+                    ..Default::default()
+                };
             }
-            let r = run_comparison(data, course, race, uma, &with_skill(data, uma, id), &opts, false, false, None);
+            let r = run_comparison(
+                data,
+                course,
+                race,
+                uma,
+                &with_skill(data, uma, id),
+                &opts,
+                false,
+                false,
+                None,
+            );
             progress.tick();
-            ChartRow { id, mean: r.mean, median: r.median, min: r.min, max: r.max, samples }
+            ChartRow {
+                id,
+                mean: r.mean,
+                median: r.median,
+                min: r.min,
+                max: r.max,
+                samples,
+            }
         })
         .collect()
 }
@@ -585,22 +708,51 @@ fn chart_round(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &Um
 /// Two rounds like Moomoolator: 25 runs each, then 175 more for skills that showed a gain.
 /// `realistic` turns wit checks and rushing on (`realistic_options`); off matches the site's chart.
 #[allow(clippy::too_many_arguments)]
-pub fn run_chart(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, skills: &[u32], seed: f64, realistic: bool, progress: &Progress) -> Vec<ChartRow> {
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(1, 16);
+pub fn run_chart(
+    data: &SimData,
+    course: &Arc<Course>,
+    race: &RaceParams,
+    uma: &UmaBuild,
+    skills: &[u32],
+    seed: f64,
+    realistic: bool,
+    progress: &Progress,
+) -> Vec<ChartRow> {
+    let threads = std::thread::available_parallelism()
+        .map_or(4, |n| n.get())
+        .clamp(1, 16);
     let parallel = |list: &[u32], samples: usize| -> Vec<ChartRow> {
         if list.is_empty() {
             return Vec::new();
         }
         let chunk = list.len().div_ceil(threads);
         std::thread::scope(|scope| {
-            let handles: Vec<_> = list.chunks(chunk).map(|c| scope.spawn(move || chart_round(data, course, race, uma, c, seed, samples, realistic, progress))).collect();
-            handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+            let handles: Vec<_> = list
+                .chunks(chunk)
+                .map(|c| {
+                    scope.spawn(move || {
+                        chart_round(
+                            data, course, race, uma, c, seed, samples, realistic, progress,
+                        )
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_default())
+                .collect()
         })
     };
     progress.total.store(skills.len() * 2, Ordering::Relaxed);
     let mut rows = parallel(skills, 25);
-    let promising: Vec<u32> = rows.iter().filter(|r| r.max > 0.1 && (r.max - r.min).abs() > 0.1).map(|r| r.id).collect();
-    progress.total.store(skills.len() + promising.len(), Ordering::Relaxed);
+    let promising: Vec<u32> = rows
+        .iter()
+        .filter(|r| r.max > 0.1 && (r.max - r.min).abs() > 0.1)
+        .map(|r| r.id)
+        .collect();
+    progress
+        .total
+        .store(skills.len() + promising.len(), Ordering::Relaxed);
     let more = parallel(&promising, 175);
     for m in more {
         if let Some(r) = rows.iter_mut().find(|r| r.id == m.id) {
@@ -633,7 +785,15 @@ pub struct HpCalcResult {
 }
 
 /// Stamina mode: how much HP the build has left at the finish (hpcalc.ts).
-pub fn run_hpcalc(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: &UmaBuild, opts: &SimOptions, force_full: bool, progress: Option<&Progress>) -> HpCalcResult {
+pub fn run_hpcalc(
+    data: &SimData,
+    course: &Arc<Course>,
+    race: &RaceParams,
+    uma: &UmaBuild,
+    opts: &SimOptions,
+    force_full: bool,
+    progress: Option<&Progress>,
+) -> HpCalcResult {
     let n = opts.samples.max(1);
     let mut b0 = Builder::new(n, course.clone(), race.clone(), opts.seed);
     b0.pos_keep = PosKeepMode::Approximate;
@@ -647,8 +807,18 @@ pub fn run_hpcalc(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: 
     b0.dueling = opts.dueling;
     let unique = uma.unique(data);
     for &id in &uma.skills {
-        let lv = if Some(id) == unique { uma.unique_level.max(1) } else { 1 };
-        b0.add_skill(id, Perspective::Mine, None, lv, uma.forced.get(&id).copied());
+        let lv = if Some(id) == unique {
+            uma.unique_level.max(1)
+        } else {
+            1
+        };
+        b0.add_skill(
+            id,
+            Perspective::Mine,
+            None,
+            lv,
+            uma.forced.get(&id).copied(),
+        );
     }
     b0.with_asitame();
     let _pacer = b0.use_default_pacer(data, &uma.skills);
@@ -659,7 +829,10 @@ pub fn run_hpcalc(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: 
     let mut g1 = b1.build(data);
     let d = course.distance;
     let cutoff = (n * 4 / 5).max(n.saturating_sub(200));
-    let mut out = HpCalcResult { runs: n, ..Default::default() };
+    let mut out = HpCalcResult {
+        runs: n,
+        ..Default::default()
+    };
     let (mut est_median, mut best) = (0.0, f64::INFINITY);
     for i in 0..n {
         if progress.is_some_and(Progress::cancelled) {
@@ -679,7 +852,14 @@ pub fn run_hpcalc(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: 
         }
         solvers[0].cleanup();
         let s0 = &solvers[0];
-        if let Hp::ForceFull { hp, force, balance, was_full, downhill_save } = &s0.hp {
+        if let Hp::ForceFull {
+            hp,
+            force,
+            balance,
+            was_full,
+            downhill_save,
+        } = &s0.hp
+        {
             out.max_hp = hp.max_hp;
             out.full_spurt_runs += usize::from(*was_full);
             out.downhill_save.push(*downhill_save);
@@ -692,7 +872,11 @@ pub fn run_hpcalc(data: &SimData, course: &Arc<Course>, race: &RaceParams, uma: 
             }
             if i >= cutoff && (final_hp - est_median).abs() < best {
                 best = (final_hp - est_median).abs();
-                tr.skills = s0.activations.iter().map(|a| (a.id, a.start as f32, a.end as f32)).collect();
+                tr.skills = s0
+                    .activations
+                    .iter()
+                    .map(|a| (a.id, a.start as f32, a.end as f32))
+                    .collect();
                 out.median_run = tr;
             }
         }

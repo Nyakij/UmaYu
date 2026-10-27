@@ -3,7 +3,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke, TextStyle, Theme, ThemePreference, Visuals};
+use eframe::egui::{
+    self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke,
+    TextStyle, Theme, ThemePreference, Visuals,
+};
 
 /// Name of the semibold font family used for headings and titles.
 pub const SEMIBOLD: &str = "semibold";
@@ -63,7 +66,10 @@ impl Mode {
 
     /// Unknown or missing keys mean dark, the default before System existed.
     pub fn from_key(key: &str) -> Mode {
-        Mode::ALL.into_iter().find(|m| m.key() == key).unwrap_or(Mode::Dark)
+        Mode::ALL
+            .into_iter()
+            .find(|m| m.key() == key)
+            .unwrap_or(Mode::Dark)
     }
 
     pub fn label(self) -> &'static str {
@@ -118,7 +124,10 @@ pub fn chibi() -> Chibi {
 }
 
 pub fn use_chibi(c: Chibi) {
-    CHIBI.store(Chibi::ALL.iter().position(|x| *x == c).unwrap_or(1) as u8, Ordering::Relaxed);
+    CHIBI.store(
+        Chibi::ALL.iter().position(|x| *x == c).unwrap_or(1) as u8,
+        Ordering::Relaxed,
+    );
 }
 
 /// 0 = comfortable, 1 = compact (spacing × 0.8).
@@ -126,7 +135,11 @@ static DENSITY: AtomicU8 = AtomicU8::new(0);
 
 /// How much spacing is scaled: 1.0 comfortable, 0.8 compact.
 pub fn density() -> f32 {
-    if DENSITY.load(Ordering::Relaxed) == 1 { 0.8 } else { 1.0 }
+    if DENSITY.load(Ordering::Relaxed) == 1 {
+        0.8
+    } else {
+        1.0
+    }
 }
 
 /// A gap from `gap`, scaled by the density setting.
@@ -161,7 +174,14 @@ pub enum Look {
 }
 
 impl Look {
-    pub const ALL: [Look; 6] = [Look::Sky, Look::Sakura, Look::Sunset, Look::Night, Look::Track, Look::Ink];
+    pub const ALL: [Look; 6] = [
+        Look::Sky,
+        Look::Sakura,
+        Look::Sunset,
+        Look::Night,
+        Look::Track,
+        Look::Ink,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -198,7 +218,10 @@ impl Look {
     }
 
     pub fn from_key(key: &str) -> Look {
-        Look::ALL.into_iter().find(|l| l.key() == key).unwrap_or(Look::Sky)
+        Look::ALL
+            .into_iter()
+            .find(|l| l.key() == key)
+            .unwrap_or(Look::Sky)
     }
 }
 
@@ -211,7 +234,10 @@ pub fn look() -> Look {
 
 /// Use a colour theme from now on; `set_look` also restyles a running app.
 pub fn use_look(look: Look) {
-    LOOK.store(Look::ALL.iter().position(|l| *l == look).unwrap_or(0) as u8, Ordering::Relaxed);
+    LOOK.store(
+        Look::ALL.iter().position(|l| *l == look).unwrap_or(0) as u8,
+        Ordering::Relaxed,
+    );
 }
 
 /// Switch the running app to a colour theme.
@@ -255,18 +281,90 @@ pub struct Palette {
 fn tint(look: Look, dark: bool) -> [Color32; 5] {
     let c = Color32::from_rgb;
     match (look, dark) {
-        (Look::Sky, true) => [c(96, 165, 250), c(10, 20, 36), c(96, 165, 250), c(125, 211, 252), c(30, 52, 84)],
-        (Look::Sky, false) => [c(14, 110, 190), Color32::WHITE, c(10, 85, 150), c(3, 105, 161), c(204, 228, 250)],
-        (Look::Sakura, true) => [c(244, 143, 177), c(40, 10, 22), c(244, 143, 177), c(249, 168, 212), c(70, 34, 54)],
-        (Look::Sakura, false) => [c(204, 52, 108), Color32::WHITE, c(160, 32, 82), c(176, 30, 94), c(252, 221, 233)],
-        (Look::Sunset, true) => [c(251, 157, 75), c(40, 20, 6), c(251, 157, 75), c(253, 196, 128), c(86, 44, 34)],
-        (Look::Sunset, false) => [c(180, 80, 10), Color32::WHITE, c(150, 66, 8), c(170, 78, 10), c(255, 222, 190)],
-        (Look::Night, true) => [c(167, 139, 250), c(22, 14, 46), c(167, 139, 250), c(196, 181, 253), c(40, 32, 84)],
-        (Look::Night, false) => [c(109, 58, 214), Color32::WHITE, c(84, 40, 170), c(92, 46, 190), c(226, 218, 252)],
-        (Look::Track, true) => [c(234, 179, 8), c(30, 20, 0), c(234, 179, 8), c(250, 204, 21), c(58, 42, 20)],
-        (Look::Track, false) => [c(146, 100, 0), Color32::WHITE, c(120, 80, 0), c(133, 77, 14), c(247, 234, 200)],
-        (Look::Ink, true) => [c(236, 238, 242), c(12, 13, 16), c(236, 238, 242), c(191, 219, 254), c(30, 32, 38)],
-        (Look::Ink, false) => [c(17, 19, 24), Color32::WHITE, c(0, 0, 0), c(29, 78, 216), c(226, 228, 232)],
+        (Look::Sky, true) => [
+            c(96, 165, 250),
+            c(10, 20, 36),
+            c(96, 165, 250),
+            c(125, 211, 252),
+            c(30, 52, 84),
+        ],
+        (Look::Sky, false) => [
+            c(14, 110, 190),
+            Color32::WHITE,
+            c(10, 85, 150),
+            c(3, 105, 161),
+            c(204, 228, 250),
+        ],
+        (Look::Sakura, true) => [
+            c(244, 143, 177),
+            c(40, 10, 22),
+            c(244, 143, 177),
+            c(249, 168, 212),
+            c(70, 34, 54),
+        ],
+        (Look::Sakura, false) => [
+            c(204, 52, 108),
+            Color32::WHITE,
+            c(160, 32, 82),
+            c(176, 30, 94),
+            c(252, 221, 233),
+        ],
+        (Look::Sunset, true) => [
+            c(251, 157, 75),
+            c(40, 20, 6),
+            c(251, 157, 75),
+            c(253, 196, 128),
+            c(86, 44, 34),
+        ],
+        (Look::Sunset, false) => [
+            c(180, 80, 10),
+            Color32::WHITE,
+            c(150, 66, 8),
+            c(170, 78, 10),
+            c(255, 222, 190),
+        ],
+        (Look::Night, true) => [
+            c(167, 139, 250),
+            c(22, 14, 46),
+            c(167, 139, 250),
+            c(196, 181, 253),
+            c(40, 32, 84),
+        ],
+        (Look::Night, false) => [
+            c(109, 58, 214),
+            Color32::WHITE,
+            c(84, 40, 170),
+            c(92, 46, 190),
+            c(226, 218, 252),
+        ],
+        (Look::Track, true) => [
+            c(234, 179, 8),
+            c(30, 20, 0),
+            c(234, 179, 8),
+            c(250, 204, 21),
+            c(58, 42, 20),
+        ],
+        (Look::Track, false) => [
+            c(146, 100, 0),
+            Color32::WHITE,
+            c(120, 80, 0),
+            c(133, 77, 14),
+            c(247, 234, 200),
+        ],
+        (Look::Ink, true) => [
+            c(236, 238, 242),
+            c(12, 13, 16),
+            c(236, 238, 242),
+            c(191, 219, 254),
+            c(30, 32, 38),
+        ],
+        (Look::Ink, false) => [
+            c(17, 19, 24),
+            Color32::WHITE,
+            c(0, 0, 0),
+            c(29, 78, 216),
+            c(226, 228, 232),
+        ],
     }
 }
 
@@ -283,13 +381,32 @@ pub fn palette_for(look: Look, dark: bool) -> Palette {
     }
     // Ink: stronger secondary text and borders, for high contrast.
     if dark {
-        Palette { bg: Color32::BLACK, surface: Color32::from_rgb(14, 15, 18), weak: Color32::from_rgb(196, 201, 210), border: Color32::from_rgb(92, 98, 110), ..p }
+        Palette {
+            bg: Color32::BLACK,
+            surface: Color32::from_rgb(14, 15, 18),
+            weak: Color32::from_rgb(196, 201, 210),
+            border: Color32::from_rgb(92, 98, 110),
+            ..p
+        }
     } else {
-        Palette { bg: Color32::WHITE, surface: Color32::WHITE, weak: Color32::from_rgb(52, 58, 68), border: Color32::from_rgb(120, 126, 136), ..p }
+        Palette {
+            bg: Color32::WHITE,
+            surface: Color32::WHITE,
+            weak: Color32::from_rgb(52, 58, 68),
+            border: Color32::from_rgb(120, 126, 136),
+            ..p
+        }
     }
 }
 
-fn base_palette(dark: bool, accent: Color32, on_accent: Color32, accent_strong: Color32, link: Color32, sky: Color32) -> Palette {
+fn base_palette(
+    dark: bool,
+    accent: Color32,
+    on_accent: Color32,
+    accent_strong: Color32,
+    link: Color32,
+    sky: Color32,
+) -> Palette {
     if dark {
         Palette {
             bg: Color32::from_rgb(17, 19, 24),
@@ -341,7 +458,11 @@ pub fn contrast(a: Color32, b: Color32) -> f32 {
     fn lum(c: Color32) -> f32 {
         let ch = |v: u8| {
             let v = f32::from(v) / 255.0;
-            if v <= 0.039_28 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+            if v <= 0.039_28 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
         };
         0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
     }
@@ -356,13 +477,21 @@ pub fn pal(ui: &egui::Ui) -> Palette {
 
 fn visuals(dark: bool) -> Visuals {
     let p = palette(dark);
-    let mut v = if dark { Visuals::dark() } else { Visuals::light() };
+    let mut v = if dark {
+        Visuals::dark()
+    } else {
+        Visuals::light()
+    };
     // Pages are see-through: main.rs paints the background (and the sky) behind every panel.
     v.panel_fill = Color32::TRANSPARENT;
     v.window_fill = p.surface;
     v.extreme_bg_color = p.input;
     // Table stripes tint what's behind them rather than covering it.
-    v.faint_bg_color = if dark { Color32::from_white_alpha(7) } else { Color32::from_black_alpha(9) };
+    v.faint_bg_color = if dark {
+        Color32::from_white_alpha(7)
+    } else {
+        Color32::from_black_alpha(9)
+    };
     v.code_bg_color = p.raised;
     v.window_stroke = Stroke::new(1.0, p.border);
     v.window_corner_radius = CornerRadius::same(RADIUS);
@@ -381,7 +510,11 @@ fn visuals(dark: bool) -> Visuals {
     w.inactive.bg_fill = p.raised;
     w.inactive.weak_bg_fill = p.raised;
     // Light mode needs outlines, or inputs and buttons vanish on white cards.
-    w.inactive.bg_stroke = if dark { Stroke::NONE } else { Stroke::new(1.0, p.border) };
+    w.inactive.bg_stroke = if dark {
+        Stroke::NONE
+    } else {
+        Stroke::new(1.0, p.border)
+    };
     w.inactive.fg_stroke = Stroke::new(1.0, p.text);
     w.inactive.corner_radius = r;
     w.hovered.bg_fill = p.hover;
@@ -402,29 +535,55 @@ fn visuals(dark: bool) -> Visuals {
 /// Segoe UI Symbol for ☆ ♪ ≠ ∞ ♡, and a Japanese font for event text. Falls back to egui's
 /// defaults where a font is missing.
 fn install_fonts(ctx: &egui::Context) {
-    let dir = std::env::var_os("WINDIR").map_or_else(|| std::path::PathBuf::from(r"C:\Windows"), std::path::PathBuf::from).join("Fonts");
+    let dir = std::env::var_os("WINDIR")
+        .map_or_else(
+            || std::path::PathBuf::from(r"C:\Windows"),
+            std::path::PathBuf::from,
+        )
+        .join("Fonts");
     let mut defs = FontDefinitions::default();
     let mut load = |name: &str, files: &[&str]| -> Option<String> {
         let bytes = files.iter().find_map(|f| std::fs::read(dir.join(f)).ok())?;
-        defs.font_data.insert(name.to_string(), Arc::new(FontData::from_owned(bytes)));
+        defs.font_data
+            .insert(name.to_string(), Arc::new(FontData::from_owned(bytes)));
         Some(name.to_string())
     };
     let regular = load("Segoe UI", &["segoeui.ttf"]);
     let semibold = load("Segoe UI Semibold", &["seguisb.ttf"]);
-    let fallbacks: Vec<String> =
-        [load("Segoe UI Symbol", &["seguisym.ttf"]), load("Japanese", &["YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"])].into_iter().flatten().collect();
+    let fallbacks: Vec<String> = [
+        load("Segoe UI Symbol", &["seguisym.ttf"]),
+        load("Japanese", &["YuGothR.ttc", "meiryo.ttc", "msgothic.ttc"]),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
-    let base_prop = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    let base_mono = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    let base_prop = defs
+        .families
+        .get(&FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    let base_mono = defs
+        .families
+        .get(&FontFamily::Monospace)
+        .cloned()
+        .unwrap_or_default();
     let chain = |first: Vec<String>, base: &[String]| -> Vec<String> {
         let mut v = first;
         v.extend(base.iter().cloned());
         v.extend(fallbacks.iter().cloned());
         v
     };
-    defs.families.insert(FontFamily::Proportional, chain(regular.clone().into_iter().collect(), &base_prop));
-    defs.families.insert(FontFamily::Monospace, chain(Vec::new(), &base_mono));
-    defs.families.insert(FontFamily::Name(SEMIBOLD.into()), chain(semibold.or(regular).into_iter().collect(), &base_prop));
+    defs.families.insert(
+        FontFamily::Proportional,
+        chain(regular.clone().into_iter().collect(), &base_prop),
+    );
+    defs.families
+        .insert(FontFamily::Monospace, chain(Vec::new(), &base_mono));
+    defs.families.insert(
+        FontFamily::Name(SEMIBOLD.into()),
+        chain(semibold.or(regular).into_iter().collect(), &base_prop),
+    );
     ctx.set_fonts(defs);
 }
 
@@ -449,7 +608,10 @@ pub fn install(ctx: &egui::Context, mode: Mode) {
                 (TextStyle::Body, FontId::proportional(size::BODY)),
                 (TextStyle::Button, FontId::proportional(size::BODY)),
                 (TextStyle::Monospace, FontId::monospace(size::SM)),
-                (TextStyle::Heading, FontId::new(size::XL, FontFamily::Name(SEMIBOLD.into()))),
+                (
+                    TextStyle::Heading,
+                    FontId::new(size::XL, FontFamily::Name(SEMIBOLD.into())),
+                ),
             ]
             .into();
             apply_spacing(s);
@@ -478,15 +640,31 @@ mod tests {
         for look in Look::ALL {
             for dark in [true, false] {
                 let p = palette_for(look, dark);
-                for (name, c) in [("good", p.good), ("warn", p.warn), ("bad", p.bad), ("weak", p.weak), ("gold", p.gold), ("link", p.link), ("pink", p.pink)] {
+                for (name, c) in [
+                    ("good", p.good),
+                    ("warn", p.warn),
+                    ("bad", p.bad),
+                    ("weak", p.weak),
+                    ("gold", p.gold),
+                    ("link", p.link),
+                    ("pink", p.pink),
+                ] {
                     for (on, bg) in [("surface", p.surface), ("page", p.bg)] {
                         let r = contrast(c, bg);
-                        assert!(r >= 4.5, "{name} on {on}, {look:?} {}: {r:.2}", if dark { "dark" } else { "light" });
+                        assert!(
+                            r >= 4.5,
+                            "{name} on {on}, {look:?} {}: {r:.2}",
+                            if dark { "dark" } else { "light" }
+                        );
                     }
                 }
                 // Text on the accent (main buttons).
                 let r = contrast(p.on_accent, p.accent);
-                assert!(r >= 4.5, "text on the accent, {look:?} {}: {r:.2}", if dark { "dark" } else { "light" });
+                assert!(
+                    r >= 4.5,
+                    "text on the accent, {look:?} {}: {r:.2}",
+                    if dark { "dark" } else { "light" }
+                );
             }
         }
     }
@@ -502,7 +680,11 @@ mod tests {
         for m in Mode::ALL {
             assert_eq!(Mode::from_key(m.key()), m);
         }
-        assert_eq!(Mode::from_key("nonsense"), Mode::Dark, "old settings default to dark");
+        assert_eq!(
+            Mode::from_key("nonsense"),
+            Mode::Dark,
+            "old settings default to dark"
+        );
         for c in Chibi::ALL {
             assert_eq!(Chibi::from_key(c.key()), Some(c));
         }

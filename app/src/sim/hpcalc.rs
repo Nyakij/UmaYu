@@ -5,7 +5,13 @@ use super::course::{Course, base_speed};
 
 /// HP coefficient and phase speed coefficients per style: Front, Pace, Late, End, Runaway.
 const HP_COEF: [f64; 5] = [0.95, 0.89, 1.0, 0.995, 0.86];
-const PHASE_COEF: [[f64; 3]; 5] = [[1.0, 0.98, 0.962], [0.978, 0.991, 0.975], [0.938, 0.998, 0.994], [0.931, 1.0, 1.0], [1.0, 0.98, 0.962]];
+const PHASE_COEF: [[f64; 3]; 5] = [
+    [1.0, 0.98, 0.962],
+    [0.978, 0.991, 0.975],
+    [0.938, 0.998, 0.994],
+    [0.931, 1.0, 1.0],
+    [1.0, 0.98, 0.962],
+];
 
 #[derive(Clone, Debug, Default)]
 pub struct HpEstimate {
@@ -101,7 +107,15 @@ fn downhill(course: &Course, wisdom: f64, style: usize, guts: f64, speed: f64) -
 }
 
 /// The HP Calculator's estimate for one course and build. `style`: 0 Front … 4 Runaway.
-pub fn estimate(course: &Course, stamina: f64, guts: f64, wisdom: f64, speed: f64, style: usize, heal_pct: f64) -> HpEstimate {
+pub fn estimate(
+    course: &Course,
+    stamina: f64,
+    guts: f64,
+    wisdom: f64,
+    speed: f64,
+    style: usize,
+    heal_pct: f64,
+) -> HpEstimate {
     let d = course.distance;
     let max = max_hp(stamina, d, style);
     let (early, late) = hp_needed(d, style, guts, speed);
@@ -117,7 +131,11 @@ pub fn estimate(course: &Course, stamina: f64, guts: f64, wisdom: f64, speed: f6
         total_needed: total,
         surplus,
         full_spurt: surplus >= 0.0,
-        heal_needed: if surplus >= 0.0 { 0.0 } else { ((total - max) / max * 1000.0).ceil() / 10.0 },
+        heal_needed: if surplus >= 0.0 {
+            0.0
+        } else {
+            ((total - max) / max * 1000.0).ceil() / 10.0
+        },
         min_stamina: min_stamina(d, style, heal_pct, total),
         downhill_distance: dist,
         downhill_mode_rate: rate,

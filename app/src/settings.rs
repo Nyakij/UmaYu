@@ -1,11 +1,30 @@
-//! Per-user settings in %APPDATA%\umaLord\settings.json (theme, saved API key).
+//! Per-user settings in %APPDATA%\UmaYu\settings.json (theme, saved API key).
 
 use std::path::PathBuf;
+use std::sync::Once;
 
 use serde_json::Value;
 
+static MIGRATE: Once = Once::new();
+
+/// If the new `%APPDATA%\UmaYu` directory doesn't exist yet but the old `%APPDATA%\umaLord`
+/// exists, rename it so settings, cache, and profiles are preserved.
+pub fn migrate_appdata() {
+    MIGRATE.call_once(|| {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let base = PathBuf::from(appdata);
+            let old_dir = base.join("umaLord");
+            let new_dir = base.join("UmaYu");
+            if old_dir.exists() && !new_dir.exists() {
+                let _ = std::fs::rename(old_dir, new_dir);
+            }
+        }
+    });
+}
+
 pub fn path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("umaLord").join("settings.json"))
+    migrate_appdata();
+    std::env::var_os("APPDATA").map(|d| PathBuf::from(d).join("UmaYu").join("settings.json"))
 }
 
 fn read_all() -> Value {
@@ -31,5 +50,7 @@ pub fn set(key: &str, value: Value) -> bool {
             map.insert(key.to_string(), value);
         }
     }
-    p.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok()) && std::fs::write(&p, all.to_string()).is_ok()
+    p.parent()
+        .is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+        && std::fs::write(&p, all.to_string()).is_ok()
 }
