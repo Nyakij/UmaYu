@@ -6,10 +6,11 @@
 /results/
 /profiles/
 /.zcode/
-/CHANGELOG.md
 /opencode.json.bk
 /Push_github/
 /UmaYu-push.bat
+/CHANGELOG.md
+
 # Build output, and the per-machine toolchain setup that app/setup-toolchain.ps1 writes
 /app/target/
 /app/.cargo/
@@ -35,3 +36,5 @@ __pycache__/
 /UmaYu-push.bat
 /UmaYu-reset.bat
 /UmaYu-setup.iss
+
+CHANGELOG.md
