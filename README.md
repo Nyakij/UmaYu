@@ -44,6 +44,8 @@
 - 📈 **Race sim charts**: the gap of every race, where along the course the lengths are won, speed and HP of the typical race with a replay, a timeline of every skill, what each skill is worth and where the next training points matter.
 - 🃏 **Compare two cards** side by side at your levels, filter cards by a skill they teach or an effect's minimum, and see the community tier list on every skill.
 - 🧩 **Setup in minutes**: click what you own on art grids, paste a list, or load a profile file. ⚙ Settings → Profile → Save my data puts your whole account in one file.
+- 🔄 **Clean slate reset (`UmaYu-reset.bat`)**: close `umayu.exe` and run `UmaYu-reset.bat` to permanently wipe all account data, saved plans, results, insights, profiles, cache, audio exports, and settings back to a fresh first-run state. Prompts for explicit confirmation (`RESET`) and restores blank roster templates.
+- 📦 **Packaging menu (`UmaYu-package.bat`)**: interactive menu at the project root to package UmaYu into either a standalone release ZIP (`dist\UmaYu-<date>.zip`) or a Windows Installer setup (`dist\UmaYu-<date>-Setup.exe`) via Inno Setup without bundling private data.
 - 🎵 **Game Audio & Music tab (optional)**: connect to your local game installation (Global or JP) in Settings → Game audio to browse game sounds, listen to Jukebox songs (Short & Game-size with automatic fallback), and stage multi-track Live concerts with synced karaoke lyrics, custom character lineups, and 16-bit WAV export to `exports/audio/`. Runs 100% locally and offline.
 - ⌨️ **Keyboard shortcuts**: Ctrl+1–5 for tabs (Ctrl+5 for Music when enabled), Ctrl+, for Settings, Ctrl+F to search, Ctrl+S to save the plan, F5 to reload, ? for help.
 - 🤖 **MCP server**: the assistant's tools work in Claude Code and Claude Desktop too ([below](#-use-it-with-claude-code)).
@@ -81,7 +83,7 @@ Every pick is labelled for what it is: game data, simulator output, community me
 
 ## 🤖 Use it with Claude Code
 
-Open the folder in Claude Code. [`CLAUDE.md`](CLAUDE.md) tells Claude how to keep your roster up to date from screenshots, simulate saved plans, log real results, and keep evidence-backed opinions in `insights.md`.
+Open the folder in Claude Code. You can use Claude Code to keep your roster up to date from screenshots, simulate saved plans, log real results, and keep evidence-backed opinions in `insights.md`.
 
 `umayu.exe --mcp <folder>` serves the same tools the Ask tab uses (your roster, the game data, the meta sheet, the CM schedule, the planner and the race simulator) as an MCP server over stdio. Point it at your UmaYu folder.
 
@@ -146,7 +148,7 @@ Game data lives in `knowledge/data/`. To refresh it from uma.guide, umalator.app
 python -I -X utf8 tools/update_knowledge.py
 ```
 
-Add `--only meta` to refresh just the meta sheet. `tools/package.ps1 -Build` makes the release zip locally; it never includes your account. `tools/readme_art.ps1` redraws the art on this page from fresh screenshots.
+Add `--only meta` to refresh just the meta sheet. `UmaYu-package.bat` at the repository root provides an interactive menu to package into either a release ZIP (`dist\UmaYu-<date>.zip`) or a Windows Installer setup (`dist\UmaYu-<date>-Setup.exe`, requires Inno Setup 6 with `ISCC.exe` on PATH or `ISCC_PATH`). Both formats can also be packaged directly via `tools/package.ps1 -Build [-Format Zip|Setup]`; packaging never includes your account or settings. `tools/readme_art.ps1` redraws the art on this page from fresh screenshots.
 
 **Releasing:** add the version's section to [CHANGELOG.md](CHANGELOG.md), bump `version` in `app/Cargo.toml`, then push a tag:
 
@@ -167,6 +169,7 @@ The [Release workflow](.github/workflows/release.yml) builds, tests and packages
 
 - **Game data:** [uma.guide](https://uma.guide): umas, cards, skills, races and events.
 - **Race simulator:** a port of [Moomoolator](https://umalator.app) ([TheCing/uma-tools](https://github.com/TheCing/uma-tools)), which builds on alpha123's Umalator and kachi-dev's VFalator.
+- **Game audio reference:** [UmamusumeExplorer](https://github.com/MarshmallowAndroid/UmamusumeExplorer) by MarshmallowAndroid: inspiration and reference for the game audio concept.
 - **Audio & asset decoding:** [cridecoder](https://crates.io/crates/cridecoder) (CRIWARE ACB/AWB/HCA decoding), [cpal](https://crates.io/crates/cpal) (low-latency WASAPI output), [rusqlite](https://crates.io/crates/rusqlite) (SQLite manifest reading), and [lz4_flex](https://crates.io/crates/lz4_flex) (pure Rust UnityFS LZ4 block decompression).
 - **Meta picks:** the community "PvP Deck & Uma Recommendation" sheet by Lightning, Daptrius and Henry.
 - **Skill tiers:** the community "Uma Musume Skills Spreadsheet" tier list by Dylan, formatted by sayaduck.

@@ -1026,7 +1026,7 @@ impl App {
                     .replace('\\', "/");
                 let allowed = rel.ends_with(".md")
                     && !rel.contains("..")
-                    && (["insights.md", "sources.md", "CLAUDE.md"].contains(&rel.as_str())
+                    && (["insights.md", "sources.md"].contains(&rel.as_str())
                         || ["plans/", "results/", "account/", "knowledge/"]
                             .iter()
                             .any(|d| rel.starts_with(d)));

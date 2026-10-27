@@ -36,6 +36,8 @@ The app starts empty and opens Setup, which offers two ways in:
 Settings (the cog, top right) > Profile can rename the account, save your data to one file (Save my data), load
 another profile, reopen Setup, or empty the app (Start over). Loading a profile or starting
 over saves what was there to profiles\backups first, so nothing is lost.
+To completely wipe all personal data and settings (clean slate without backups), close the
+app and run UmaYu-reset.bat in the app folder.
 
 
 Tabs
@@ -243,7 +245,7 @@ theirs automatically). Without one, the app shows a coloured box instead.
 
 Using it with Claude Code (optional)
 ------------------------------------
-Open this folder in Claude Code. CLAUDE.md tells Claude how to:
+Open this folder in Claude Code. You can use Claude to:
 - keep the roster up to date from screenshots,
 - run simulations for saved plans,
 - log results, and keep its opinions in insights.md.
@@ -263,11 +265,23 @@ assets from your local game installation (Global, Steam JP, or DMM JP):
   live stage mixes can be exported directly to standard 16-bit PCM RIFF WAV in the exports\audio folder.
 
 
-Rebuilding the app (optional)
------------------------------
+Rebuilding and packaging the app (optional)
+-------------------------------------------
 The source is in the app folder. You need Rust (rustup) with the
 stable-x86_64-pc-windows-gnu toolchain and its llvm-tools component.
 Run app\setup-toolchain.ps1 once, then run "cargo build --release" in the app folder.
+
+To package the application, run UmaYu-package.bat at the root of the project:
+- Option 1 (ZIP): builds and packages into dist\UmaYu-<date>.zip.
+- Option 2 (Setup.exe): builds and packages into dist\UmaYu-<date>-Setup.exe.
+  Creating the setup.exe installer requires Inno Setup 6 (ISCC.exe on PATH
+  or configured via the ISCC_PATH environment variable).
+Both packaging options use the same clean release payload and never bundle
+personal account data, saved plans, or user settings. The installer installs
+per-user into %LOCALAPPDATA%\Programs\UmaYu without requiring administrator
+privileges, and updating or uninstalling safely preserves all user data.
+Direct packaging can also be executed via:
+powershell -ExecutionPolicy Bypass -File tools\package.ps1 [-Build] [-Format Zip|Setup]
 
 
 License & Credits
@@ -287,3 +301,7 @@ Troubleshooting
   graphics driver.
 - The status bar says "Knowledge missing": the knowledge\data folder is gone. Unzip the
   whole folder again.
+- Resetting to initial state: close umayu.exe and run UmaYu-reset.bat in the app folder.
+  It asks for confirmation (type RESET) and permanently deletes all account data, saved
+  plans, results, insights, profiles, cache, audio exports, and settings while restoring
+  empty roster templates so the app opens as a fresh installation.

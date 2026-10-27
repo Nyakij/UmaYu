@@ -483,11 +483,7 @@ impl App {
         vec![
             (
                 "Claude's notes".into(),
-                vec![
-                    root.join("insights.md"),
-                    root.join("sources.md"),
-                    root.join("CLAUDE.md"),
-                ],
+                vec![root.join("insights.md"), root.join("sources.md")],
             ),
             ("Plans".into(), list("plans")),
             ("Results".into(), list("results")),

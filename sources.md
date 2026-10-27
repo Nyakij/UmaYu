@@ -135,7 +135,7 @@ The repo README lists `/umalator-global`, `/umalator` and `/hp-calculator`. The 
   - per uma: finish time, max speed, full-spurt rate, HP survival rate, start delay, and rushed rate with its location
   - each skill's activation window
   - a race timeline of the median run
-- **Limits** (from the repo's CLAUDE.md):
+- **Limits**:
   - it simulates one uma at a time against a virtual field
   - position keep is approximated
   - order conditions are assumed to be met

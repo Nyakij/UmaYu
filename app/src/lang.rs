@@ -1,4 +1,4 @@
-//! The app's display language: Vietnamese (the default) or English, picked in Settings →
+//! The app's display language: English (the default) or Vietnamese, picked in Settings →
 //! Appearance and saved as `lang` in settings.json (`UMALORD_LANG` overrides it).
 //!
 //! Every label is written in English in the code, and that English text is the key of the
@@ -32,18 +32,18 @@ use std::sync::atomic::{AtomicU8, Ordering};
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Lang {
     #[default]
-    Vi,
     En,
+    Vi,
 }
 
 impl Lang {
-    pub const ALL: [Lang; 2] = [Lang::Vi, Lang::En];
+    pub const ALL: [Lang; 2] = [Lang::En, Lang::Vi];
 
     /// The name saved in settings.json and taken by `UMALORD_LANG`.
     pub fn key(self) -> &'static str {
         match self {
-            Lang::Vi => "vi",
             Lang::En => "en",
+            Lang::Vi => "vi",
         }
     }
 
@@ -56,8 +56,8 @@ impl Lang {
     /// The language's own name, as the picker shows it in every language.
     pub fn label(self) -> &'static str {
         match self {
-            Lang::Vi => "Tiếng Việt",
             Lang::En => "English",
+            Lang::Vi => "Tiếng Việt",
         }
     }
 }

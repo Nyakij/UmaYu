@@ -719,7 +719,15 @@ impl App {
                 chibi(ui, 0, 160.0);
             }
         });
-        ui.add_space(16.0);
+        ui.add_space(14.0);
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(semibold(t!("Language"), size::BODY));
+                ui.add_space(12.0);
+                self.language_picker(ui);
+            });
+        });
+        ui.add_space(14.0);
         let half = (ui.available_width() - 16.0) / 2.0;
         let mut go = None;
         ui.horizontal_top(|ui| {

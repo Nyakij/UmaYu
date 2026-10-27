@@ -5,13 +5,11 @@
 /plans/
 /results/
 /profiles/
-/UmamusumeExplorer-master/
 /.zcode/
-/AGENTS.md.bk
 /CHANGELOG.md
-/CLAUDE.md.bk
 /opencode.json.bk
-
+/Push_github/
+/UmaYu-push.bat
 # Build output, and the per-machine toolchain setup that app/setup-toolchain.ps1 writes
 /app/target/
 /app/.cargo/
@@ -33,3 +31,7 @@ __pycache__/
 # Local only: development plans and the demo launcher
 /plan/
 /UmaYu-demo.bat
+/UmaYu-package.bat
+/UmaYu-push.bat
+/UmaYu-reset.bat
+/UmaYu-setup.iss

@@ -8,7 +8,7 @@
   it with powershell -STA. -Shots is a folder of 1400x900 screenshots named as in $need below.
   -Take takes them first with the friend's profile on a scratch copy of knowledge\ and
   app\assets\ in %TEMP%, so no real account file is read; ask.png needs a live model run, so
-  take it yourself (UMALORD_ASK, see CLAUDE.md) or keep the one already in -Shots.
+  take it yourself (UMALORD_ASK) or keep the one already in -Shots.
 
 .EXAMPLE
   powershell -STA -ExecutionPolicy Bypass -File tools\readme_art.ps1 -Shots $env:TEMP\readme-shots -Take

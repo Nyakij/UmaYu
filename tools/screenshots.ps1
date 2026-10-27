@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Runs app\target\release\umayu.exe once per page x theme x size with the UMALORD_* screenshot
-  variables (see CLAUDE.md) and saves <page>-<theme>-<size>.png into -Out, which must be outside
+  variables and saves <page>-<theme>-<size>.png into -Out, which must be outside
   the repo. Pages that need a roster show the friend's profile in memory (UMALORD_PROFILE), so
   your own account files are never read into a screenshot or changed.
 

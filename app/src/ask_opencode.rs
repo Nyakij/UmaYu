@@ -3,9 +3,9 @@
 //! Each question runs `opencode run --format json`, which prints one JSON event per line:
 //! `tool_use` (a file read or search, or one of UmaYu's tools), `text` (part of the answer),
 //! `step_finish` (token counts) and `error`. Follow-up questions pass `--session <id>` so OpenCode
-//! keeps the conversation. OpenCode reads AGENTS.md for its instructions and
-//! knowledge/digest/owned.md for the roster, and gets UmaYu's agent tools from this exe run as
-//! an MCP server (`mcp_config`, passed in `OPENCODE_CONFIG_CONTENT`).
+//! keeps the conversation. OpenCode reads knowledge/digest/owned.md for the roster,
+//! and gets UmaYu's agent tools from this exe run as an MCP server (`mcp_config`,
+//! passed in `OPENCODE_CONFIG_CONTENT`).
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
