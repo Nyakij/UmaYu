@@ -33,7 +33,6 @@ if (-not (Test-Path $exe)) { throw 'No release build. Run "cargo build --release
 $requiredInputs = @(
     (Join-Path $root 'LICENSE'),
     (Join-Path $root 'sources.md'),
-    (Join-Path $root 'UmaYu-reset.bat'),
     (Join-Path $root 'docs\guide.txt'),
     (Join-Path $root 'knowledge'),
     (Join-Path $root 'tools'),
@@ -57,7 +56,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 Copy-Item $exe $stage
-foreach ($f in 'LICENSE', 'sources.md', 'UmaYu-reset.bat') { Copy-Item (Join-Path $root $f) $stage }
+foreach ($f in 'LICENSE', 'sources.md') { Copy-Item (Join-Path $root $f) $stage }
 # The user guide sits at the zip's root as README.txt, where people look first.
 Copy-Item (Join-Path $root 'docs\guide.txt') (Join-Path $stage 'README.txt')
 foreach ($d in 'knowledge', 'tools') { Copy-Item (Join-Path $root $d) (Join-Path $stage $d) -Recurse }

@@ -36,8 +36,6 @@ The app starts empty and opens Setup, which offers two ways in:
 Settings (the cog, top right) > Profile can rename the account, save your data to one file (Save my data), load
 another profile, reopen Setup, or empty the app (Start over). Loading a profile or starting
 over saves what was there to profiles\backups first, so nothing is lost.
-To completely wipe all personal data and settings (clean slate without backups), close the
-app and run UmaYu-reset.bat in the app folder.
 
 
 Tabs
@@ -301,7 +299,5 @@ Troubleshooting
   graphics driver.
 - The status bar says "Knowledge missing": the knowledge\data folder is gone. Unzip the
   whole folder again.
-- Resetting to initial state: close umayu.exe and run UmaYu-reset.bat in the app folder.
-  It asks for confirmation (type RESET) and permanently deletes all account data, saved
-  plans, results, insights, profiles, cache, audio exports, and settings while restoring
-  empty roster templates so the app opens as a fresh installation.
+- Resetting to initial state: open Settings (the cog) > Profile > Start over. It saves the
+  current data to profiles\backups first, then reopens the app as a fresh installation.
